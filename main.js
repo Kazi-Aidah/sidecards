@@ -289,7 +289,8 @@ class CardSidebarView extends ItemView {
                 });
                 
                 btn.addEventListener('click', async () => {
-                    try { this.currentRecurrenceFilter = filter.toLowerCase(); } catch (e) { this.currentRecurrenceFilter = 'all'; }
+                    const recurrence = String(filter || '').toLowerCase();
+                    try { this.currentRecurrenceFilter = recurrence; } catch (e) { this.currentRecurrenceFilter = 'all'; }
                     filterGroup.querySelectorAll('.card-filter-btn').forEach(b => {
                         b.removeClass('active');
                         b.style.backgroundColor = 'var(--background-primary)';
@@ -300,7 +301,7 @@ class CardSidebarView extends ItemView {
                     btn.removeClass('active');
 
                     if (wasActive) {
-                        await this.loadCards(false);
+                        await this.loadCards(false, null);
                         this.filterCardsByRecurrence('all');
                         return;
                     }
@@ -309,13 +310,13 @@ class CardSidebarView extends ItemView {
                     btn.style.backgroundColor = 'var(--background-modifier-hover)';
                     btn.style.color = 'var(--text-normal)';
 
-                    if (filter.toLowerCase() === 'archived') {
-                        await this.loadCards(true);
+                    if (recurrence === 'archived') {
+                        await this.loadCards(true, null);
                     } else {
-                        await this.loadCards(false);
+                        await this.loadCards(false, recurrence);
                     }
 
-                    this.filterCardsByRecurrence(filter.toLowerCase());
+                    this.filterCardsByRecurrence(recurrence);
                 });
             });
         }
@@ -842,7 +843,14 @@ class CardSidebarView extends ItemView {
         contentEl.setAttribute('contenteditable', 'true');
 
         contentEl.addEventListener('blur', () => {
-            this.updateCardContent(card, contentEl.innerHTML);
+            // Use plain text so characters like '>' are not HTML-escaped to '&gt;' ;-;
+            try {
+                const text = contentEl.innerText != null ? contentEl.innerText : contentEl.textContent;
+                this.updateCardContent(card, text);
+            } catch (e) {
+                // fallback to innerHTML if something unexpected happens
+                this.updateCardContent(card, contentEl.innerHTML);
+            }
         });
 
         const insertLineBreakInContentEditable = (el) => {
@@ -958,7 +966,7 @@ class CardSidebarView extends ItemView {
             element: card,
             color: cardColor,
             tags: options.tags || [],
-            recurrence: 'none',
+            recurrence: (options.recurrence != null ? options.recurrence : 'none'),
             created: options.created || new Date().toISOString(),
             archived: options.archived || false,
             pinned: options.pinned || false,
@@ -1995,19 +2003,31 @@ class CardSidebarView extends ItemView {
                 }
 
                 item.onClick(async () => {
-                    cardData.recurrence = option.value;
-                    this.saveCards();
-                    if (cardData.notePath) {
-                        try {
-                            const file = this.app.vault.getAbstractFileByPath(cardData.notePath);
-                            if (file) {
-                                let content = await this.app.vault.read(file);
-                                content = content.replace(/(Recurrence:\s*)(.*)/, `$1${option.value}`);
-                                await this.app.vault.modify(file, content);
+                    try {
+                        // Update recurrence on the in-memory card and persist
+                        cardData.recurrence = option.value;
+                        if (typeof this.saveCards === 'function') await this.saveCards();
+
+                        // Also update the associated note frontmatter when present
+                        if (cardData.notePath) {
+                            try {
+                                const file = this.app.vault.getAbstractFileByPath(cardData.notePath);
+                                if (file) {
+                                    let content = await this.app.vault.read(file);
+                                    content = content.replace(/(Recurrence:\s*)(.*)/, `$1${option.value}`);
+                                    await this.app.vault.modify(file, content);
+                                }
+                            } catch (err) {
+                                console.error('Error updating recurrence in note:', err);
                             }
-                        } catch (err) {
-                            console.error('Error updating recurrence in note:', err);
                         }
+
+                        // Re-apply the current recurrence filter so the card visibility updates immediately
+                        try {
+                            if (typeof this.filterCardsByRecurrence === 'function') this.filterCardsByRecurrence(this.currentRecurrenceFilter || 'all');
+                        } catch (e) { /* ign */ }
+                    } catch (err) {
+                        console.error('Error setting recurrence on card:', err);
                     }
                 });
             });
@@ -2295,7 +2315,7 @@ class CardSidebarView extends ItemView {
         }
     }
 
-    async loadCards(showArchived = false) {
+    async loadCards(showArchived = false, recurrenceFilter = null) {
         try {
             if (this.cardsContainer) this.cardsContainer.empty();
         } catch (e) {
@@ -2309,6 +2329,7 @@ class CardSidebarView extends ItemView {
                     const saved = this.plugin.settings.cards || [];
                     saved.forEach(savedCard => {
                         if (savedCard.archived && !showArchived) return;
+                        if (recurrenceFilter && recurrenceFilter !== 'all' && String(savedCard.recurrence || 'none').toLowerCase() !== String(recurrenceFilter).toLowerCase()) return;
                         this.createCard(savedCard.content || '', {
                             id: savedCard.id,
                             color: savedCard.color,
@@ -2321,7 +2342,7 @@ class CardSidebarView extends ItemView {
                         });
                     });
                 } else {
-                    await this.importNotesFromFolder(folder, true);
+                    await this.importNotesFromFolder(folder, true, recurrenceFilter, showArchived);
                 }
             } catch (e) {
                 console.error('Error importing notes from storage folder during load:', e);
@@ -2336,6 +2357,7 @@ class CardSidebarView extends ItemView {
             for (const savedCard of saved) {
                 try {
                     if (savedCard.archived && !showArchived) continue;
+                    if (recurrenceFilter && recurrenceFilter !== 'all' && String(savedCard.recurrence || 'none').toLowerCase() !== String(recurrenceFilter).toLowerCase()) continue;
 
                     let pinnedFromNote = savedCard.pinned || false;
                     if (savedCard.notePath) {
@@ -2385,7 +2407,7 @@ class CardSidebarView extends ItemView {
         this.refreshAllCardTimestamps();
     }
 
-    async importNotesFromFolder(folder, silent = false) {
+    async importNotesFromFolder(folder, silent = false, recurrenceFilter = null, showArchived = false) {
         if (!folder) return 0;
         try {
             const allFiles = this.app.vault.getAllLoadedFiles();
@@ -2465,6 +2487,12 @@ class CardSidebarView extends ItemView {
                     }
 
                     const content = body.trim() || '(empty)';
+
+                    // skip archived items when not showing archived
+                    if (archived && !showArchived) continue;
+
+                    // skip items that don't match the recurrence filter (if provided)
+                    if (recurrenceFilter && recurrenceFilter !== 'all' && String(recurrence || 'none').toLowerCase() !== String(recurrenceFilter).toLowerCase()) continue;
 
                     const cardData = this.createCard(content, {
                         id: Date.now().toString() + Math.random().toString(36).slice(2, 8),
@@ -3187,12 +3215,19 @@ class CardSidebarPlugin extends Plugin {
         }
 
         console.log('Card Sidebar plugin loaded successfully');
+        try {
+            if (!this.settings || !this.settings.tutorialShown) {
+                // show tutorial on first load
+                try { this.showFirstRunTutorial(); } catch (e) { console.error('Error showing first-run tutorial:', e); }
+            }
+        } catch (e) { }
     }
 
     async loadSettings() {
         this.settings = Object.assign({
             storageFolder: 'Cards',
             autoOpen: true,
+            tutorialShown: false,
             showTimestamps: true,
             datetimeFormat: 'YYYY-MM-DD HH:mm',
             color1: '#8392a4',
@@ -3227,6 +3262,72 @@ class CardSidebarPlugin extends Plugin {
             cards: []
         }, await this.loadData());
     }
+
+    showFirstRunTutorial() {
+    try {
+        const modal = new Modal(this.app);
+        modal.titleEl.setText('Welcome to SideCards');
+
+        const content = modal.contentEl;
+        
+        content.createEl('p', { 
+            text: 'Get started with SideCards in 3 steps:',
+            cls: 'sidecards-tutorial-intro'
+        });
+
+        const ol = content.createEl('ol');
+        ol.style.paddingLeft = '20px';
+        ol.style.marginBottom = '20px';
+        ol.style.lineHeight = '1.5';
+
+        const steps = [
+            'Go to Settings → SideCards and set a Storage Folder.',
+            'Add cards using the input box below, type and press Enter.',
+            'Drag cards from the sidebar into your notes.'
+        ];
+
+        steps.forEach(stepText => {
+            const li = ol.createEl('li');
+            li.textContent = stepText;
+            li.style.marginBottom = '8px';
+        });
+
+        const tip = content.createEl('p', {
+            text: '💡 Tip: Customize card appearance in settings.\nReload using the button below the input box after changes.'
+        });
+        tip.style.whiteSpace = 'pre-line';
+
+        tip.style.marginTop = '15px';
+        tip.style.fontSize = '0.9em';
+        tip.style.color = 'var(--text-muted)';
+
+        const btnRow = content.createDiv();
+        btnRow.style.display = 'flex';
+        btnRow.style.justifyContent = 'flex-end';
+        btnRow.style.marginTop = '20px';
+        btnRow.style.gap = '8px'; 
+
+        const openSettings = btnRow.createEl('button', { text: 'Open Settings' });
+        openSettings.addEventListener('click', () => {
+            this.app.setting.open();
+            this.app.setting.openTabById('sidecards');
+            modal.close();
+        });
+
+        const gotIt = btnRow.createEl('button', { text: 'Got It' });
+        gotIt.addClass('mod-cta');
+        gotIt.addEventListener('click', async () => {
+            this.settings.tutorialShown = true;
+            await this.saveSettings();
+            modal.close();
+        });
+
+        modal.open();
+    } catch (e) {
+        console.error('Error showing first-run tutorial:', e);
+    }
+}
+
 
     // inject global CSS variables and style tweaks
     applyGlobalStyles() {
