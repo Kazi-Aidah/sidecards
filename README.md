@@ -5,6 +5,8 @@ color, tag, and drag them straight into your notes.
 
 <img alt="SideCardsBanner" src="https://github.com/user-attachments/assets/503eae84-0d7d-4385-9253-7b48d7bef43e" />
 
+<i> Theme: [Underwater](https://github.com/Seniblue/Underwater) </i>
+
 ## Features
 
 ### **Core Card System:**
