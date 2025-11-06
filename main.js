@@ -129,8 +129,24 @@ class CardSidebarView extends ItemView {
             console.error('Error during onOpen import check:', e);
         }
 
-        await this.loadCards(false);
-        if (typeof this.applyFilters === 'function') this.applyFilters();
+        // Show a short loading overlay while bringing in cards
+        try { this.showLoadingOverlay(); } catch (e) {}
+        try {
+            await this.loadCards(false);
+        } catch (e) {
+            console.error('Error during loadCards onOpen:', e);
+        }
+
+        // Ensure recurrence filtering (which hides archived items for 'all') runs first,
+        // then apply the active search/pinned filters. This prevents archived cards from
+        // appearing in the 'All' view on initial load.
+        try { if (typeof this.filterCardsByRecurrence === 'function') this.filterCardsByRecurrence(this.currentRecurrenceFilter || 'all'); } catch (e) {}
+        try { if (typeof this.applyFilters === 'function') this.applyFilters(); } catch (e) {}
+
+        // Now that the filtered set is rendered, hide the loading overlay and trigger
+        // the fade of visible cards (300ms) so the opacity animation only begins
+        // once the filtered cards are ready.
+        try { this.hideLoadingOverlay(300); } catch (e) {}
 
         try {
             this.plugin.registerEvent(this.app.vault.on('modify', async (file) => {
@@ -249,16 +265,7 @@ class CardSidebarView extends ItemView {
         const header = container.createDiv();
         header.addClass('card-sidebar-header');
         header.style.display = 'flex';
-        header.style.justifyContent = 'space-between';
-        header.style.alignItems = 'center';
-        header.style.padding = '8px';
-        header.style.borderBottom = '1px solid var(--background-modifier-border)';
         
-        try {
-            if (container && container.firstChild && container.firstChild !== header) {
-                container.insertBefore(header, container.firstChild);
-            }
-        } catch (e) { }
 
         if (!this.plugin.settings.disableFilterButtons) {
             const filterGroup = header.createDiv('filter-group');
@@ -301,24 +308,109 @@ class CardSidebarView extends ItemView {
                     btn.removeClass('active');
 
                     if (wasActive) {
-                        await this.loadCards(false, null);
-                        this.filterCardsByRecurrence('all');
+                        try { this.showLoadingOverlay(); } catch (e) {}
+                        try {
+                            // Immediately hide existing cards so only the filtered set
+                            // will appear and animate. Use visibility to preserve layout
+                            // and avoid flashes of the old content.
+                            try {
+                                if (this.cardsContainer) {
+                                    const oldCards = Array.from(this.cardsContainer.querySelectorAll('.card-sidebar-card'));
+                                    oldCards.forEach(c => { try { c.style.visibility = 'hidden'; } catch (e) {} });
+                                }
+                            } catch (e) {}
+
+                            // allow the browser a tick to apply the visibility change
+                            await new Promise(r => setTimeout(r, 20));
+
+                            await this.loadCards(false, null);
+                            this.filterCardsByRecurrence('all');
+
+                            // Animate the entrance of the visible (filtered) cards
+                            try { this.animateCardsEntrance({ duration: 300, offset: 28 }); } catch (e) {}
+                        } finally {
+                            try { this.hideLoadingOverlay(300); } catch (e) {}
+                        }
                         return;
                     }
 
+                    // mark active visually before running the flip animation so the
+                    // measured 'before' state includes the button change if it affects layout
                     btn.addClass('active');
                     btn.style.backgroundColor = 'var(--background-modifier-hover)';
                     btn.style.color = 'var(--text-normal)';
 
-                    if (recurrence === 'archived') {
-                        await this.loadCards(true, null);
-                    } else {
-                        await this.loadCards(false, recurrence);
-                    }
+                    try { this.showLoadingOverlay(); } catch (e) {}
+                    try {
+                        // Hide existing cards immediately so only the newly filtered
+                        // set is visible and animated. This avoids ghost frames of
+                        // the previous set appearing during the transition.
+                        try {
+                            if (this.cardsContainer) {
+                                const oldCards = Array.from(this.cardsContainer.querySelectorAll('.card-sidebar-card'));
+                                oldCards.forEach(c => { try { c.style.visibility = 'hidden'; } catch (e) {} });
+                            }
+                        } catch (e) {}
 
-                    this.filterCardsByRecurrence(recurrence);
+                        await new Promise(r => setTimeout(r, 20));
+
+                        if (recurrence === 'archived') {
+                            await this.loadCards(true, null);
+                        } else {
+                            await this.loadCards(false, recurrence);
+                        }
+
+                        this.filterCardsByRecurrence(recurrence);
+
+                        try { this.animateCardsEntrance({ duration: 300, offset: 28 }); } catch (e) {}
+                    } finally {
+                        try { this.hideLoadingOverlay(300); } catch (e) {}
+                    }
                 });
             });
+        }
+    }
+
+    // Loading overlay helpers
+    showLoadingOverlay() {
+        try {
+            if (!this.containerEl) return;
+            if (this._loadingOverlay) return;
+            const overlay = this.containerEl.createDiv();
+            overlay.addClass('card-sidebar-loading-overlay');
+            overlay.style.position = 'absolute';
+            overlay.style.inset = '0';
+            overlay.style.display = 'flex';
+            overlay.style.alignItems = 'center';
+            overlay.style.justifyContent = 'center';
+            overlay.style.background = 'var(--background-modifier-transparent)';
+            overlay.style.zIndex = '999';
+
+            const box = overlay.createDiv();
+            box.style.padding = '12px 16px';
+            box.style.borderRadius = '8px';
+            box.style.background = 'var(--background-secondary)';
+            box.style.boxShadow = 'var(--shadow-elevation-2)';
+            box.style.color = 'var(--text-normal)';
+            box.style.fontSize = '13px';
+            box.textContent = 'Loading cards...';
+
+            this._loadingOverlay = overlay;
+            // Keep overlay present in the DOM for logic, but keep it hidden
+            try { this._loadingOverlay.style.display = 'none'; } catch (e) {}
+        } catch (e) {
+            console.error('Error showing loading overlay:', e);
+        }
+    }
+
+    hideLoadingOverlay() {
+        try {
+            if (this._loadingOverlay) {
+                try { this._loadingOverlay.remove(); } catch (e) {}
+                this._loadingOverlay = null;
+            }
+        } catch (e) {
+            console.error('Error hiding loading overlay:', e);
         }
     }
     
@@ -382,6 +474,342 @@ class CardSidebarView extends ItemView {
                     if (cd && cd.element) cd.element.style.display = cd.pinned ? '' : 'none';
                 } catch (e) { }
             });
+        }
+        try { this.animateCardsEntrance(); } catch (e) {}
+    }
+
+    // Slide-up entrance for visible cards (uses `animatedCards` setting).
+    animateCardsEntrance(options = {}) {
+        try {
+            if (!this.plugin || !this.plugin.settings) return;
+            if (!this.cardsContainer) return;
+
+            // Respect reduced motion
+            if (window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+
+            // Only run slide animation when animatedCards is enabled
+            if (!this.plugin.settings.animatedCards) return;
+
+            const els = Array.from(this.cardsContainer.querySelectorAll('.card-sidebar-card'))
+                .filter(el => el && el.style && el.style.display !== 'none');
+            if (!els || els.length === 0) return;
+
+            const duration = options.duration != null ? options.duration : 260;
+            const stagger = options.stagger != null ? options.stagger : 28;
+
+            // Prepare initial state: slide-only from below into place. Use a fixed
+            // positive offset so cards always animate upward.
+            const offsetPx = options.offset != null ? Number(options.offset) : 28;
+            els.forEach(el => {
+                try {
+                    el.style.transition = 'none';
+                    // Ensure any elements hidden earlier (visibility:hidden) are
+                    // revealed before running the entrance transform.
+                    try { el.style.visibility = ''; } catch (e) {}
+                    el.style.transform = `translateY(${offsetPx}px)`;
+                    el.style.willChange = 'transform';
+                } catch (e) { }
+            });
+
+            // Force reflow
+            void this.cardsContainer.offsetHeight;
+
+            // Play animations with small stagger (transform only)
+            els.forEach((el, i) => {
+                const delay = i * stagger;
+                setTimeout(() => {
+                    try {
+                        el.style.transition = `transform ${duration}ms cubic-bezier(.2,.8,.2,1)`;
+                        el.style.transform = '';
+                    } catch (e) { }
+                }, delay);
+            });
+
+            // Cleanup after max duration + stagger
+            const total = duration + (els.length * stagger) + 50;
+            setTimeout(() => {
+                els.forEach(el => {
+                    try {
+                        el.style.transition = '';
+                        el.style.willChange = '';
+                        el.style.transform = '';
+                    } catch (e) { }
+                });
+            }, total);
+        } catch (err) {
+            console.error('Error running animateCardsEntrance:', err);
+        }
+    }
+
+    // FLIP wrapper: animate DOM reorder/show/hide when enabled.
+    async flipAnimateAsync(asyncDomChange, opts = {}) {
+        try {
+            if (!this.plugin || !this.plugin.settings || !this.plugin.settings.animatedCards) {
+                await asyncDomChange();
+                return;
+            }
+
+            if (!this.cardsContainer) { await asyncDomChange(); return; }
+            if (window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+                await asyncDomChange();
+                return;
+            }
+
+            const duration = opts.duration != null ? opts.duration : 260;
+            const easing = opts.easing || 'cubic-bezier(.2,.8,.2,1)';
+            const stagger = opts.stagger != null ? opts.stagger : 20;
+            const entranceOffset = opts.offset != null ? Number(opts.offset) : 28;
+
+            // Map old positions by card id
+            const oldEls = Array.from(this.cardsContainer.querySelectorAll('.card-sidebar-card'));
+            const oldMap = new Map();
+            oldEls.forEach(el => {
+                try {
+                    const id = el.dataset && el.dataset.id;
+                    if (!id) return;
+                    oldMap.set(id, el.getBoundingClientRect());
+                } catch (e) {}
+            });
+
+            // Perform DOM change
+            await asyncDomChange();
+
+            // New elements after change
+            const newEls = Array.from(this.cardsContainer.querySelectorAll('.card-sidebar-card'));
+            const newMap = new Map();
+            const elById = new Map();
+            newEls.forEach(el => {
+                try {
+                    const id = el.dataset && el.dataset.id;
+                    if (!id) return;
+                    newMap.set(id, el.getBoundingClientRect());
+                    elById.set(id, el);
+                } catch (e) {}
+            });
+
+            // Apply inverse transforms (vertical-only) to animate movement.
+            const ids = Array.from(elById.keys());
+            ids.forEach(id => {
+                try {
+                    const oldRect = oldMap.get(id);
+                    const newRect = newMap.get(id);
+                    const el = elById.get(id);
+                    if (!oldRect || !newRect || !el) return;
+                    const dx = oldRect.left - newRect.left;
+                    const dy = oldRect.top - newRect.top;
+                    if (dx === 0 && dy === 0) return;
+                    // Slide in Animation Y Axis
+                    el.style.transition = 'none';
+                    el.style.transform = `translateY(${dy}px)`;
+                    el.style.willChange = 'transform';
+                } catch (e) { }
+            });
+
+            // always animate upward into place. down > up
+            ids.forEach(id => {
+                try {
+                    if (oldMap.has(id)) return;
+                    const el = elById.get(id);
+                    if (!el) return;
+                    el.style.transition = 'none';
+                    el.style.transform = `translateY(${entranceOffset}px)`;
+                    el.style.willChange = 'transform';
+                } catch (e) { }
+            });
+
+            // Force reflow
+            void this.cardsContainer.offsetHeight;
+
+            ids.forEach((id, i) => {
+                const el = elById.get(id);
+                if (!el) return;
+                const delay = i * stagger;
+                setTimeout(() => {
+                    try {
+                        // Prepare existing vs new element lists
+                        const existingIds = [];
+                        const newIds = [];
+                        ids.forEach(id => {
+                            if (oldMap.has(id)) existingIds.push(id);
+                            else newIds.push(id);
+                        });
+
+                        // FLIP inverse transform
+                        existingIds.forEach(id => {
+                            try {
+                                const oldRect = oldMap.get(id);
+                                const newRect = newMap.get(id);
+                                const el = elById.get(id);
+                                if (!oldRect || !newRect || !el) return;
+                                const dx = oldRect.left - newRect.left;
+                                const dy = oldRect.top - newRect.top;
+                                if (dx === 0 && dy === 0) return;
+                                el.style.transition = 'none';
+                                el.style.transform = `translateY(${dy}px)`;
+                                el.style.willChange = 'transform';
+                            } catch (e) { }
+                        });
+
+                        // New elements: hide them and position below so they don't flash at final spot
+                        newIds.forEach(id => {
+                            try {
+                                const el = elById.get(id);
+                                if (!el) return;
+                                el.style.transition = 'none';
+                                el.style.transform = `translateY(${entranceOffset}px)`;
+                                el.style.willChange = 'transform';
+                                // hide until we start the transition to avoid ghosting
+                                el.style.visibility = 'hidden';
+                            } catch (e) { }
+                        });
+
+                        el.style.transform = '';
+                    } catch (e) {}
+                });
+            }, total);
+        } catch (err) {
+            console.error('Error in flipAnimateAsync:', err);
+            // fallback to just doing the change if not already executed
+            try { await asyncDomChange(); } catch (e) {}
+        }
+    }
+
+    // Show loading overlay (attached to cards container when available).
+    showLoadingOverlay(maxMs = 2000) {
+        try {
+            // Prefer attaching the overlay to the cards area so it doesn't cover the header/filter chips.
+            const parent = this.cardsContainer || this.containerEl;
+            if (!parent) return;
+
+            if (!this._loadingEl) {
+                const overlay = parent.createDiv();
+                overlay.addClass('card-sidebar-loading');
+                // Ensure parent can be the positioning context
+                try {
+                    if (parent === this.cardsContainer) parent.style.position = parent.style.position || 'relative';
+                } catch (e) {}
+
+                overlay.style.position = 'absolute';
+                overlay.style.left = '0';
+                overlay.style.top = '0';
+                overlay.style.right = '0';
+                overlay.style.bottom = '0';
+                overlay.style.display = 'flex';
+                overlay.style.alignItems = 'center';
+                overlay.style.justifyContent = 'center';
+                overlay.style.background = 'var(--background-modifier-card, rgba(0,0,0,0.02))';
+                overlay.style.zIndex = '9999';
+                overlay.style.pointerEvents = 'auto';
+
+                const box = overlay.createDiv();
+                box.style.display = 'flex';
+                box.style.flexDirection = 'column';
+                box.style.alignItems = 'center';
+                box.style.gap = '8px';
+
+                const spinner = box.createDiv();
+                spinner.style.width = '36px';
+                spinner.style.height = '36px';
+                spinner.style.border = '4px solid var(--background-modifier-border)';
+                spinner.style.borderTopColor = 'var(--interactive-accent)';
+                spinner.style.borderRadius = '50%';
+                spinner.style.animation = 'card-sidebar-spin 800ms linear infinite';
+
+                const txt = box.createDiv();
+                txt.textContent = 'Loading cards…';
+                txt.style.color = 'var(--text-muted)';
+
+                // basic keyframes (inject once)
+                if (!document.getElementById('card-sidebar-loading-anim')) {
+                    const s = document.createElement('style');
+                    s.id = 'card-sidebar-loading-anim';
+                    s.textContent = `@keyframes card-sidebar-spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }`;
+                    document.head.appendChild(s);
+                }
+
+                this._loadingEl = overlay;
+            }
+
+            // Keep the loading element hidden visually while preserving its
+            // presence in the DOM for later removal or debugging.
+            try { this._loadingEl.style.display = 'none'; } catch (e) {}
+
+            if (this._loadingTimeout) clearTimeout(this._loadingTimeout);
+            this._loadingTimeout = setTimeout(() => {
+                try { if (this._loadingEl) { try { this._loadingEl.remove(); } catch (e) { this._loadingEl.style.display = 'none'; } this._loadingEl = null; } } catch (e) {}
+            }, Math.max(0, Number(maxMs) || 2000));
+        } catch (err) {
+            console.error('Error showing loading overlay:', err);
+        }
+    }
+
+    // Hide loading overlay and optionally trigger a card opacity fade.
+    hideLoadingOverlay(fadeMs = 0) {
+        try {
+            if (this._loadingTimeout) { clearTimeout(this._loadingTimeout); this._loadingTimeout = null; }
+            if (this._loadingEl) {
+                try { this._loadingEl.remove(); } catch (e) { try { this._loadingEl.style.display = 'none'; } catch (ee) {} }
+                this._loadingEl = null;
+            }
+
+            // Determine whether to run the opacity fade based on settings.
+            try {
+                // Respect the disableCardFadeIn setting: when true, skip the opacity
+                // fade unless animatedCards is enabled (per user preference, animated
+                // cards are unaffected by this toggle).
+                const fadeMsNum = Number(fadeMs) || 0;
+                const disabled = !!(this.plugin && this.plugin.settings && this.plugin.settings.disableCardFadeIn);
+                const animated = !!(this.plugin && this.plugin.settings && this.plugin.settings.animatedCards);
+                const doFade = fadeMsNum > 0 && (!disabled || animated);
+                if (doFade) {
+                    this.fadeVisibleCards(fadeMsNum);
+                }
+            } catch (e) { }
+        } catch (err) {
+            console.error('Error hiding loading overlay:', err);
+        }
+    }
+
+    // Fade visible cards (opacity) over `duration` milliseconds.
+    fadeVisibleCards(duration = 300) {
+        try {
+            if (!this.cardsContainer) return;
+            if (window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+
+            const els = Array.from(this.cardsContainer.querySelectorAll('.card-sidebar-card'))
+                .filter(el => el && el.style && el.style.display !== 'none');
+            if (!els || els.length === 0) return;
+
+            // Prepare: set no-transition and opacity 0
+            els.forEach(el => {
+                try {
+                    el.style.transition = 'none';
+                    el.style.opacity = '0';
+                } catch (e) { }
+            });
+
+            // Force reflow
+            void this.cardsContainer.offsetHeight;
+
+            // Enable opacity transition and trigger to 1
+            els.forEach(el => {
+                try {
+                    el.style.transition = `opacity ${duration}ms ease`;
+                    el.style.opacity = '1';
+                } catch (e) { }
+            });
+
+            // Cleanup after animation
+            setTimeout(() => {
+                els.forEach(el => {
+                    try {
+                        el.style.transition = '';
+                        el.style.opacity = '';
+                    } catch (e) { }
+                });
+            }, duration + 50);
+        } catch (err) {
+            console.error('Error running fadeVisibleCards:', err);
         }
     }
     
@@ -1281,19 +1709,65 @@ class CardSidebarView extends ItemView {
         }
     }
 
-    updateCardContent(card, newContent) {
+    async updateCardContent(card, newContent) {
         const cardData = this.cards.find(c => c.element === card);
-        if (cardData) {
+        if (!cardData) return;
+
+        try {
             cardData.content = newContent;
             const tagRegex = /#[\w\-]+/g;
             const tags = newContent.match(tagRegex) || [];
             cardData.tags = tags.map(t => t.substring(1));
-            
+
             if (this.plugin.settings.groupTags) {
-                this.updateCardTagDisplay(cardData);
+                try { this.updateCardTagDisplay(cardData); } catch (e) {}
             }
-            
-            this.saveCards();
+
+            // Persist to plugin settings immediately
+            try { await this.saveCards(); } catch (e) { console.error('Error saving cards after content edit:', e); }
+
+            // If the card has an associated note, update its body while preserving frontmatter
+            try {
+                if (cardData.notePath) {
+                    const file = this.app.vault.getAbstractFileByPath(cardData.notePath);
+                    if (file) {
+                        let text = await this.app.vault.read(file);
+                        const fmMatch = text.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n/);
+                        let fmBlock = '';
+                        if (fmMatch) fmBlock = fmMatch[0];
+
+                        // Ensure there's a blank line between frontmatter and body (like when creating notes)
+                        let separator = '';
+                        if (fmBlock) {
+                            separator = fmBlock.endsWith('\n\n') ? '' : '\n\n';
+                        }
+
+                        const newText = fmBlock ? (fmBlock + separator + newContent) : newContent;
+                        await this.app.vault.modify(file, newText);
+                    } else {
+                        // If note file is missing, try to create it in storage folder
+                        try {
+                            const folder = this.plugin.settings.storageFolder || '';
+                            const firstLine = (newContent || '').split('\n')[0] || 'card';
+                            let title = firstLine.slice(0, 30).trim();
+                            let fileName = `${title.replace(/[^a-zA-Z0-9]/g, '-').toLowerCase()}` || `card-${Date.now()}`;
+                            let filePath = folder ? `${folder}/${fileName}.md` : `${fileName}.md`;
+                            // avoid overwrite
+                            if (await this.app.vault.adapter.exists(filePath)) {
+                                fileName += `-${Date.now()}`;
+                                filePath = folder ? `${folder}/${fileName}.md` : `${fileName}.md`;
+                            }
+                            await this.app.vault.create(filePath, newContent);
+                            cardData.notePath = filePath;
+                            try { await this.saveCards(); } catch (e) {}
+                        } catch (e) { console.error('Error creating note for card content update:', e); }
+                    }
+                }
+            } catch (e) {
+                console.error('Error writing card content to note:', e);
+            }
+        } catch (err) {
+            console.error('Error in updateCardContent:', err);
         }
     }
 
@@ -1393,6 +1867,16 @@ class CardSidebarView extends ItemView {
                 try {
                     if (!c || !c.element) return;
                     let visible = true;
+
+                    // Respect recurrence filter: when viewing 'all' we must treat archived cards as non-existent
+                    // so they are never shown by applyFilters. If a recurrence filter other than 'all' is active,
+                    // archived visibility is handled by filterCardsByRecurrence.
+                    try {
+                        const rec = String(this.currentRecurrenceFilter || 'all').toLowerCase();
+                        if (rec === 'all' && c.archived) {
+                            visible = false;
+                        }
+                    } catch (e) { }
                     if (showPinnedOnly && !c.pinned) visible = false;
                     if (tags && tags.length > 0) {
                         for (const tg of tags) {
@@ -2162,6 +2646,16 @@ class CardSidebarView extends ItemView {
         if (cardData.tags) {
             inputEl.value = cardData.tags.join(' ');
         }
+
+        // Allow saving tags by pressing Enter in the input
+        try {
+            inputEl.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter' && !e.shiftKey && !e.ctrlKey && !e.altKey) {
+                    e.preventDefault();
+                    try { saveButton.click(); } catch (err) {  }
+                }
+            });
+        } catch (e) { }
         
         const buttonContainer = contentEl.createDiv();
         buttonContainer.style.display = 'flex';
@@ -2348,7 +2842,7 @@ class CardSidebarView extends ItemView {
                             }
 
                             // debug: report archived state discovered when loading this saved card
-                            this.createCard(savedCard.content || '', {
+                            const createdCard = this.createCard(savedCard.content || '', {
                                 id: savedCard.id,
                                 color: savedCard.color,
                                 tags: savedCard.tags,
@@ -2358,6 +2852,11 @@ class CardSidebarView extends ItemView {
                                 pinned: savedCard.pinned || false,
                                 notePath: savedCard.notePath
                             });
+                            try {
+                                if (createdCard && createdCard.archived && !showArchived && createdCard.element) {
+                                    createdCard.element.style.display = 'none';
+                                }
+                            } catch (e) {}
                         } catch (e) {
                             console.error('Error creating card from savedCard (folder block):', e);
                         }
@@ -2370,6 +2869,7 @@ class CardSidebarView extends ItemView {
             }
 
             this.refreshAllCardTimestamps();
+            try { this.animateCardsEntrance(); } catch (e) {}
             return;
         }
 
@@ -2399,7 +2899,7 @@ class CardSidebarView extends ItemView {
                         } catch (e) { }
                     }
 
-                    this.createCard(savedCard.content || '', {
+                    const createdCard = this.createCard(savedCard.content || '', {
                         id: savedCard.id,
                         color: savedCard.color,
                         tags: savedCard.tags,
@@ -2409,6 +2909,11 @@ class CardSidebarView extends ItemView {
                         pinned: pinnedFromNote || false,
                         notePath: savedCard.notePath
                     });
+                    try {
+                        if (createdCard && createdCard.archived && !showArchived && createdCard.element) {
+                            createdCard.element.style.display = 'none';
+                        }
+                    } catch (e) {}
                 } catch (err) { console.error('Error loading saved card', err); }
             }
         } else {
@@ -2429,6 +2934,7 @@ class CardSidebarView extends ItemView {
             await this.applySort(this.plugin.settings.sortMode || 'manual', this.plugin.settings.sortAscending != null ? this.plugin.settings.sortAscending : true);
         } catch (e) { }
         this.refreshAllCardTimestamps();
+        try { this.animateCardsEntrance(); } catch (e) {}
     }
 
     async importNotesFromFolder(folder, silent = false, recurrenceFilter = null, showArchived = false) {
@@ -2689,7 +3195,24 @@ class CardSidebarSettingTab extends PluginSettingTab {
                 }
             });
 
-            new FolderSuggest(this.app, cb.inputEl, folders);
+            const folderSuggest = new FolderSuggest(this.app, cb.inputEl, folders);
+
+            (function() {
+                let wasMouseDown = false;
+
+                try {
+                    cb.inputEl.addEventListener('mousedown', () => { wasMouseDown = true; });
+
+                    cb.inputEl.addEventListener('focus', (e) => {
+                        if (!wasMouseDown) {
+                            setTimeout(() => { try { cb.inputEl.blur(); } catch (err) {} }, 0);
+                        }
+                        wasMouseDown = false;
+                    }, true);
+                } catch (e) {
+                    console.error('Error setting folder input focus handlers:', e);
+                }
+            })();
         });
 
     containerEl.createEl('h3', { text: 'Colors' });
@@ -2825,6 +3348,35 @@ class CardSidebarSettingTab extends PluginSettingTab {
                 updateCardRadius(value);
             }));
 
+            // Animated cards toggle
+            new Setting(containerEl)
+                .setName('Animated Cards')
+                .setDesc('When enabled, cards will slide/fade in when switching categories or on load.')
+                .addToggle(toggle => toggle
+                    .setValue(this.plugin.settings.animatedCards || false)
+                    .onChange(async (value) => {
+                        this.plugin.settings.animatedCards = value;
+                        await this.plugin.saveSettings();
+                        try {
+                            const view = this.app.workspace.getLeavesOfType('card-sidebar')[0]?.view;
+                            if (view && value) {
+                                // trigger a small entrance animation when enabling
+                                try { view.animateCardsEntrance(); } catch (e) {}
+                            }
+                        } catch (e) { }
+                    }));
+
+                // Disable card fade-in toggle
+                new Setting(containerEl)
+                    .setName('Disable card fade in')
+                    .setDesc('When enabled, cards will not perform an opacity fade on load or category switch. Slide animations are unaffected.')
+                    .addToggle(toggle => toggle
+                        .setValue(this.plugin.settings.disableCardFadeIn != null ? this.plugin.settings.disableCardFadeIn : true)
+                        .onChange(async (value) => {
+                            this.plugin.settings.disableCardFadeIn = value;
+                            await this.plugin.saveSettings();
+                        }));
+
     new Setting(containerEl)
         .setName('Hide Clear button')
         .setDesc('Hide the Clear button in the input area (hidden by default)')
@@ -2892,6 +3444,23 @@ class CardSidebarSettingTab extends PluginSettingTab {
     this.updateCSSVariables();
     updateCardRadius(this.plugin.settings.borderRadius || 6);
     updateButtonPadding(this.plugin.settings.buttonPaddingBottom || 26);
+
+    // below card-sidebar-button-container padding
+    try {
+        new Setting(containerEl)
+            .setName('Bottom Space under Input/Button Row')
+            .setDesc('Adjust bottom padding under the input/button row to make room for the Statusbar.')
+            .addSlider(slider => slider
+                .setLimits(0, 100, 1)
+                .setValue(this.plugin.settings.buttonPaddingBottom || 26)
+                .onChange(async (value) => {
+                    try {
+                        this.plugin.settings.buttonPaddingBottom = Number(value) || 0;
+                        await this.plugin.saveSettings();
+                        updateButtonPadding(this.plugin.settings.buttonPaddingBottom || 0);
+                    } catch (e) { console.error('Error saving buttonPaddingBottom', e); }
+                }));
+    } catch (e) { }
 
     new Setting(containerEl)
         .setName('Group tags under content')
@@ -3106,8 +3675,10 @@ class FolderSuggest {
         
         this.inputEl.parentElement.appendChild(this.suggestEl);
         
-        this.inputEl.addEventListener('focus', this.onFocus.bind(this));
-        this.inputEl.addEventListener('input', this.onInput.bind(this));
+    // Only open suggestions when the input is explicitly clicked
+    // This prevents the dropdown from auto-opening on programmatic focus.
+    this.inputEl.addEventListener('click', this.onFocus.bind(this));
+    this.inputEl.addEventListener('input', this.onInput.bind(this));
         document.addEventListener('click', this.onClick.bind(this));
     }
     
@@ -3257,6 +3828,10 @@ class CardSidebarPlugin extends Plugin {
             tutorialShown: false,
             showTimestamps: true,
             datetimeFormat: 'YYYY-MM-DD HH:mm',
+            // whether to animate cards on load/category change
+            animatedCards: true,
+            // when true, card opacity fade-in is disabled (slide animations unaffected)
+            disableCardFadeIn: true,
             color1: '#8392a4',
             color2: '#eb3b5a',
             color3: '#fa8231',

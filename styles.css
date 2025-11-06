@@ -29,8 +29,6 @@
     margin-bottom: 0px;
 }
 
-/* Decorative ASCII corners removed for cleaner layout */
-
 .card-sidebar-header .header-border {
     position: absolute;
     background: var(--background-modifier-border);
@@ -79,7 +77,6 @@
     color: var(--text-normal);
 }
 
-/* Search Bar Styles */
 .card-sidebar-search {
     display: flex;
     flex-direction: column;
@@ -106,7 +103,6 @@
     flex-wrap: wrap;
 }
 
-/* Search result selected state for keyboard navigation */
 .search-result.selected,
 .search-result.selected:hover {
     background-color: var(--background-modifier-hover);
@@ -158,8 +154,6 @@
     width: 100%;
 }
 
-/* Decorative ASCII corners removed from cards */
-
 .card-sidebar-card .card-border-left,
 .card-sidebar-card .card-border-right {
     position: absolute;
@@ -200,13 +194,10 @@
 
 /* Drag Handle */
 .card-drag-handle {
-    display: none; /* hidden - cards are draggable by dragging the card itself */
+    display: none;
 }
 
 /* Drag States */
-/* When a card is being dragged we disable animations/transitions to
-   prevent the browser drag image (ghost) from jittering. The plugin
-   sets the class 'dragging' on dragstart. */
 .card-sidebar-card.dragging {
     animation: none !important;
     transition: none !important;
@@ -244,9 +235,6 @@
     margin: 6px 0;
     position: relative;
 }
-
-/* separator decorative dash removed */
-
 /* Timestamp */
 .card-timestamp {
     color: var(--text-normal);
@@ -278,8 +266,8 @@
 .card-tags {
     display: flex;
     flex-direction: row;
-    flex-wrap: wrap; /* wrap to next line when needed */
-    gap: 6px; /* spacing between tag pills */
+    flex-wrap: wrap;
+    gap: 6px;
     align-items: center;
     color: var(--text-muted);
     font-size: 11px;
@@ -469,7 +457,6 @@
 }
 
 /* Animation for card operations */
-/* Removed slide-in animation for cards to avoid visual jitter when loading/dragging */
 .card-sidebar-card {
     animation: none !important;
 }
