@@ -4,8 +4,6 @@
   "description": "Quickly create cards in your sidebar, color, tag, and drag them straight into your notes.",
   "version": "0.1.0",
   "minAppVersion": "0.15.0",
-  "main": "main.js",
-  "css": "styles.css",
   "author": "Kazi Aidah Haque",
   "authorUrl": "https://github.com/Kazi-Aidah",
   "isDesktopOnly": false
