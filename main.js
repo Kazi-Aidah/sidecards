@@ -2327,20 +2327,41 @@ class CardSidebarView extends ItemView {
             try {
                 if (this.plugin._importedFromFolderOnLoad && this.plugin.settings.cards && this.plugin.settings.cards.length > 0) {
                     const saved = this.plugin.settings.cards || [];
-                    saved.forEach(savedCard => {
-                        if (savedCard.archived && !showArchived) return;
-                        if (recurrenceFilter && recurrenceFilter !== 'all' && String(savedCard.recurrence || 'none').toLowerCase() !== String(recurrenceFilter).toLowerCase()) return;
-                        this.createCard(savedCard.content || '', {
-                            id: savedCard.id,
-                            color: savedCard.color,
-                            tags: savedCard.tags,
-                            recurrence: savedCard.recurrence,
-                            created: savedCard.created,
-                            archived: savedCard.archived,
-                            pinned: savedCard.pinned || false,
-                            notePath: savedCard.notePath
-                        });
-                    });
+                    for (const savedCard of saved) {
+                        // Always create cards from settings; visibility will be handled by filters later.
+                        if (recurrenceFilter && recurrenceFilter !== 'all' && String(savedCard.recurrence || 'none').toLowerCase() !== String(recurrenceFilter).toLowerCase()) continue;
+                        try {
+                            let archivedFromNote = savedCard.archived || false;
+                            if (savedCard.notePath) {
+                                try {
+                                    const f = this.app.vault.getAbstractFileByPath(savedCard.notePath);
+                                    if (f) {
+                                        const txt = await this.app.vault.read(f);
+                                        const m2 = txt.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n/);
+                                        if (m2 && m2[1]) {
+                                            const fm_ = m2[1];
+                                            if (/^\s*archived:\s*true$/mi.test(fm_)) archivedFromNote = true;
+                                            else if (/^\s*archived:\s*false$/mi.test(fm_)) archivedFromNote = false;
+                                        }
+                                    }
+                                } catch (e) { /* ign */ }
+                            }
+
+                            // debug: report archived state discovered when loading this saved card
+                            this.createCard(savedCard.content || '', {
+                                id: savedCard.id,
+                                color: savedCard.color,
+                                tags: savedCard.tags,
+                                recurrence: savedCard.recurrence,
+                                created: savedCard.created,
+                                archived: archivedFromNote,
+                                pinned: savedCard.pinned || false,
+                                notePath: savedCard.notePath
+                            });
+                        } catch (e) {
+                            console.error('Error creating card from savedCard (folder block):', e);
+                        }
+                    }
                 } else {
                     await this.importNotesFromFolder(folder, true, recurrenceFilter, showArchived);
                 }
@@ -2356,10 +2377,11 @@ class CardSidebarView extends ItemView {
         if (saved && saved.length > 0) {
             for (const savedCard of saved) {
                 try {
-                    if (savedCard.archived && !showArchived) continue;
+                    // Always create cards from settings; filtering will hide archived items when appropriate.
                     if (recurrenceFilter && recurrenceFilter !== 'all' && String(savedCard.recurrence || 'none').toLowerCase() !== String(recurrenceFilter).toLowerCase()) continue;
 
                     let pinnedFromNote = savedCard.pinned || false;
+                    let archivedFromNote = savedCard.archived || false;
                     if (savedCard.notePath) {
                         try {
                             const file = this.app.vault.getAbstractFileByPath(savedCard.notePath);
@@ -2370,6 +2392,8 @@ class CardSidebarView extends ItemView {
                                     const fm = m[1];
                                     if (/^\s*pinned\s*:\s*true$/mi.test(fm)) pinnedFromNote = true;
                                     if (/^\s*pinned\s*:\s*false$/mi.test(fm)) pinnedFromNote = false;
+                                    if (/^\s*archived\s*:\s*true$/mi.test(fm)) archivedFromNote = true;
+                                    if (/^\s*archived\s*:\s*false$/mi.test(fm)) archivedFromNote = false;
                                 }
                             }
                         } catch (e) { }
@@ -2381,7 +2405,7 @@ class CardSidebarView extends ItemView {
                         tags: savedCard.tags,
                         recurrence: savedCard.recurrence,
                         created: savedCard.created,
-                        archived: savedCard.archived,
+                        archived: archivedFromNote,
                         pinned: pinnedFromNote || false,
                         notePath: savedCard.notePath
                     });
@@ -2414,12 +2438,15 @@ class CardSidebarView extends ItemView {
             const prefix = folder.endsWith('/') ? folder : folder + '/';
             const mdFiles = allFiles.filter(f => f.path && f.path.startsWith(prefix) && f.path.toLowerCase().endsWith('.md'));
 
+            // (debug logs removed)
+
             if (!mdFiles || mdFiles.length === 0) {
                 if (!silent) new Notice('No markdown files found in selected folder');
                 return 0;
             }
 
             let imported = 0;
+            let archivedCount = 0;
             const createdSerial = [];
 
             for (const file of mdFiles) {
@@ -2452,6 +2479,7 @@ class CardSidebarView extends ItemView {
                         const createdMatch = fm.match(/^\s*Created-Date:\s*(.*)$/mi);
                         if (createdMatch) created = createdMatch[1].trim();
                         if (/^\s*archived:\s*true$/mi.test(fm)) archived = true;
+                        if (archived) archivedCount++;
                         try {
                             if (/^\s*pinned\s*:\s*true$/mi.test(fm)) {
                                 pinned = true;
@@ -2486,12 +2514,11 @@ class CardSidebarView extends ItemView {
                         }
                     }
 
+
                     const content = body.trim() || '(empty)';
+                    if (archived && !showArchived) {
+                    }
 
-                    // skip archived items when not showing archived
-                    if (archived && !showArchived) continue;
-
-                    // skip items that don't match the recurrence filter (if provided)
                     if (recurrenceFilter && recurrenceFilter !== 'all' && String(recurrence || 'none').toLowerCase() !== String(recurrenceFilter).toLowerCase()) continue;
 
                     const cardData = this.createCard(content, {
@@ -2523,7 +2550,7 @@ class CardSidebarView extends ItemView {
                 }
             }
 
-            if (imported > 0) {
+                    if (imported > 0) {
                 if (silent) {
                     this.plugin.settings.cards = createdSerial;
                     await this.plugin.saveSettings();
