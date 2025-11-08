@@ -54,6 +54,11 @@ Frontmatter Support - Comprehensive metadata storage in YAML frontmatter <img al
 
 - Bulk Operations - Reload all cards or apply sorting across entire collection
 
+- Custom Filter Creation - Build your own filters beyond the standard daily/weekly/monthly views
+<img alt="image" src="https://github.com/user-attachments/assets/d56fa01e-dd9d-45c0-a2b0-cb3d423a2310" /> <img width="752" height="439" alt="image" src="https://github.com/user-attachments/assets/1eb02b3e-800f-4578-a41b-71a21ec1affc" />
+
+
+
 - Custom Color Naming - If card-color frontmatter is absent, card-color-name will work instead. 
 <img alt="card color name" src="https://github.com/user-attachments/assets/a291de80-79c1-4932-a35d-ff08fa9e0fef" />
 
