@@ -6,8 +6,7 @@ class CardSidebarView extends ItemView {
         super(leaf);
         this.plugin = plugin;
         this.cards = [];
-        this.activeFilters = { query: '', tags: [] };
-        this.currentRecurrenceFilter = 'all';
+    this.activeFilters = { query: '', tags: [] };
         this._pendingTagWrites = {};
         this._reapplyingTags = {};
     }
@@ -142,16 +141,19 @@ class CardSidebarView extends ItemView {
         }
 
         
-        try { if (typeof this.filterCardsByRecurrence === 'function') this.filterCardsByRecurrence(this.currentRecurrenceFilter || 'all'); } catch (e) {}
+    try { if (typeof this.applyFilters === 'function') this.applyFilters(); } catch (e) {}
         try { if (typeof this.applyFilters === 'function') this.applyFilters(); } catch (e) {}
 
         try {
             const openVal = (this.plugin && this.plugin.settings && this.plugin.settings.openCategoryOnLoad) ? String(this.plugin.settings.openCategoryOnLoad) : null;
             if (openVal) {
                 const lower = String(openVal).toLowerCase();
-                if (['all', 'daily', 'weekly', 'monthly', 'archived'].includes(lower)) {
-                    try { this.currentRecurrenceFilter = lower; } catch (e) { this.currentRecurrenceFilter = 'all'; }
-                    try { this.filterCardsByRecurrence(this.currentRecurrenceFilter); } catch (e) {}
+                if (['all', 'archived'].includes(lower)) {
+                    try {
+                        if (lower === 'archived') await this.loadCards(true);
+                        else await this.loadCards(false);
+                    } catch (e) {}
+                    try { if (typeof this.applyFilters === 'function') this.applyFilters(); } catch (e) {}
                 } else {
                     
                     try { this.currentCategoryFilter = String(openVal).toLowerCase(); } catch (e) { this.currentCategoryFilter = String(openVal); }
@@ -386,17 +388,35 @@ class CardSidebarView extends ItemView {
             const filterGroup = header.createDiv('filter-group');
             filterGroup.style.display = 'flex';
             filterGroup.style.gap = '8px';
+            // Allow horizontal scrolling of filter chips without showing a scrollbar
+            filterGroup.style.overflowX = 'auto';
+            filterGroup.style.flexWrap = 'nowrap';
+            filterGroup.style.whiteSpace = 'nowrap';
+            filterGroup.style.webkitOverflowScrolling = 'touch';
+
+            try {
+                if (!document.getElementById('card-filter-scroll-hide')) {
+                    const s = document.createElement('style');
+                    s.id = 'card-filter-scroll-hide';
+                    s.textContent = `
+                        .card-sidebar-header .filter-group { -ms-overflow-style: none; scrollbar-width: none; }
+                        .card-sidebar-header .filter-group::-webkit-scrollbar { display: none; width: 0; height: 0; }
+                    `;
+                    document.head.appendChild(s);
+                }
+            } catch (e) {}
 
             
             
             const chips = [];
             chips.push({ type: 'all', label: 'All', value: 'all' });
 
-            const showRecurrenceChips = !(this.plugin && this.plugin.settings && this.plugin.settings.hideRecurrenceFilterChips);
-            if (showRecurrenceChips) {
-                chips.push({ type: 'recurrence', label: 'Daily', value: 'daily' });
-                chips.push({ type: 'recurrence', label: 'Weekly', value: 'weekly' });
-                chips.push({ type: 'recurrence', label: 'Monthly', value: 'monthly' });
+            // Always show time-based filters unless explicitly disabled
+            const showTimeBasedChips = !(this.plugin && this.plugin.settings && this.plugin.settings.disableTimeBasedFiltering);
+            if (showTimeBasedChips) {
+                chips.push({ type: 'category', label: 'Today', value: 'today', icon: 'calendar-day' });
+                chips.push({ type: 'category', label: 'Tomorrow', value: 'tomorrow', icon: 'calendar-up' });
+                chips.push({ type: 'category', label: 'This Week', value: 'this_week', icon: 'calendar-week' });
             }
 
             
@@ -405,9 +425,18 @@ class CardSidebarView extends ItemView {
                 if (enabled) {
                     const cats = Array.isArray(this.plugin.settings.customCategories) ? this.plugin.settings.customCategories : [];
                     cats.forEach(cat => {
-                        if (cat && cat.showInMenu !== false) {
-                            chips.push({ type: 'category', label: cat.label || '', value: cat.id || cat.label || '' });
-                        }
+                        try {
+                            // Optionally hide time-based custom categories (Today/Tomorrow/This Week)
+                            const id = String(cat.id || '').toLowerCase();
+                            const label = String(cat.label || '').toLowerCase();
+                            const disabledTime = !!(this.plugin && this.plugin.settings && this.plugin.settings.disableTimeBasedFiltering);
+                            if (disabledTime && (id === 'today' || id === 'tomorrow' || id === 'this_week' || label.includes('today') || label.includes('tomorrow') || label.includes('this week'))) {
+                                return;
+                            }
+                            if (cat && cat.showInMenu !== false) {
+                                chips.push({ type: 'category', label: cat.label || '', value: cat.id || cat.label || '' });
+                            }
+                        } catch (e) { }
                     });
                 }
             } catch (e) {
@@ -456,17 +485,11 @@ class CardSidebarView extends ItemView {
                     btn.removeClass('active');
 
                     
-                    if (chip.type === 'recurrence' || chip.type === 'archived' || chip.type === 'all') {
+                    if (chip.type === 'archived' || chip.type === 'all') {
                         
-                        const recurrence = String(chip.value || '').toLowerCase();
-                        try { this.currentRecurrenceFilter = recurrence; } catch (e) { this.currentRecurrenceFilter = 'all'; }
-                        
-                        try { if (chip.type === 'all') this.currentCategoryFilter = null; } catch (e) {}
-
                         if (wasActive) {
                             try { this.showLoadingOverlay(); } catch (e) {}
                             try {
-                                
                                 try { this.currentCategoryFilter = null; } catch (e) {}
                                 try {
                                     if (this.cardsContainer) {
@@ -477,8 +500,13 @@ class CardSidebarView extends ItemView {
 
                                 await new Promise(r => setTimeout(r, 20));
 
-                                await this.loadCards(false, null);
-                                this.filterCardsByRecurrence('all');
+                                if (chip.type === 'archived') {
+                                    await this.loadCards(true);
+                                } else {
+                                    await this.loadCards(false);
+                                }
+
+                                try { if (typeof this.applyFilters === 'function') this.applyFilters(); } catch (e) {}
 
                                 try { this.animateCardsEntrance({ duration: 300, offset: 28 }); } catch (e) {}
                             } finally {
@@ -487,11 +515,12 @@ class CardSidebarView extends ItemView {
                             return;
                         }
 
-                        
                         btn.addClass('active');
                         btn.style.backgroundColor = 'var(--background-modifier-hover)';
                         btn.style.color = 'var(--text-normal)';
-
+                        // Clear any category filter when switching to 'all' or 'archived'
+                        try { this.currentCategoryFilter = null; } catch (e) { this.currentCategoryFilter = null; }
+                        
                         try { this.showLoadingOverlay(); } catch (e) {}
                         try {
                             try {
@@ -503,13 +532,13 @@ class CardSidebarView extends ItemView {
 
                             await new Promise(r => setTimeout(r, 20));
 
-                            if (recurrence === 'archived') {
-                                await this.loadCards(true, null);
+                            if (chip.type === 'archived') {
+                                await this.loadCards(true);
                             } else {
-                                await this.loadCards(false, recurrence);
+                                await this.loadCards(false);
                             }
 
-                            this.filterCardsByRecurrence(recurrence);
+                            try { if (typeof this.applyFilters === 'function') this.applyFilters(); } catch (e) {}
 
                             try { this.animateCardsEntrance({ duration: 300, offset: 28 }); } catch (e) {}
                         } finally {
@@ -532,7 +561,13 @@ class CardSidebarView extends ItemView {
                         btn.style.backgroundColor = 'var(--background-modifier-hover)';
                         btn.style.color = 'var(--text-normal)';
                         
-                        try { this.currentRecurrenceFilter = this.currentRecurrenceFilter || 'all'; } catch (e) { this.currentRecurrenceFilter = 'all'; }
+                        // If the last load showed archived-only cards, reload the non-archived set !
+                        try {
+                            if (this._lastLoadArchived) {
+                                await this.loadCards(false);
+                            }
+                        } catch (e) {}
+
                         this.applyFilters();
                     }
                 });
@@ -540,82 +575,7 @@ class CardSidebarView extends ItemView {
         }
     }
     
-    // Filter cards by recurrence type (daily/weekly/monthly) and handle archived state
-    filterCardsByRecurrence(filter) {
-        console.log('Filtering by:', filter);
-        const cards = this.cardsContainer.querySelectorAll('.card-sidebar-card');
-        const now = new Date();
-        
-        cards.forEach(card => {
-            const cardData = this.cards.find(c => c.element === card);
-            if (!cardData) return;
-            
-            card.style.display = 'none';
-            
-            if (filter === 'all') {
-                const isArchived = !!cardData.archived;
-                if (!isArchived) card.style.display = ''; 
-                return;
-            }
-
-            if (filter === 'archived') {
-                if (!!cardData.archived) card.style.display = '';
-                return;
-            }
-
-            switch (filter) {
-                case 'daily':
-                    if (!cardData.archived && cardData.recurrence === 'daily') card.style.display = '';
-                    break;
-                case 'weekly':
-                    if (!cardData.archived && cardData.recurrence === 'weekly') card.style.display = '';
-                    break;
-                case 'monthly':
-                    if (!cardData.archived && cardData.recurrence === 'monthly') card.style.display = '';
-                    break;
-                default:
-                    if (!cardData.archived) card.style.display = '';  // Non-archived for unknown filters
-            }
-        });
-        
-        
-        const filterBtns = this.containerEl.querySelectorAll('.card-filter-btn');
-        filterBtns.forEach(btn => {
-            try {
-                const t = (btn.dataset && btn.dataset.filterType) ? String(btn.dataset.filterType) : '';
-                const v = (btn.dataset && btn.dataset.filterValue) ? String(btn.dataset.filterValue).toLowerCase() : String(btn.textContent || '').toLowerCase();
-                if (t === 'recurrence' || t === 'archived' || t === 'all') {
-                    if (v === String(filter).toLowerCase()) {
-                        btn.addClass('active');
-                        btn.style.backgroundColor = 'var(--background-modifier-hover)';
-                        btn.style.color = 'var(--text-normal)';
-                    } else {
-                        btn.removeClass('active');
-                        btn.style.backgroundColor = 'var(--background-primary)';
-                        btn.style.color = 'var(--text-muted)';
-                    }
-                } else {
-                    
-                    btn.removeClass('active');
-                    btn.style.backgroundColor = 'var(--background-primary)';
-                    btn.style.color = 'var(--text-muted)';
-                }
-            } catch (e) {
-                try { btn.removeClass('active'); } catch (er) {}
-                try { btn.style.backgroundColor = 'var(--background-primary)'; } catch (er) {}
-                try { btn.style.color = 'var(--text-muted)'; } catch (er) {}
-            }
-        });
-
-        if (this.plugin && this.plugin.settings && this.plugin.settings.showPinnedOnly) {
-            this.cards.forEach(cd => {
-                try {
-                    if (cd && cd.element) cd.element.style.display = cd.pinned ? '' : 'none';
-                } catch (e) { }
-            });
-        }
-        try { this.animateCardsEntrance(); } catch (e) {}
-    }
+    
 
     
     animateCardsEntrance(options = {}) {
@@ -1205,12 +1165,7 @@ class CardSidebarView extends ItemView {
                 const showArchived = activeText === 'archived';
 
                 await this.loadCards(showArchived);
-
-                if (activeText && typeof this.filterCardsByRecurrence === 'function') {
-                    this.filterCardsByRecurrence(activeText);
-                } else {
-                    this.filterCardsByRecurrence('all');
-                }
+                try { if (typeof this.applyFilters === 'function') this.applyFilters(); } catch (e) {}
 
                 new Notice('Cards reloaded');
             } catch (err) {
@@ -1359,7 +1314,6 @@ class CardSidebarView extends ItemView {
             
             let tagArray = (cardData.tags || []).map(t => String(t).trim()).filter(t => t.length > 0);
             const tagsYaml = tagArray.length > 0 ? ('Tags:\n' + tagArray.map(t => `  - ${t}`).join('\n')) : 'Tags: []';
-            const recurrence = cardData.recurrence || 'none';
             let colorKey = '';
             let colorLabel = '';
             try {
@@ -1376,7 +1330,7 @@ class CardSidebarView extends ItemView {
             const colorLine = colorKey ? `card-color: ${colorKey}` : '';
             const colorNameLine = colorLabel ? `card-color-name: "${String(colorLabel).replace(/"/g, '\\"')}"` : '';
 
-            const noteContent = `---\n${tagsYaml}${colorLine ? '\n' + colorLine : ''}${colorNameLine ? '\n' + colorNameLine : ''}\nRecurrence: ${recurrence}\nCreated-Date: ${yamlDate}\n---\n\n${content}`;
+            const noteContent = `---\n${tagsYaml}${colorLine ? '\n' + colorLine : ''}${colorNameLine ? '\n' + colorNameLine : ''}\nCreated-Date: ${yamlDate}\n---\n\n${content}`;
 
             await this.app.vault.create(filePath, noteContent);
 
@@ -1535,7 +1489,6 @@ class CardSidebarView extends ItemView {
             color: cardColor,
             tags: options.tags || [],
             category: options.category || null,
-            recurrence: (options.recurrence != null ? options.recurrence : 'none'),
             created: options.created || new Date().toISOString(),
             archived: options.archived || false,
             pinned: options.pinned || false,
@@ -1619,7 +1572,6 @@ class CardSidebarView extends ItemView {
 
                         try { pinEl.remove(); } catch (err) { }
                         try { if (typeof this.applyFilters === 'function') this.applyFilters(); } catch (e) {}
-                        try { if (typeof this.filterCardsByRecurrence === 'function') this.filterCardsByRecurrence(this.currentRecurrenceFilter || 'all'); } catch (e) {}
                     } catch (err) {
                         console.error('Error toggling pin on card', err);
                     }
@@ -2027,12 +1979,7 @@ class CardSidebarView extends ItemView {
                     if (!c || !c.element) return;
                     let visible = true;
 
-                    try {
-                        const rec = String(this.currentRecurrenceFilter || 'all').toLowerCase();
-                        if (rec === 'all' && c.archived) {
-                            visible = false;
-                        }
-                    } catch (e) { }
+                    
                     if (showPinnedOnly && !c.pinned) visible = false;
                     if (tags && tags.length > 0) {
                         for (const tg of tags) {
@@ -2271,7 +2218,6 @@ class CardSidebarView extends ItemView {
             if (m) fm = m[1];
 
             const tags = [];
-            let recurrence = cardData.recurrence || 'none';
             let created = cardData.created || new Date().toISOString();
             let archived = cardData.archived || false;
             let pinned = cardData.pinned || false;
@@ -2312,17 +2258,13 @@ class CardSidebarView extends ItemView {
                 }
                 
                 try {
-                    const catIdMatch = fm.match(/^\s*Category-ID\s*:\s*(.*)$/mi);
+                    // Read Category frontmatter
                     const catLabelMatch = fm.match(/^\s*Category\s*:\s*(.*)$/mi);
-                    let catVal = null;
-                    if (catIdMatch && catIdMatch[1]) catVal = String(catIdMatch[1]).trim().replace(/^"|"$/g, '');
-                    else if (catLabelMatch && catLabelMatch[1]) catVal = String(catLabelMatch[1]).trim().replace(/^"|"$/g, '');
-                    if (catVal) {
-                        
+                    if (catLabelMatch && catLabelMatch[1]) {
+                        const catVal = String(catLabelMatch[1]).trim().replace(/^"|"$/g, '');
                         const cats = Array.isArray(this.plugin.settings.customCategories) ? this.plugin.settings.customCategories : [];
                         const found = cats.find(x => String(x.id || '').toLowerCase() === String(catVal).toLowerCase() || String(x.label || '').toLowerCase() === String(catVal).toLowerCase());
-                        if (found) cardData.category = found.id || String(found.label || catVal);
-                        else cardData.category = catVal;
+                        cardData.category = found ? (found.label || String(found.id || catVal)) : catVal;
                     } else {
                         cardData.category = cardData.category || null;
                     }
@@ -2332,15 +2274,14 @@ class CardSidebarView extends ItemView {
                             pinned = true;
                         }
                     } catch (e) { }
-                const recMatch = fm.match(/^\s*Recurrence:\s*(.*)$/mi);
-                if (recMatch) recurrence = recMatch[1].trim();
+                
                 const createdMatch = fm.match(/^\s*Created-Date:\s*(.*)$/mi);
                 if (createdMatch) created = createdMatch[1].trim();
                 if (/^\s*archived:\s*true$/mi.test(fm)) archived = true; else archived = false;
             }
 
             if (tags.length > 0) cardData.tags = tags; else cardData.tags = [];
-            cardData.recurrence = recurrence;
+            
             cardData.created = created;
             cardData.archived = archived;
             cardData.pinned = !!pinned;
@@ -2376,7 +2317,6 @@ class CardSidebarView extends ItemView {
                                     } catch (e) { }
                                     try { pinEl.remove(); } catch (err) {}
                                     try { if (typeof this.applyFilters === 'function') this.applyFilters(); } catch (e) {}
-                                    try { if (typeof this.filterCardsByRecurrence === 'function') this.filterCardsByRecurrence(this.currentRecurrenceFilter || 'all'); } catch (e) {}
                                 } catch (err) { console.error('Error unpinning from indicator:', err); }
                             });
                         }
@@ -2417,121 +2357,63 @@ class CardSidebarView extends ItemView {
         
         if (!cardData) return;
 
+        // Pin/unpin card (1)
         menu.addItem((item) => {
-                item.setTitle(cardData.pinned ? 'Unpin Card' : 'Pin Card')
+            item.setTitle(cardData.pinned ? 'Unpin Card' : 'Pin Card')
                 .setIcon('pin')
                 .onClick(async () => {
-                    try {
-                        cardData.pinned = !cardData.pinned;
-                        try {
-                            this.cards = this.cards.filter(c => c.id !== cardData.id);
-                            if (cardData.pinned) {
-                                this.cards.unshift(cardData);
-                                if (cardData.element && this.cardsContainer) {
-                                    try { this.cardsContainer.insertBefore(cardData.element, this.cardsContainer.firstChild); } catch (e) { }
-                                }
-                            } else {
-                                this.cards.push(cardData);
-                            }
-                        } catch (e) { }
-
-                        try {
-                            const el = cardData.element;
-                            if (el) {
-                                const existing = el.querySelector('.card-pin-indicator');
-                                if (cardData.pinned) {
-                                    try { if (typeof this.applyFilters === 'function') this.applyFilters(); } catch (e) {}
-                                    try { if (typeof this.filterCardsByRecurrence === 'function') this.filterCardsByRecurrence(this.currentRecurrenceFilter || 'all'); } catch (e) {}
-
-                                    if (!existing) {
-                                        const pinEl = el.createDiv();
-                                        pinEl.addClass('card-pin-indicator');
-                                        pinEl.style.position = 'absolute';
-                                        pinEl.style.top = '6px';
-                                        pinEl.style.right = '8px';
-                                        pinEl.style.cursor = 'pointer';
-                                        pinEl.style.fontSize = '14px';
-                                        pinEl.title = 'Pinned';
-                                        try { setIcon(pinEl, 'pin'); } catch (e) { pinEl.textContent = '📌'; }
-
-                                        pinEl.style.color = 'var(--interactive-accent)';
-
-                                        pinEl.addEventListener('click', async (ev) => {
-                                            ev.preventDefault(); ev.stopPropagation();
-                                            try {
-                                                cardData.pinned = false;
-                                                this.cards = this.cards.filter(c => c.id !== cardData.id);
-                                                this.cards.push(cardData);
-                                                await this.saveCards();
-                                                try {
-                                                    if (this.plugin && this.plugin.settings && this.plugin.settings.sortMode === 'manual') {
-                                                        this.plugin.settings.manualOrder = (this.cards || []).map(c => c.id);
-                                                        if (typeof this.plugin.saveSettings === 'function') await this.plugin.saveSettings();
-                                                    }
-                                                } catch (e) { }
-                                                try { pinEl.remove(); } catch (err) {}
-                                                try { if (typeof this.applyFilters === 'function') this.applyFilters(); } catch (e) {}
-                                                try { if (typeof this.filterCardsByRecurrence === 'function') this.filterCardsByRecurrence(this.currentRecurrenceFilter || 'all'); } catch (e) {}
-                                            } catch (err) { console.error('Error unpinning from indicator:', err); }
-                                        });
-                                    }
-                                } else {
-                                    try { if (existing) existing.remove(); } catch (e) {}
-                                    if (this.plugin && this.plugin.settings && this.plugin.settings.showPinnedOnly) {
-                                        try { el.style.display = 'none'; } catch (e) { }
-                                    }
-                                }
-                            }
-                        } catch (e) { console.error('Error updating DOM pin indicator:', e); }
-
-                            try {
-                                if (cardData.notePath) {
-                                    try {
-                                        const file = this.app.vault.getAbstractFileByPath(cardData.notePath);
-                                        if (file) {
-                                            let content = await this.app.vault.read(file);
-                                            const fmMatch = content.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n/);
-                                            if (fmMatch) {
-                                                let fm = fmMatch[1];
-                                                if (cardData.pinned) {
-                                                    if (/^\s*pinned\s*:/gmi.test(fm)) {
-                                                        fm = fm.replace(/^\s*pinned\s*:.*$/gmi, 'pinned: true');
-                                                    } else {
-                                                        fm = fm + '\n' + 'pinned: true';
-                                                    }
-                                                } else {
-                                                    if (/^\s*pinned\s*:/gmi.test(fm)) {
-                                                        fm = fm.replace(/^\s*pinned\s*:.*$/gmi, 'pinned: false');
-                                                    } else {
-                                                        fm = fm + '\n' + 'pinned: false';
-                                                    }
-                                                }
-                                                const newFm = '---\n' + fm + '\n---\n';
-                                                content = content.replace(fmMatch[0], newFm);
-                                            } else {
-                                                const newFm = '---\n' + (cardData.pinned ? 'pinned: true' : 'pinned: false') + '\n---\n\n';
-                                                content = newFm + content;
-                                            }
-                                            console.debug('sidecards: modify (toggle pin state) ->', file.path);
-                                            await this.app.vault.modify(file, content);
-                                        }
-                                    } catch (err) {
-                                        console.error('Error updating pinned in note frontmatter:', err);
-                                    }
-                                }
-                            } catch (e) { }
-
-                            await this.saveCards();
-                            try {
-                                if (this.plugin && this.plugin.settings && this.plugin.settings.sortMode === 'manual') {
-                                    this.plugin.settings.manualOrder = (this.cards || []).map(c => c.id);
-                                    if (typeof this.plugin.saveSettings === 'function') await this.plugin.saveSettings();
-                                }
-                            } catch (e) { }
-                    } catch (e) { console.error('Error toggling pin state:', e); }
+                    cardData.pinned = !cardData.pinned;
+                    await this.saveCards();
+                    if (typeof this.applyFilters === 'function') this.applyFilters();
                 });
         });
 
+        if (!(this.plugin && this.plugin.settings && this.plugin.settings.hideTimeBasedAddButtonsInContextMenu)) {
+            [
+                { label: 'Add to Today', value: 'today', icon: 'calendar-clock' },
+                { label: 'Add to Tomorrow', value: 'tomorrow', icon: 'calendar-days' },
+                { label: 'Add to This Week', value: 'this_week', icon: 'calendar-range' }
+            ].forEach(opt => {
+                menu.addItem(item => {
+                    item.setTitle(opt.label)
+                        .setIcon(opt.icon)
+                        .onClick(async () => {
+                            cardData.category = opt.value;
+                            if (typeof this.saveCards === 'function') await this.saveCards();
+                            try {
+                                if (cardData.notePath) {
+                                    const file = this.app.vault.getAbstractFileByPath(cardData.notePath);
+                                    if (file) {
+                                        let content = await this.app.vault.read(file);
+                                        const catLabelLine = `Category: ${opt.value}`;
+                                        const fmMatch = content.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n/);
+                                        if (fmMatch) {
+                                            let fm = fmMatch[1];
+                                            if (/^\s*Category\s*:/gmi.test(fm)) {
+                                                fm = fm.replace(/^\s*Category\s*:.*$/gmi, catLabelLine);
+                                            } else {
+                                                fm = fm + '\n' + catLabelLine;
+                                            }
+                                            const newFm = '---\n' + fm + '\n---\n';
+                                            content = content.replace(fmMatch[0], newFm);
+                                        } else {
+                                            content = '---\n' + catLabelLine + '\n---\n\n' + content;
+                                        }
+                                        await this.app.vault.modify(file, content);
+                                    }
+                                }
+                            } catch (err) {
+                                console.error('Error updating category in note frontmatter:', err);
+                            }
+                            if (typeof this.applyFilters === 'function') this.applyFilters();
+                        });
+                });
+            });
+        }
+
+        menu.addSeparator();
+
+        // Colors (5)
         menu.addItem((item) => {
             const colors = [
                 { name: 'gray', var: 'var(--card-color-1)' },
@@ -2673,7 +2555,8 @@ class CardSidebarView extends ItemView {
                                     .setIcon('plus-square')
                                     .onClick(async () => {
                                         try {
-                                            cardData.category = cat.id || String(cat.label || '');
+                                            // store category as label
+                                            cardData.category = String(cat.label || '');
                                             if (typeof this.saveCards === 'function') await this.saveCards();
 
                                             
@@ -2693,19 +2576,10 @@ class CardSidebarView extends ItemView {
                                                     if (file) {
                                                         let content = await this.app.vault.read(file);
                                                         const fmMatch = content.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n/);
-                                                        const cid = String(cat.id || cat.label || '').trim();
                                                         const clabel = String(cat.label || cat.id || '').trim();
-                                                        const catIdLine = `Category-ID: ${cid}`;
                                                         const catLabelLine = `Category: ${clabel}`;
                                                         if (fmMatch) {
                                                             let fm = fmMatch[1];
-                                                            
-                                                            if (/^\s*Category-ID\s*:/gmi.test(fm)) {
-                                                                fm = fm.replace(/^\s*Category-ID\s*:.*$/gmi, catIdLine);
-                                                            } else {
-                                                                fm = fm + '\n' + catIdLine;
-                                                            }
-                                                            
                                                             if (/^\s*Category\s*:/gmi.test(fm)) {
                                                                 fm = fm.replace(/^\s*Category\s*:.*$/gmi, catLabelLine);
                                                             } else {
@@ -2714,7 +2588,7 @@ class CardSidebarView extends ItemView {
                                                             const newFm = '---\n' + fm + '\n---\n';
                                                             content = content.replace(fmMatch[0], newFm);
                                                         } else {
-                                                            content = '---\n' + catIdLine + '\n' + catLabelLine + '\n---\n\n' + content;
+                                                            content = '---\n' + catLabelLine + '\n---\n\n' + content;
                                                         }
                                                         console.debug('sidecards: modify (add category) ->', file.path);
                                                         await this.app.vault.modify(file, content);
@@ -2756,7 +2630,6 @@ class CardSidebarView extends ItemView {
                                                         if (fmMatch) {
                                                             let fm = fmMatch[1];
                                                             
-                                                            fm = fm.replace(/^\s*Category-ID\s*:.*$/gmi, '');
                                                             fm = fm.replace(/^\s*Category\s*:.*$/gmi, '');
                                                             
                                                             fm = fm.split(/\r?\n/).filter(l => l.trim() !== '').join('\n');
@@ -2778,69 +2651,11 @@ class CardSidebarView extends ItemView {
         } catch (e) { console.error('Error adding custom category menu items:', e); }
 
         
-        menu.addSeparator();
 
-        const options = [
-            { label: 'No Recurrence', value: 'none', icon: 'x' },
-            { label: 'Daily', value: 'daily', icon: 'calendar-clock' },
-            { label: 'Weekly', value: 'weekly', icon: 'calendar-range' },
-            { label: 'Monthly', value: 'monthly', icon: 'calendar-days' }
-        ];
-        
-        
-        if (!(this.plugin && this.plugin.settings && this.plugin.settings.hideRecurrenceInContextMenu)) {
-            options.forEach(option => {
-                menu.addItem((item) => {
-                item.setTitle(option.label)
-                    .setIcon(option.icon);
-
-                if (cardData.recurrence === option.value) {
-                    item.setChecked(true);
-                }
-
-                item.onClick(async () => {
-                    try {
-                        
-                        cardData.recurrence = option.value;
-                        if (typeof this.saveCards === 'function') await this.saveCards();
-
-                        
-                        if (cardData.notePath) {
-                            try {
-                                const file = this.app.vault.getAbstractFileByPath(cardData.notePath);
-                                if (file) {
-                                    let content = await this.app.vault.read(file);
-                                    content = content.replace(/(Recurrence:\s*)(.*)/, `$1${option.value}`);
-                                    console.debug('sidecards: modify (recurrence) ->', file.path);
-                                    await this.app.vault.modify(file, content);
-                                }
-                            } catch (err) {
-                                console.error('Error updating recurrence in note:', err);
-                            }
-                        }
-
-                        
-                        try {
-                            if (typeof this.filterCardsByRecurrence === 'function') this.filterCardsByRecurrence(this.currentRecurrenceFilter || 'all');
-                        } catch (e) {  }
-                    } catch (err) {
-                        console.error('Error setting recurrence on card:', err);
-                    }
-                });
-            });
-        });
-        } 
         
         menu.addSeparator();
-        
-        menu.addItem((item) => {
-            item.setTitle('Edit Tags')
-                .setIcon('tag')
-                .onClick(() => {
-                    this.showTagsModal(cardData);
-                });
-        });
 
+        // Create/View Note (based on whether note exists)
         if (cardData.notePath) {
             menu.addItem((item) => {
                 item.setTitle('View Note')
@@ -2863,9 +2678,19 @@ class CardSidebarView extends ItemView {
                     });
             });
         }
-        
+
+        // Add/Edit Tags
+        menu.addItem((item) => {
+            item.setTitle('Add Tags')
+                .setIcon('tag')
+                .onClick(() => {
+                    this.showTagsModal(cardData);
+                });
+        });
+
         menu.addSeparator();
-        
+
+        // Destructive actions at the bottom
         menu.addItem((item) => {
             item.setTitle('Delete Card')
                 .setIcon('trash')
@@ -2886,6 +2711,7 @@ class CardSidebarView extends ItemView {
                     this.saveCards();
                 });
         });
+
         menu.addItem((item) => {
             item.setTitle('Archive Card')
                 .setIcon('archive')
@@ -3143,13 +2969,12 @@ class CardSidebarView extends ItemView {
                 if (cardData.category) {
                     const cats = Array.isArray(this.plugin.settings.customCategories) ? this.plugin.settings.customCategories : [];
                     const found = cats.find(x => String(x.id || '').toLowerCase() === String(cardData.category || '').toLowerCase() || String(x.label || '').toLowerCase() === String(cardData.category || '').toLowerCase());
-                    const cid = found ? (found.id || found.label) : cardData.category;
                     const clabel = found ? (found.label || found.id) : cardData.category;
-                    categoryBlock = `Category-ID: ${cid}\nCategory: ${clabel}\n`;
+                    categoryBlock = `Category: ${clabel}\n`;
                 }
             } catch (e) { }
 
-            const noteContent = `---\nCreated-Date: ${created}\n${tagsYaml}${colorLine ? '\n' + colorLine : ''}${colorNameLine ? '\n' + colorNameLine : ''}\n${categoryBlock}Recurrence: ${cardData.recurrence || 'none'}\n---\n\n${cardData.content}`;
+            const noteContent = `---\nCreated-Date: ${created}\n${tagsYaml}${colorLine ? '\n' + colorLine : ''}${colorNameLine ? '\n' + colorNameLine : ''}\n${categoryBlock}---\n\n${cardData.content}`;
             
             const file = await this.app.vault.create(filePath, noteContent);
             const leaf = this.app.workspace.getLeaf();
@@ -3168,11 +2993,15 @@ class CardSidebarView extends ItemView {
         }
     }
 
-    async loadCards(showArchived = false, recurrenceFilter = null) {
+    async loadCards(showArchived = false) {
         try {
+            this._bulkLoading = true;
+            try { if (this.cardsContainer) this.cardsContainer.style.visibility = 'hidden'; } catch (e) {}
             if (this.cardsContainer) this.cardsContainer.empty();
         } catch (e) {
         }
+        // remember whether this load was archived-only so other UI can reload if needed
+        try { this._lastLoadArchived = !!showArchived; } catch (e) {}
         this.cards = [];
         const folder = this.plugin.settings.storageFolder;
 
@@ -3181,8 +3010,6 @@ class CardSidebarView extends ItemView {
                 if (this.plugin._importedFromFolderOnLoad && this.plugin.settings.cards && this.plugin.settings.cards.length > 0) {
                     const saved = this.plugin.settings.cards || [];
                     for (const savedCard of saved) {
-                        
-                        if (recurrenceFilter && recurrenceFilter !== 'all' && String(savedCard.recurrence || 'none').toLowerCase() !== String(recurrenceFilter).toLowerCase()) continue;
                         try {
                             let archivedFromNote = savedCard.archived || false;
                             if (savedCard.notePath) {
@@ -3201,11 +3028,17 @@ class CardSidebarView extends ItemView {
                             }
 
                             
+                            // Only create cards that match the requested archived filter
+                            try {
+                                if (Boolean(archivedFromNote) !== Boolean(showArchived)) {
+                                    continue;
+                                }
+                            } catch (e) {}
+
                             const createdCard = this.createCard(savedCard.content || '', {
                                 id: savedCard.id,
                                 color: savedCard.color,
                                 tags: savedCard.tags,
-                                recurrence: savedCard.recurrence,
                                 category: savedCard.category || null,
                                 created: savedCard.created,
                                 archived: archivedFromNote,
@@ -3222,7 +3055,7 @@ class CardSidebarView extends ItemView {
                         }
                     }
                 } else {
-                    await this.importNotesFromFolder(folder, true, recurrenceFilter, showArchived);
+                    await this.importNotesFromFolder(folder, true, showArchived);
                 }
             } catch (e) {
                 console.error('Error importing notes from storage folder during load:', e);
@@ -3230,6 +3063,8 @@ class CardSidebarView extends ItemView {
 
             this.refreshAllCardTimestamps();
             try { this.animateCardsEntrance(); } catch (e) {}
+            try { if (this.cardsContainer) this.cardsContainer.style.visibility = ''; } catch (e) {}
+            this._bulkLoading = false;
             return;
         }
 
@@ -3238,7 +3073,7 @@ class CardSidebarView extends ItemView {
             for (const savedCard of saved) {
                 try {
                     
-                    if (recurrenceFilter && recurrenceFilter !== 'all' && String(savedCard.recurrence || 'none').toLowerCase() !== String(recurrenceFilter).toLowerCase()) continue;
+
 
                     let pinnedFromNote = savedCard.pinned || false;
                     let archivedFromNote = savedCard.archived || false;
@@ -3259,11 +3094,17 @@ class CardSidebarView extends ItemView {
                         } catch (e) { }
                     }
 
+                    // Only create cards that match the requested archived filter
+                    try {
+                        if (Boolean(archivedFromNote) !== Boolean(showArchived)) {
+                            continue;
+                        }
+                    } catch (e) {}
+
                     const createdCard = this.createCard(savedCard.content || '', {
                         id: savedCard.id,
                         color: savedCard.color,
                         tags: savedCard.tags,
-                        recurrence: savedCard.recurrence,
                         category: savedCard.category || null,
                         created: savedCard.created,
                         archived: archivedFromNote,
@@ -3280,7 +3121,7 @@ class CardSidebarView extends ItemView {
         } else {
             const sampleCards = [
                 "Welcome to Card Sidebar! This is your quick note-taking space.",
-                "Right-click on cards to change colors, set recurrence, or add tags.",
+                "Right-click on cards to change colors, manage categories, or add tags.",
                 "Use the input box below to add new cards quickly.",
                 "Drag cards to reorder them."
             ];
@@ -3295,10 +3136,13 @@ class CardSidebarView extends ItemView {
             await this.applySort(this.plugin.settings.sortMode || 'manual', this.plugin.settings.sortAscending != null ? this.plugin.settings.sortAscending : true);
         } catch (e) { }
         this.refreshAllCardTimestamps();
-        try { this.animateCardsEntrance(); } catch (e) {}
+    try { this.animateCardsEntrance(); } catch (e) {}
+    // Reveal container now that only filtered cards will be visible
+    try { if (this.cardsContainer) this.cardsContainer.style.visibility = ''; } catch (e) {}
+    this._bulkLoading = false;
     }
 
-    async importNotesFromFolder(folder, silent = false, recurrenceFilter = null, showArchived = false) {
+    async importNotesFromFolder(folder, silent = false, showArchived = false) {
         if (!folder) return 0;
         try {
             const allFiles = this.app.vault.getAllLoadedFiles();
@@ -3332,7 +3176,7 @@ class CardSidebarView extends ItemView {
                     }
 
                     const tags = [];
-                    let recurrence = 'none';
+                    
                     let created = new Date().toISOString();
                     let archived = false;
                     let parsedColorVar = null;
@@ -3342,27 +3186,18 @@ class CardSidebarView extends ItemView {
                     if (fm) {
                         const parsedTags = this.parseTagsFromFrontmatter(fm);
                         parsedTags.forEach(t => { if (t) tags.push(t); });
-                        const recMatch = fm.match(/^\s*Recurrence:\s*(.*)$/mi);
-                        if (recMatch) recurrence = recMatch[1].trim();
+                        
                         const createdMatch = fm.match(/^\s*Created-Date:\s*(.*)$/mi);
                         if (createdMatch) created = createdMatch[1].trim();
                         if (/^\s*archived:\s*true$/mi.test(fm)) archived = true;
                         
                         try {
-                            const catIdMatch = fm.match(/^\s*Category-ID\s*:\s*(.*)$/mi);
                             const catLabelMatch = fm.match(/^\s*Category\s*:\s*(.*)$/mi);
-                            let catVal = null;
-                            if (catIdMatch && catIdMatch[1]) catVal = String(catIdMatch[1]).trim().replace(/^"|"$/g, '');
-                            else if (catLabelMatch && catLabelMatch[1]) catVal = String(catLabelMatch[1]).trim().replace(/^"|"$/g, '');
-                            if (catVal) {
+                            if (catLabelMatch && catLabelMatch[1]) {
+                                const catVal = String(catLabelMatch[1]).trim().replace(/^"|"$/g, '');
                                 const cats = Array.isArray(this.plugin.settings.customCategories) ? this.plugin.settings.customCategories : [];
                                 const found = cats.find(x => String(x.id || '').toLowerCase() === String(catVal).toLowerCase() || String(x.label || '').toLowerCase() === String(catVal).toLowerCase());
-                                if (found) {
-                                    
-                                    parsedCategoryId = found.id || String(found.label || catVal);
-                                } else {
-                                    parsedCategoryId = catVal;
-                                }
+                                parsedCategoryId = found ? (found.label || String(found.id || catVal)) : catVal;
                             }
                         } catch (e) {}
                         if (archived) archivedCount++;
@@ -3405,15 +3240,17 @@ class CardSidebarView extends ItemView {
                     if (archived && !showArchived) {
                     }
 
-                    if (recurrenceFilter && recurrenceFilter !== 'all' && String(recurrence || 'none').toLowerCase() !== String(recurrenceFilter).toLowerCase()) continue;
-
-                    
+                    // Only create cards that match the requested archived filter
+                    try {
+                        if (Boolean(archived) !== Boolean(showArchived)) {
+                            continue;
+                        }
+                    } catch (e) {}
 
                     const cardData = this.createCard(content, {
                         id: Date.now().toString() + Math.random().toString(36).slice(2, 8),
                         color: parsedColorVar || `var(--card-color-1)`,
                         tags,
-                        recurrence,
                         created,
                         archived,
                         notePath: path,
@@ -3427,7 +3264,6 @@ class CardSidebarView extends ItemView {
                         color: cardData.color,
                         tags: cardData.tags || [],
                         category: cardData.category || null,
-                        recurrence: cardData.recurrence || 'none',
                         created: cardData.created,
                         archived: cardData.archived || false,
                         pinned: cardData.pinned || false,
@@ -3468,7 +3304,6 @@ class CardSidebarView extends ItemView {
                 color: c.color,
                 tags: c.tags || [],
                 category: c.category || null,
-                recurrence: c.recurrence || 'none',
                 created: c.created,
                 archived: c.archived || false,
                 pinned: c.pinned || false,
@@ -3819,7 +3654,7 @@ class CardSidebarSettingTab extends PluginSettingTab {
             
     new Setting(containerEl)
         .setName('Hide Filters Topbar')
-        .setDesc('When enabled, the topbar containing filter buttons (All, Daily, Weekly, Monthly, Archived) are hidden.')
+        .setDesc('When enabled, the topbar containing filter buttons are hidden.')
         .addToggle(toggle => toggle
             .setValue(this.plugin.settings.disableFilterButtons || false)
             .onChange(async (value) => {
@@ -4001,24 +3836,13 @@ class CardSidebarSettingTab extends PluginSettingTab {
             }));
 
     new Setting(containerEl)
-        .setName('Hide recurrence in right-click menu')
-        .setDesc('When enabled, the Daily/Weekly/Monthly recurrence options are hidden from the card context menu')
+        .setName('Disable Time-based Filtering')
+        .setDesc('Hides the default Today / Tomorrow / This Week filters')
         .addToggle(toggle => toggle
-            .setValue(this.plugin.settings.hideRecurrenceInContextMenu || false)
+            .setValue(this.plugin.settings.disableTimeBasedFiltering || false)
             .onChange(async (value) => {
-                this.plugin.settings.hideRecurrenceInContextMenu = value;
+                this.plugin.settings.disableTimeBasedFiltering = value;
                 await this.plugin.saveSettings();
-            }));
-
-    new Setting(containerEl)
-        .setName('Hide recurrence filter buttons')
-        .setDesc('When enabled, the Daily/Weekly/Monthly filter buttons in the header will be hidden')
-        .addToggle(toggle => toggle
-            .setValue(this.plugin.settings.hideRecurrenceFilterChips || false)
-            .onChange(async (value) => {
-                this.plugin.settings.hideRecurrenceFilterChips = value;
-                await this.plugin.saveSettings();
-                
                 const view = this.app.workspace.getLeavesOfType('card-sidebar')[0]?.view;
                 if (view) {
                     try {
@@ -4026,8 +3850,18 @@ class CardSidebarSettingTab extends PluginSettingTab {
                         const old = main?.querySelector('.card-sidebar-header');
                         if (old) old.remove();
                         if (main) view.createHeader(main);
-                    } catch (e) { console.error('Error refreshing header after hideRecurrenceFilterChips change', e); }
+                    } catch (e) { console.error('Error refreshing header after disableTimeBasedFiltering change', e); }
                 }
+            }));
+
+    new Setting(containerEl)
+        .setName('Hide time-based add buttons in right-click menu')
+        .setDesc('When enabled, the Today / Tomorrow / This Week items are hidden from the card context menu')
+        .addToggle(toggle => toggle
+            .setValue(this.plugin.settings.hideTimeBasedAddButtonsInContextMenu || false)
+            .onChange(async (value) => {
+                this.plugin.settings.hideTimeBasedAddButtonsInContextMenu = value;
+                await this.plugin.saveSettings();
             }));
 
     new Setting(containerEl)
@@ -4190,30 +4024,14 @@ class CardSidebarSettingTab extends PluginSettingTab {
         addRow.style.marginTop = '8px';
 
         const addBtn = addRow.createEl('button');
-        addBtn.textContent = 'Add category';
+        addBtn.textContent = 'Add Filter';
         addBtn.addEventListener('click', async () => {
             if (!Array.isArray(this.plugin.settings.customCategories)) this.plugin.settings.customCategories = [];
             this.plugin.settings.customCategories.push({ id: 'cat-' + Date.now(), label: 'New', showInMenu: true });
             await this.plugin.saveSettings();
             renderCategories();
         });
-
-        const presetBtn = addRow.createEl('button');
-        presetBtn.textContent = 'Add presets';
-        presetBtn.addEventListener('click', async () => {
-            const presets = [
-                { id: 'today', label: 'Today', showInMenu: true },
-                { id: 'tomorrow', label: 'Tomorrow', showInMenu: true },
-                { id: 'this_week', label: 'This Week', showInMenu: true },
-                { id: 'backlog', label: 'Backlog', showInMenu: true }
-            ];
-            this.plugin.settings.customCategories = (Array.isArray(this.plugin.settings.customCategories) ? this.plugin.settings.customCategories : []).concat(presets);
-            await this.plugin.saveSettings();
-            renderCategories();
-        });
-
         addRow.appendChild(addBtn);
-        addRow.appendChild(presetBtn);
     };
 
     try { renderCategories(); } catch (e) { console.error('Error rendering custom categories UI:', e); }
@@ -4223,9 +4041,9 @@ class CardSidebarSettingTab extends PluginSettingTab {
         const buildOptions = () => {
             const opts = [
                 { value: 'all', label: 'All' },
-                { value: 'daily', label: 'Daily' },
-                { value: 'weekly', label: 'Weekly' },
-                { value: 'monthly', label: 'Monthly' }
+                { value: 'today', label: 'Today' },
+                { value: 'Tomorrow', label: 'Tomorrow' },
+                { value: 'This Week', label: 'This Week' }
             ];
             const cats = Array.isArray(this.plugin.settings.customCategories) ? this.plugin.settings.customCategories : [];
             cats.forEach(c => {
@@ -4542,6 +4360,36 @@ class CardSidebarPlugin extends Plugin {
                 try { this.showFirstRunTutorial(); } catch (e) { console.error('Error showing first-run tutorial:', e); }
             }
         } catch (e) { }
+
+        // Track local date changes and move items from 'tomorrow' to 'today' when date rolls over
+        try {
+            // Initialize last check time to current hour
+            const now = new Date();
+            this._lastCheckHour = now.getHours();
+            
+            // Check every minute for date/time transitions
+            this._dateCheckInterval = setInterval(async () => {
+                try {
+                    const now = new Date();
+                    const currentHour = now.getHours();
+                    
+                    // If we've crossed midnight (e.g. from hour 23 to 0)
+                    if (this._lastCheckHour === 23 && currentHour === 0) {
+                        console.log('sidecards: Midnight detected, running date transition...');
+                        try { 
+                            await this._handleDateChange(); 
+                            new Notice('Cards have been updated for the new day');
+                        } catch (e) { 
+                            console.error('Error handling date change:', e); 
+                        }
+                    }
+                    
+                    this._lastCheckHour = currentHour;
+                } catch (e) {
+                    console.error('Error in date check interval:', e);
+                }
+            }, 60 * 1000); // Check every minute
+        } catch (e) { console.error('Error setting up date rollover checker:', e); }
     }
 
     // Initialize plugin settings with defaults for colors, animations, and card behavior
@@ -4575,11 +4423,12 @@ class CardSidebarPlugin extends Plugin {
             groupTags: true,
             disableFilterButtons: false, 
             hideArchivedFilterButton: false,
-            enableCustomCategories: false,
-            hideRecurrenceInContextMenu: false,
-            hideRecurrenceFilterChips: false,
-            
-            customCategories: [],
+            enableCustomCategories: true,
+            disableTimeBasedFiltering: false,
+            hideTimeBasedAddButtonsInContextMenu: false,
+            customCategories: [
+                { id: 'backlog', label: 'Backlog', showInMenu: true }
+            ],
             sortMode: 'manual', 
             sortAscending: true, 
             manualOrder: [],
@@ -4591,6 +4440,101 @@ class CardSidebarPlugin extends Plugin {
             saveKey: 'enter',
             cards: []
         }, await this.loadData());
+    }
+
+    // Move cards from 'tomorrow' category into 'today' category on local date change
+    async _handleDateChange() {
+        try {
+            const cats = Array.isArray(this.settings.customCategories) ? this.settings.customCategories : [];
+            // Find a 'today' category id if present (by id or label)
+            let todayCat = cats.find(c => String(c.id || '').toLowerCase() === 'today' || String(c.label || '').toLowerCase().includes('today'));
+            const todayId = todayCat ? todayCat.id : 'today';
+
+            // Identify category ids that represent 'tomorrow' and 'this week'
+            const tomorrowIds = cats.filter(c => String(c.id || '').toLowerCase() === 'tomorrow' || String(c.label || '').toLowerCase().includes('tomorrow')).map(c => c.id);
+            const thisWeekIds = cats.filter(c => String(c.id || '').toLowerCase() === 'this_week' || String(c.label || '').toLowerCase().includes('this week')).map(c => c.id);
+
+            // Get current date for this week calculations
+            const now = new Date();
+            const isMonday = now.getDay() === 1;
+
+            let changed = false;
+            if (Array.isArray(this.settings.cards)) {
+                await Promise.all(this.settings.cards.map(async card => {
+                    try {
+                        const cat = String(card.category || '').toLowerCase();
+                        let newCategory = null;
+                        
+                        // Handle tomorrow -> today transition
+                        if (cat === 'tomorrow' || (tomorrowIds.length > 0 && tomorrowIds.includes(card.category))) {
+                            newCategory = todayId;
+                        }
+                        // Handle this week -> today transition on Monday
+                        // else if (isMonday && (cat === 'this_week' || (thisWeekIds.length > 0 && thisWeekIds.includes(card.category)))) {
+                        //     newCategory = todayId;
+                        // }
+
+                        if (newCategory) {
+                            card.category = newCategory;
+                            changed = true;
+
+                            // Update the frontmatter in the note file if it exists
+                            if (card.notePath) {
+                                try {
+                                    const file = this.app.vault.getAbstractFileByPath(card.notePath);
+                                    if (file) {
+                                        let content = await this.app.vault.read(file);
+                                        const fmMatch = content.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n/);
+                                        if (fmMatch) {
+                                            let fm = fmMatch[1];
+                                            const regex = /^(\s*Category\s*:).*$/mi;
+                                            if (regex.test(fm)) {
+                                                fm = fm.replace(regex, `$1 "${newCategory}"`);
+                                            } else {
+                                                fm = fm + `\nCategory: "${newCategory}"`;
+                                            }
+                                            const newFmFull = `---\n${fm}\n---\n`;
+                                            content = content.replace(fmMatch[0], newFmFull);
+                                            console.debug('sidecards: modify (date change category) ->', file.path);
+                                            await this.app.vault.modify(file, content);
+                                        }
+                                    }
+                                } catch (e) {
+                                    console.error('Error updating note frontmatter during date change:', e);
+                                }
+                            }
+                        }
+                    } catch (e) {
+                        console.error('Error processing card during date change:', e);
+                    }
+                }));
+            }
+
+            if (changed) {
+                try { await this.saveSettings(); } catch (e) { console.error('Error saving settings after date rollover category update:', e); }
+
+                // Show notification about transitions
+                new Notice('Cards have been moved to Today based on date change');
+
+                // Refresh any open views
+                try {
+                    const leaves = this.app.workspace.getLeavesOfType('card-sidebar');
+                    leaves.forEach(l => {
+                        try {
+                            const view = l.view;
+                            if (view && typeof view.loadCards === 'function') {
+                                try { view.loadCards(); } catch (e) {}
+                            }
+                            if (view && typeof view.applyFilters === 'function') {
+                                try { view.applyFilters(); } catch (e) {}
+                            }
+                        } catch (e) {}
+                    });
+                } catch (e) {}
+            }
+        } catch (e) {
+            console.error('Error in _handleDateChange:', e);
+        }
     }
 
     showFirstRunTutorial() {
@@ -4757,7 +4701,6 @@ class CardSidebarPlugin extends Plugin {
                     }
 
                     const tags = [];
-                    let recurrence = 'none';
                     let created = new Date().toISOString();
                     let archived = false;
                     let parsedColorVar = null;
@@ -4785,24 +4728,18 @@ class CardSidebarPlugin extends Plugin {
                             }
                         } catch (e) {  }
 
-                        const recMatch = fm.match(/^\s*Recurrence:\s*(.*)$/mi);
-                        if (recMatch) recurrence = recMatch[1].trim();
                         const createdMatch = fm.match(/^\s*Created-Date:\s*(.*)$/mi);
                         if (createdMatch) created = createdMatch[1].trim();
                         if (/^\s*archived:\s*true$/mi.test(fm)) archived = true;
 
                         
                         try {
-                            const catIdMatch = fm.match(/^\s*Category-ID\s*:\s*(.*)$/mi);
                             const catLabelMatch = fm.match(/^\s*Category\s*:\s*(.*)$/mi);
-                            let catVal = null;
-                            if (catIdMatch && catIdMatch[1]) catVal = String(catIdMatch[1]).trim().replace(/^"|"$/g, '');
-                            else if (catLabelMatch && catLabelMatch[1]) catVal = String(catLabelMatch[1]).trim().replace(/^"|"$/g, '');
-                            if (catVal) {
+                            if (catLabelMatch && catLabelMatch[1]) {
+                                const catVal = String(catLabelMatch[1]).trim().replace(/^"|"$/g, '');
                                 const cats = Array.isArray(this.settings.customCategories) ? this.settings.customCategories : [];
                                 const found = cats.find(x => String(x.id || '').toLowerCase() === String(catVal).toLowerCase() || String(x.label || '').toLowerCase() === String(catVal).toLowerCase());
-                                if (found) parsedCategoryId = found.id || String(found.label || catVal);
-                                else parsedCategoryId = catVal;
+                                parsedCategoryId = found ? (found.label || String(found.id || catVal)) : catVal;
                             }
                         } catch (e) {}
 
@@ -4837,7 +4774,6 @@ class CardSidebarPlugin extends Plugin {
                         color: parsedColorVar || `var(--card-color-1)`,
                         tags,
                         category: parsedCategoryId || null,
-                        recurrence,
                         created,
                         archived: archived || false,
                         pinned: false,
@@ -4892,6 +4828,12 @@ class CardSidebarPlugin extends Plugin {
 
     onunload() {
         console.log('Unloading Card Sidebar plugin');
+        try {
+            if (this._dateCheckInterval) {
+                clearInterval(this._dateCheckInterval);
+                this._dateCheckInterval = null;
+            }
+        } catch (e) {}
     }
 }
 

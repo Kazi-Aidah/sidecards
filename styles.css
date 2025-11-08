@@ -17,7 +17,7 @@
 /* Header */
 .card-sidebar-header {
   background: var(--background-primary);
-  padding: 8px 12px;
+  padding: 0;
   font-size: 12px;
   font-weight: bold;
   display: flex;
@@ -25,6 +25,11 @@
   align-items: center;
   position: relative;
   margin-bottom: 0;
+}
+
+.filter-group {
+   padding: 8px 12px !important;
+   margin: 0px !important;
 }
 
 .card-sidebar-header .header-border {
@@ -306,24 +311,7 @@
   border-color: var(--text-normal);
 }
 
-.card-recurrence-menu {
-  background: var(--background-primary);
-  border: 1px solid var(--background-modifier-border);
-  border-radius: 4px;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
-}
 
-.card-recurrence-menu div {
-  padding: 8px 12px;
-  cursor: pointer;
-  font-size: 13px;
-  color: var(--text-normal);
-  transition: background 0.1s ease;
-}
-
-.card-recurrence-menu div:hover {
-  background: var(--background-modifier-hover);
-}
 
 /* Tag Modal */
 .card-tag-modal {
