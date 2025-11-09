@@ -6,9 +6,10 @@ class CardSidebarView extends ItemView {
         super(leaf);
         this.plugin = plugin;
         this.cards = [];
-    this.activeFilters = { query: '', tags: [] };
+        this.activeFilters = { query: '', tags: [] };
         this._pendingTagWrites = {};
         this._reapplyingTags = {};
+        this._universalCardOrder = [];  // Store complete universal order across all views
     }
 
     // Convert hex color codes to RGBA for card background transparency
@@ -500,15 +501,19 @@ class CardSidebarView extends ItemView {
 
                                 await new Promise(r => setTimeout(r, 20));
 
-                                if (chip.type === 'archived') {
-                                    await this.loadCards(true);
-                                } else {
-                                    await this.loadCards(false);
+                                this._isViewSwitch = true;
+                                try {
+                                    if (chip.type === 'archived') {
+                                        await this.loadCards(true);
+                                    } else {
+                                        await this.loadCards(false);
+                                    }
+
+                                    try { if (typeof this.applyFilters === 'function') this.applyFilters(); } catch (e) {}
+                                    try { this.animateCardsEntrance({ duration: 300, offset: 28 }); } catch (e) {}
+                                } finally {
+                                    this._isViewSwitch = false;
                                 }
-
-                                try { if (typeof this.applyFilters === 'function') this.applyFilters(); } catch (e) {}
-
-                                try { this.animateCardsEntrance({ duration: 300, offset: 28 }); } catch (e) {}
                             } finally {
                                 try { this.hideLoadingOverlay(300); } catch (e) {}
                             }
@@ -532,10 +537,15 @@ class CardSidebarView extends ItemView {
 
                             await new Promise(r => setTimeout(r, 20));
 
-                            if (chip.type === 'archived') {
-                                await this.loadCards(true);
-                            } else {
-                                await this.loadCards(false);
+                            this._isViewSwitch = true;
+                            try {
+                                if (chip.type === 'archived') {
+                                    await this.loadCards(true);
+                                } else {
+                                    await this.loadCards(false);
+                                }
+                            } finally {
+                                this._isViewSwitch = false;
                             }
 
                             try { if (typeof this.applyFilters === 'function') this.applyFilters(); } catch (e) {}
@@ -1672,37 +1682,110 @@ class CardSidebarView extends ItemView {
 
     reindexCardsFromDOM() {
         try { console.log('sidecards: reindexCardsFromDOM start', { settingsSortMode: this.plugin && this.plugin.settings ? this.plugin.settings.sortMode : null }); } catch (e) {}
+        
+        // Get ALL cards and current universal order
+        const allCards = this.plugin.settings.cards || [];
+        const existingUniversalOrder = this._universalCardOrder || this.plugin.settings.manualOrder || [];
+        
+        // Get the current visible card order from DOM
         const domIds = [...this.cardsContainer.querySelectorAll('.card-sidebar-card')].map(el => el.dataset.id);
-        const newOrder = [];
+        const draggedOrder = [];
         domIds.forEach(id => {
             const found = this.cards.find(c => c.id === id);
-            if (found) newOrder.push(found);
+            if (found) draggedOrder.push(found);
         });
+        
+        // Build a map of all paths (including archived and non-archived)
+        const allPaths = new Set();
+        allCards.forEach(card => {
+            if (card.notePath) allPaths.add(card.notePath);
+        });
+        this.cards.forEach(card => {
+            if (card.notePath) allPaths.add(card.notePath);
+        });
+        
+        // Update universal order:
+        // 1. Reflect changes from current drag operation
+        // 2. Preserve order of non-visible cards
+        // 3. Ensure ALL cards are included
+        const newUniversalOrder = [];
+        const processedPaths = new Set();
+        
+        // First add dragged cards in their new order
+        draggedOrder.forEach(card => {
+            if (card.notePath) {
+                newUniversalOrder.push(card.notePath);
+                processedPaths.add(card.notePath);
+            }
+        });
+        
+        // Then preserve order of non-dragged cards from existing universal order
+        existingUniversalOrder.forEach(path => {
+            if (path && !processedPaths.has(path) && allPaths.has(path)) {
+                newUniversalOrder.push(path);
+                processedPaths.add(path);
+            }
+        });
+        
+        // Finally add any remaining paths not yet ordered
+        allPaths.forEach(path => {
+            if (!processedPaths.has(path)) {
+                newUniversalOrder.push(path);
+                processedPaths.add(path);
+            }
+        });
+
+        try { console.log('sidecards: reindexCardsFromDOM -> saving unified path order', { 
+            draggedCount: draggedOrder.length,
+            totalCards: allCards.length,
+            thisCards: this.cards.length,
+            universalPaths: newUniversalOrder.length,
+            order: newUniversalOrder 
+        }); } catch (e) {}
+
+        // Save the universal order that includes ALL cards
+        this._universalCardOrder = newUniversalOrder;
+        
+        // Only update plugin settings manual order if this is a real drag operation
+        // (not just a view switch)
+        if (draggedOrder.length > 0) {
+            this.plugin.settings.manualOrder = newUniversalOrder;
+            if (this.plugin && typeof this.plugin.saveSettings === 'function') {
+                this.plugin.saveSettings();
+            }
+        }
+
+        // Update current visible card order while preserving all cards
         try {
-            const others = this.cards.filter(c => !domIds.includes(c.id));
+            // Get cards that weren't part of the drag
+            const nonDraggedCards = this.cards.filter(c => !domIds.includes(c.id));
+            
             if (this.plugin && this.plugin.settings && this.plugin.settings.sortMode === 'manual') {
-                this.cards = newOrder.concat(others);
+                // For manual mode:
+                // 1. Start with dragged cards in their new order
+                // 2. Add non-dragged cards in their universal order
+                const orderedNonDragged = nonDraggedCards.sort((a, b) => {
+                    const aIdx = newUniversalOrder.indexOf(a.notePath);
+                    const bIdx = newUniversalOrder.indexOf(b.notePath);
+                    if (aIdx === -1) return 1;
+                    if (bIdx === -1) return -1;
+                    return aIdx - bIdx;
+                });
+                this.cards = draggedOrder.concat(orderedNonDragged);
             } else {
-                const pinned = newOrder.filter(c => c.pinned);
-                const unpinned = newOrder.filter(c => !c.pinned);
-                this.cards = pinned.concat(unpinned).concat(others);
+                // For non-manual modes, respect pinning:
+                const draggedPinned = draggedOrder.filter(c => c.pinned);
+                const draggedUnpinned = draggedOrder.filter(c => !c.pinned);
+                const otherPinned = nonDraggedCards.filter(c => c.pinned);
+                const otherUnpinned = nonDraggedCards.filter(c => !c.pinned);
+                this.cards = [...draggedPinned, ...otherPinned, ...draggedUnpinned, ...otherUnpinned];
             }
         } catch (e) {
-            this.cards = newOrder.concat(this.cards.filter(c => !domIds.includes(c.id)));
+            console.error('Error updating card order:', e);
+            // Fallback: Preserve drag order while keeping all cards
+            this.cards = draggedOrder.concat(this.cards.filter(c => !domIds.includes(c.id)));
         }
-        try {
-            // Convert DOM IDs to file paths for stable manual order
-            const manualOrder = domIds.map(id => {
-                const card = this.cards.find(c => c.id === id);
-                return card ? card.notePath : null;
-            }).filter(path => path !== null);
-
-            try { console.log('sidecards: reindexCardsFromDOM -> saving path order', { manualOrder }); } catch (e) {}
-            this.plugin.settings.manualOrder = manualOrder;
-            if (this.plugin && typeof this.plugin.saveSettings === 'function') this.plugin.saveSettings();
-        } catch (e) {
-            console.error('Error saving manual order paths:', e);
-        }
+        
         this.saveCards();
     }
 
@@ -1766,35 +1849,81 @@ class CardSidebarView extends ItemView {
 
             // Apply sort based on mode
             if (mode === 'manual') {
-                const manualOrder = (this.plugin && this.plugin.settings && this.plugin.settings.manualOrder) || [];
-
-                // Always use saved manual order when switching back to manual mode
-                if (manualOrder && manualOrder.length > 0) {
-                    console.log("Restoring manual order from saved paths");
+                // Use universal order if available, otherwise fall back to settings
+                const universalOrder = this._universalCardOrder || 
+                                     (this.plugin && this.plugin.settings && this.plugin.settings.manualOrder) || [];
+                
+                // Get complete list of all paths for current view context
+                const allCurrentViewPaths = new Set(this.cards.map(c => c.notePath).filter(Boolean));
+                
+                if (universalOrder && universalOrder.length > 0) {
+                    console.log("Restoring universal manual order");
                     
-                    // Create new array maintaining saved order 
+                    // Create new array maintaining saved order for current view
                     const newCardOrder = [];
                     const unmatchedCards = [...this.cards];
                     
-                    // Restore the saved path order
-                    manualOrder.forEach(path => {
-                        if (!path) return; // Skip null/undefined paths
+                    // Debug manual order path matching
+                    try {
+                        console.log("=== Manual Order Path Matching Debug ===");
+                        console.log("Manual order paths:", universalOrder);
+                        console.log("Current cards:", unmatchedCards);
+                        console.log("New card order:", newCardOrder);
+                    } catch (e) {}
+                    
+                    // First add cards that exist in universal order
+                    universalOrder.forEach(path => {
+                        if (!path) return;
+                        if (!allCurrentViewPaths.has(path)) return; // Skip paths not in current view
+                        
                         const cardIndex = unmatchedCards.findIndex(c => c.notePath === path);
                         if (cardIndex !== -1) {
                             newCardOrder.push(unmatchedCards[cardIndex]);
                             unmatchedCards.splice(cardIndex, 1);
+                            try {
+                                console.log("Path", path, "matched card:", newCardOrder[newCardOrder.length - 1]);
+                            } catch (e) {}
+                        } else {
+                            try {
+                                console.log("⚠️ No card found for path:", path);
+                            } catch (e) {}
                         }
                     });
                     
-                    // Add any new cards to the end
-                    this.cards = [...newCardOrder, ...unmatchedCards];
+                    // Add any remaining cards in current view that weren't in universal order
+                    if (unmatchedCards.length > 0) {
+                        try {
+                            console.log("Unmatched cards:", unmatchedCards);
+                        } catch (e) {}
+                        newCardOrder.push(...unmatchedCards);
+                    }
+                    
+                    try {
+                        console.log("================================");
+                    } catch (e) {}
+                    
+                    // Update current view's cards while preserving universal order
+                    this.cards = newCardOrder;
+                    
+                    // Only update universal order if this wasn't a view switch
+                    if (!this._isViewSwitch) {
+                        this._universalCardOrder = universalOrder;
+                    }
+                    
                     console.log("Manual order restored -", newCardOrder.length, "matched cards,", unmatchedCards.length, "new cards");
                 } else {
-                    // No saved order - use current order as initial manual order
-                    console.log("No saved manual order - saving current order");
-                    this.plugin.settings.manualOrder = this.cards
+                    // No saved order - initialize universal order
+                    console.log("Initializing universal manual order");
+                    const newUniversalOrder = this.cards
                         .map(c => c.notePath)
-                        .filter(path => path !== null);
+                        .filter(Boolean);
+                    
+                    this._universalCardOrder = newUniversalOrder;
+                    
+                    // Only update settings if not switching views
+                    if (!this._isViewSwitch) {
+                        this.plugin.settings.manualOrder = newUniversalOrder;
+                    }
                 }
 
                 // Update DOM order to match card order
@@ -1989,6 +2118,31 @@ class CardSidebarView extends ItemView {
         }
     }
 
+    debugManualOrderMatching(newCardOrder, currentCards, manualOrder) {
+        console.log("=== Manual Order Path Matching Debug ===");
+        console.log("Manual order paths:", manualOrder);
+        console.log("Current cards:", currentCards.map(c => ({ id: c.id, path: c.notePath })));
+        console.log("New card order:", newCardOrder.map(c => ({ id: c.id, path: c.notePath })));
+        
+        // Debug path matching
+        manualOrder.forEach((path, index) => {
+            const matchedCard = currentCards.find(c => c.notePath === path);
+            if (matchedCard) {
+                console.log(`Path ${path} matched card:`, { id: matchedCard.id, path: matchedCard.notePath });
+            } else {
+                console.log(`⚠️ No card found for path: ${path}`);
+            }
+        });
+        
+        // Debug unmatched cards
+        const unmatchedCards = currentCards.filter(c => !manualOrder.includes(c.notePath));
+        if (unmatchedCards.length > 0) {
+            console.log("Unmatched cards:", unmatchedCards.map(c => ({ id: c.id, path: c.notePath })));
+        }
+        
+        console.log("================================");
+    }
+
     formatTimestamp(dateISO) {
         const fmt = (this.plugin.settings.datetimeFormat || 'YYYY-MM-DD HH:mm').trim();
         try {
@@ -2076,19 +2230,32 @@ class CardSidebarView extends ItemView {
         });
     }
 
-    applyFilters() {
+    applyFilters(skipAnimation = false) {
         try {
+            const startTime = performance.now();
+            console.log("🔍 Applying filters - current cards:", this.cards.length);
+            const isManualSort = this.plugin && this.plugin.settings && this.plugin.settings.sortMode === 'manual';
+            const universalManualOrder = isManualSort ? (this.plugin.settings.manualOrder || []) : [];
+            
+            if (isManualSort) {
+                console.log("📌 Manual sort mode active - using universal order", {
+                    orderLength: universalManualOrder.length,
+                    samplePaths: universalManualOrder.slice(0, 3)
+                });
+            }
+
+            // First collect all visible cards
+            const visibleCards = [];
             const q = (this.activeFilters && this.activeFilters.query) ? String(this.activeFilters.query).trim().toLowerCase() : '';
             const tags = (this.activeFilters && Array.isArray(this.activeFilters.tags)) ? this.activeFilters.tags.slice() : [];
             const showPinnedOnly = !!(this.plugin && this.plugin.settings && this.plugin.settings.showPinnedOnly);
             const catFilter = (this.currentCategoryFilter || null);
-            const toAnimate = [];
+            
             (this.cards || []).forEach(c => {
                 try {
                     if (!c || !c.element) return;
                     let visible = true;
 
-                    
                     if (showPinnedOnly && !c.pinned) visible = false;
                     if (tags && tags.length > 0) {
                         for (const tg of tags) {
@@ -2128,17 +2295,82 @@ class CardSidebarView extends ItemView {
                     } catch (e) {}
 
                     if (visible) {
-                        c.element.style.display = '';
-                        toAnimate.push(c.element);
-                    } else {
-                        c.element.style.display = 'none';
+                        visibleCards.push(c);
                     }
+                    c.element.style.display = 'none'; // Hide all initially
                 } catch (e) { }
             });
-            try { this.animateCardsEntrance(); } catch (e) { }
+
+            // Sort visible cards if in manual mode
+            if (isManualSort && visibleCards.length > 0) {
+                console.log("🔄 Sorting filtered cards by universal manual order");
+                
+                // Debug manual order matching before sort
+                try {
+                    this.debugManualOrderMatching(visibleCards, visibleCards, universalManualOrder);
+                } catch (e) {
+                    console.error("Error in debug logging:", e);
+                }
+                
+                visibleCards.sort((a, b) => {
+                    // Pinned cards always go to top regardless of manual order
+                    if (a.pinned && !b.pinned) return -1;
+                    if (!a.pinned && b.pinned) return 1;
+                    
+                    // For cards with same pinned status, use universal manual order
+                    if (a.notePath && b.notePath) {
+                        const aIndex = universalManualOrder.indexOf(a.notePath);
+                        const bIndex = universalManualOrder.indexOf(b.notePath);
+                        
+                        // Both cards are in manual order
+                        if (aIndex !== -1 && bIndex !== -1) {
+                            return aIndex - bIndex;
+                        }
+                        
+                        // Handle cards not in manual order
+                        if (aIndex !== -1) return -1; // Only a is in order
+                        if (bIndex !== -1) return 1;  // Only b is in order
+                    }
+                    
+                    // Fallback to created date for cards not in manual order
+                    return (new Date(b.created || 0)) - (new Date(a.created || 0));
+                });
+                
+                // Log sort results
+                console.log("✅ Sorted cards:", visibleCards.map(c => ({
+                    id: c.id,
+                    path: c.notePath,
+                    orderIndex: c.notePath ? universalManualOrder.indexOf(c.notePath) : -1,
+                    pinned: !!c.pinned
+                })));
+            }
+
+            // Show visible cards in correct order
+            visibleCards.forEach(c => {
+                if (c.element) {
+                    if (this.cardsContainer && c.element.parentNode !== this.cardsContainer) {
+                        this.cardsContainer.appendChild(c.element);
+                    }
+                    c.element.style.display = '';
+                }
+            });
+
+            const endTime = performance.now();
+            console.log(`🎯 Filter applied: ${visibleCards.length} visible cards${isManualSort ? ' (preserving manual order)' : ''}`);
+            console.log(`⚡ Filter operation took ${Math.round(endTime - startTime)}ms`);
+            
+            if (!skipAnimation) {
+                try { this.animateCardsEntrance(); } catch (e) { }
+            }
         } catch (err) {
             console.error('Error in applyFilters:', err);
         }
+    }
+
+    // Dedicated function for full reload when needed
+    async reloadCards() {
+        console.log("🔄 Performing full card reload");
+        await this.loadCards(this._lastLoadArchived || false);
     }
 
     createSearchBar(container) {
