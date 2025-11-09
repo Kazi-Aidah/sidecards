@@ -1,14 +1,26 @@
 const { Plugin, ItemView, Setting, PluginSettingTab, Modal, Menu, Notice, setIcon, MarkdownView } = require('obsidian');
 
 // View component for the sidebar that manages card state and UI interactions
+// Helper method for array operations
+Array.prototype.removeAll = function(predicate) {
+    for (let i = this.length - 1; i >= 0; i--) {
+        if (predicate(this[i])) {
+            this.splice(i, 1);
+        }
+    }
+};
+
 class CardSidebarView extends ItemView {
     constructor(leaf, plugin) {
         super(leaf);
         this.plugin = plugin;
         this.cards = [];
-    this.activeFilters = { query: '', tags: [] };
+        this.activeFilters = { query: '', tags: [] };
         this._pendingTagWrites = {};
         this._reapplyingTags = {};
+        // manual lock prevents automated re-sorts from clobbering a user-driven manual order
+        this._manualLock = false;
+        this._manualLockUntil = 0;
     }
 
     // Convert hex color codes to RGBA for card background transparency
@@ -475,6 +487,9 @@ class CardSidebarView extends ItemView {
 
                 btn.addEventListener('click', async () => {
                     
+                    // Do not automatically overwrite saved manualOrder when toggling filters.
+                    // Manual order should only change on explicit reorder (drag/drop) or pin/unpin actions.
+
                     filterGroup.querySelectorAll('.card-filter-btn').forEach(b => {
                         b.removeClass('active');
                         b.style.backgroundColor = 'var(--background-primary)';
@@ -589,8 +604,9 @@ class CardSidebarView extends ItemView {
                 .filter(el => el && el.style && el.style.display !== 'none');
             if (!els || els.length === 0) return;
 
-            const duration = options.duration != null ? options.duration : 260;
-            const stagger = options.stagger != null ? options.stagger : 28;
+            // Make the entrance slightly slower by default and reduce snappiness
+            const duration = options.duration != null ? options.duration : 360; // was 260
+            const stagger = options.stagger != null ? options.stagger : 34; // was 28
             const offsetPx = options.offset != null ? Number(options.offset) : 28;
             
             els.forEach(el => {
@@ -605,11 +621,14 @@ class CardSidebarView extends ItemView {
 
             void this.cardsContainer.offsetHeight;
 
+            // Original linear stagger: delay increases uniformly per item so the
+            // first items start slightly before later ones. This matches the
+            // behavior from the referenced oldmain.js.
             els.forEach((el, i) => {
                 const delay = i * stagger;
                 setTimeout(() => {
                     try {
-                        const transitions = [`transform ${duration}ms cubic-bezier(.2,.8,.2,1)`];
+                        const transitions = [`transform ${duration}ms ease-out`];
                         if (!this.plugin.settings.disableCardFadeIn) {
                             transitions.push(`opacity ${duration}ms ease-out`);
                         }
@@ -652,7 +671,7 @@ class CardSidebarView extends ItemView {
             }
 
             const duration = opts.duration != null ? opts.duration : 260;
-            const easing = opts.easing || 'cubic-bezier(.2,.8,.2,1)';
+            const easing = opts.easing || 'ease-out';
             const stagger = opts.stagger != null ? opts.stagger : 20;
             const entranceOffset = opts.offset != null ? Number(opts.offset) : 28;
 
@@ -716,6 +735,7 @@ class CardSidebarView extends ItemView {
             
             void this.cardsContainer.offsetHeight;
 
+            // Use the original linear stagger for FLIP entrance (match oldmain.js)
             ids.forEach((id, i) => {
                 const el = elById.get(id);
                 if (!el) return;
@@ -890,7 +910,7 @@ class CardSidebarView extends ItemView {
             
             els.forEach(el => {
                 try {
-                    el.style.transition = `opacity ${duration}ms ease`;
+                    el.style.transition = `opacity ${duration}ms ease-out`;
                     el.style.opacity = '1';
                 } catch (e) { }
             });
@@ -1206,17 +1226,13 @@ class CardSidebarView extends ItemView {
                     if (this.plugin.settings.sortMode === m.key) item.setChecked(true);
                     item.onClick(async () => {
                         try {
-                            const currentMode = this.plugin.settings.sortMode;
-                            const newMode = m.key;
-                            // If selecting the same mode, do nothing
-                            if (currentMode === newMode) return;
-                            
-                            this.plugin.settings.sortMode = newMode;
-                            if (this.plugin.saveSettings) await this.plugin.saveSettings();
-                            if (typeof this.applySort === 'function') {
-                                try { console.log('sidecards: calling applySort (sort menu selection)', { from: currentMode, to: newMode }); } catch (e) {}
-                                await this.applySort(newMode, this.plugin.settings.sortAscending);
+                            if (this.plugin.settings.sortMode === 'manual' && m.key !== 'manual') {
+                                this.plugin.settings.manualOrder = (this.cards || []).map(c => c.id);
+                                if (this.plugin.saveSettings) this.plugin.saveSettings();
                             }
+                            this.plugin.settings.sortMode = m.key;
+                            if (this.plugin.saveSettings) this.plugin.saveSettings();
+                            if (typeof this.applySort === 'function') await this.applySort(m.key, this.plugin.settings.sortAscending);
                         } catch (err) { console.error('Error applying sort mode', err); }
                     });
                 });
@@ -1230,15 +1246,7 @@ class CardSidebarView extends ItemView {
                     try {
                         this.plugin.settings.sortAscending = !this.plugin.settings.sortAscending;
                         if (this.plugin.saveSettings) this.plugin.saveSettings();
-                        if (typeof this.applySort === 'function') {
-                            try { 
-                                console.log('sidecards: calling applySort (toggle sort direction)', { 
-                                    mode: this.plugin.settings.sortMode,
-                                    ascending: this.plugin.settings.sortAscending 
-                                }); 
-                            } catch (e) {}
-                            await this.applySort(this.plugin.settings.sortMode || 'manual', this.plugin.settings.sortAscending);
-                        }
+                        if (typeof this.applySort === 'function') await this.applySort(this.plugin.settings.sortMode || 'manual', this.plugin.settings.sortAscending);
                     } catch (err) { console.error('Error toggling sort direction', err); }
                 });
             });
@@ -1322,13 +1330,42 @@ class CardSidebarView extends ItemView {
 
             // Get the first sentence (up to the period)
             const firstSentence = (content.split('.')[0] || content).trim();
-            let title = firstSentence;
             const timestamp = new Date();
-            let fileName = `${title.replace(/[^a-zA-Z0-9\s]/g, ' ').trim()} ${timestamp.getHours().toString().padStart(2, '0')}${timestamp.getMinutes().toString().padStart(2, '0')}`;
-            let filePath = folder ? `${folder}/${fileName}.md` : `${fileName}.md`;
-            if (await this.app.vault.adapter.exists(filePath)) {
-                fileName += `-${Date.now()}`;
-                filePath = folder ? `${folder}/${fileName}.md` : `${fileName}.md`;
+            const timeStampStr = `${timestamp.getHours().toString().padStart(2, '0')}${timestamp.getMinutes().toString().padStart(2, '0')}`;
+            // Normalize title to a safe filename base (dash-separated, lowercase)
+            const baseName = (firstSentence.replace(/[^a-zA-Z0-9]/g, '-').toLowerCase() || `card-${Date.now()}`);
+            let fileName = `${baseName}-${timeStampStr}.md`;
+            let filePath = folder ? `${folder}/${fileName}` : fileName;
+
+            // Try to find and reuse an existing matching file in the folder (case-insensitive normalized)
+            try {
+                const prefix = folder && folder !== '/' ? (folder.endsWith('/') ? folder : folder + '/') : '';
+                const all = this.app.vault.getAllLoadedFiles() || [];
+                for (const f of all) {
+                    if (!f.path || !f.path.toLowerCase().endsWith('.md')) continue;
+                    if (prefix && !f.path.startsWith(prefix)) continue;
+                    const candidate = f.path.split('/').pop().replace(/\.md$/i, '').toLowerCase();
+                    if (candidate === baseName || candidate.startsWith(baseName + '-')) {
+                        filePath = f.path;
+                        console.debug('sidecards: reusing existing file for addCardFromInput ->', filePath);
+                        break;
+                    }
+                }
+            } catch (e) {
+                console.error('Error searching for existing matching files (addCardFromInput):', e);
+            }
+
+            // If no matching reuse and exact target exists, append deterministic suffix instead of relying on adapter
+            try {
+                if (this.app.vault.adapter && typeof this.app.vault.adapter.exists === 'function') {
+                    const exists = await this.app.vault.adapter.exists(filePath);
+                    if (exists) {
+                        const ts = `${baseName}-${Date.now()}`;
+                        filePath = folder ? `${folder}/${ts}.md` : `${ts}.md`;
+                    }
+                }
+            } catch (e) {
+                console.error('Error checking existing file before addCardFromInput create:', e);
             }
 
             const createdDate = new Date(cardData.created);
@@ -1526,6 +1563,7 @@ class CardSidebarView extends ItemView {
                 if (this.cardsContainer && this.cardsContainer.firstChild) this.cardsContainer.insertBefore(card, this.cardsContainer.firstChild);
             } catch (e) { }
             this.cards.unshift(cardData);
+            try { console.log('sidecards: createCard -> created pinned card', { id: cardData.id }); } catch (e) {}
         } else {
             this.cards.push(cardData);
         }
@@ -1644,6 +1682,7 @@ class CardSidebarView extends ItemView {
         });
 
         card.addEventListener('dragend', () => {
+            try { console.log('sidecards: dragend for card', { id: card.dataset.id }); } catch (e) {}
             card.classList.remove('dragging');
             this.reindexCardsFromDOM();
         });
@@ -1662,6 +1701,7 @@ class CardSidebarView extends ItemView {
             });
 
             this.cardsContainer.addEventListener('drop', (e) => {
+                try { console.log('sidecards: drop event on cardsContainer'); } catch (e) {}
                 e.preventDefault();
                 this.reindexCardsFromDOM();
             });
@@ -1670,40 +1710,74 @@ class CardSidebarView extends ItemView {
         }
     }
 
-    reindexCardsFromDOM() {
-        try { console.log('sidecards: reindexCardsFromDOM start', { settingsSortMode: this.plugin && this.plugin.settings ? this.plugin.settings.sortMode : null }); } catch (e) {}
-        const domIds = [...this.cardsContainer.querySelectorAll('.card-sidebar-card')].map(el => el.dataset.id);
-        const newOrder = [];
-        domIds.forEach(id => {
-            const found = this.cards.find(c => c.id === id);
-            if (found) newOrder.push(found);
+    async reindexCardsFromDOM() {
+        // Diagnostic: log entry and current sortMode
+        try { console.log('sidecards: reindexCardsFromDOM start', { settingsSortMode: this.plugin?.settings?.sortMode, isManualMode: this.plugin?.settings?.sortMode === 'manual' }); } catch (e) {}
+
+        // Only proceed if we're in manual mode
+        if (this.plugin?.settings?.sortMode !== 'manual') {
+            try { console.log('sidecards: reindexCardsFromDOM -> aborting because sortMode !== manual', { sortMode: this.plugin?.settings?.sortMode }); } catch (e) {}
+            return;
+        }
+
+        // Get the current order from the DOM, but only of visible cards
+        const domIds = [...this.cardsContainer.querySelectorAll('.card-sidebar-card')]
+            .filter(el => el.style.display !== 'none')
+            .map(el => el.dataset.id);
+
+        try { console.log('sidecards: reindexCardsFromDOM -> domIds', { domIds }); } catch (e) {}
+
+        // Keep track of original positions of all cards before reordering
+        const currentCards = new Map(this.cards.map((card, index) => [card.id, index]));
+        
+        // Build new order based on DOM-visible ids, preserving relative order for hidden cards
+        const orderedVisible = domIds.map(id => this.cards.find(c => c.id === id)).filter(Boolean);
+        const hidden = this.cards.filter(c => !domIds.includes(c.id));
+        // Keep hidden in their original relative order
+        hidden.sort((a, b) => {
+            return currentCards.get(a.id) - currentCards.get(b.id);
         });
+
+        // Combine visible (user-ordered) then hidden (original order)
+        this.cards = [...orderedVisible, ...hidden];
+
+        // Save the new order to settings only if it actually changed
         try {
-            const others = this.cards.filter(c => !domIds.includes(c.id));
-            if (this.plugin && this.plugin.settings && this.plugin.settings.sortMode === 'manual') {
-                this.cards = newOrder.concat(others);
+            const newOrder = this.cards.map(c => c.id);
+            const oldOrder = Array.isArray(this.plugin?.settings?.manualOrder) ? this.plugin.settings.manualOrder : [];
+            const same = oldOrder.length === newOrder.length && oldOrder.every((v, i) => v === newOrder[i]);
+            if (!same) {
+                this.plugin.settings.manualOrder = newOrder;
+                console.log('sidecards: reindexCardsFromDOM -> manualOrder changed, saving', { manualOrder: newOrder });
+                await this.plugin.saveSettings();
+                await this.saveCards();
+                // Set a short manual lock to prevent automated re-sorts from overwriting
+                // the user's explicit drag/drop ordering. The duration is configurable
+                // via plugin.settings.manualLockMs (fallback to 3000 ms).
+                try {
+                    const lockMs = (this.plugin && this.plugin.settings && this.plugin.settings.manualLockMs) || 3000;
+                    this._manualLock = true;
+                    this._manualLockUntil = Date.now() + lockMs;
+                    try { new Notice('Sidecards: manual order saved'); } catch (e) {}
+                    console.log('sidecards: reindexCardsFromDOM -> manual lock set', { lockMs, until: this._manualLockUntil });
+                } catch (e) { console.error('sidecards: error setting manual lock after reindex', e); }
             } else {
-                const pinned = newOrder.filter(c => c.pinned);
-                const unpinned = newOrder.filter(c => !c.pinned);
-                this.cards = pinned.concat(unpinned).concat(others);
+                console.log('sidecards: reindexCardsFromDOM -> manualOrder unchanged, no save');
             }
         } catch (e) {
-            this.cards = newOrder.concat(this.cards.filter(c => !domIds.includes(c.id)));
+            console.error('Error saving manual order:', e);
         }
-        try {
-            // Convert DOM IDs to file paths for stable manual order
-            const manualOrder = domIds.map(id => {
-                const card = this.cards.find(c => c.id === id);
-                return card ? card.notePath : null;
-            }).filter(path => path !== null);
 
-            try { console.log('sidecards: reindexCardsFromDOM -> saving path order', { manualOrder }); } catch (e) {}
-            this.plugin.settings.manualOrder = manualOrder;
-            if (this.plugin && typeof this.plugin.saveSettings === 'function') this.plugin.saveSettings();
-        } catch (e) {
-            console.error('Error saving manual order paths:', e);
+        // Update DOM to match the new order, but only move visible cards
+        if (this.cardsContainer) {
+            this.cards.forEach(c => {
+                if (c.element && 
+                    c.element.parentNode === this.cardsContainer &&
+                    c.element.style.display !== 'none') {
+                    this.cardsContainer.appendChild(c.element);
+                }
+            });
         }
-        this.saveCards();
     }
 
     getDragAfterElement(container, y) {
@@ -1734,83 +1808,51 @@ class CardSidebarView extends ItemView {
 
     async applySort(mode = 'manual', ascending = true) {
         try {
-            // Store current mode before updating
-            const previousMode = this.plugin?.settings?.sortMode;
-            
-            // Debug logging
-            console.log("=== APPLYSORT START ===");
-            console.log("Previous mode:", previousMode);
-            console.log("New mode:", mode);
-            console.log("Ascending:", ascending);
-            
-            // Load state check
-            if (this._applySortLoadInProgress) {
-                if (!this._applySortLoadSeen) {
-                    this._applySortLoadSeen = true;
-                    console.log('sidecards: applySort allowing first call during load');
-                } else {
-                    console.log('sidecards: applySort suppressed during load (duplicate)');
+            try {
+                console.log('sidecards: applySort start', { mode, ascending, beforeOrder: (this.cards || []).map(c => c.id), settingsSortMode: this.plugin?.settings?.sortMode, settingsSortAscending: this.plugin?.settings?.sortAscending });
+            } catch (e) {}
+            // If the user recently performed a manual reorder, avoid automated re-sorts
+            // from clobbering their order. Allow manual-mode applySort to proceed so
+            // manual ordering can still be enforced, but skip non-manual sorts while locked.
+            try {
+                if (this._manualLock && Date.now() < (this._manualLockUntil || 0)) {
+                    if (mode !== 'manual') {
+                        console.log('sidecards: applySort -> manual lock active, skipping non-manual sort', { mode, lockUntil: this._manualLockUntil });
+                        return;
+                    } else {
+                        console.log('sidecards: applySort -> manual lock active but manual enforcement allowed', { mode });
+                    }
+                }
+            } catch (e) {}
+            // If plugin is configured to manual mode, reject any non-manual sort requests.
+            try {
+                if (this.plugin && this.plugin.settings && this.plugin.settings.sortMode === 'manual' && mode !== 'manual') {
+                    console.log('sidecards: applySort -> plugin in manual mode, refusing non-manual sort', { requestedMode: mode });
                     return;
                 }
-            }
+            } catch (e) {}
+            // (No automatic overwrite of manualOrder here; saves should occur on user actions.)
 
-            // Handle mode transition
-            if (previousMode === 'manual' && mode !== 'manual') {
-                console.log("Switching FROM manual mode - saving current order");
-                // Save current order before switching modes
-                this.plugin.settings.manualOrder = (this.cards || [])
-                    .map(c => c.notePath)
-                    .filter(path => path !== null);
-                await this.plugin.saveSettings();
-            }
-
-            // Apply sort based on mode
             if (mode === 'manual') {
-                const manualOrder = (this.plugin && this.plugin.settings && this.plugin.settings.manualOrder) || [];
-
-                // Always use saved manual order when switching back to manual mode
-                if (manualOrder && manualOrder.length > 0) {
-                    console.log("Restoring manual order from saved paths");
-                    
-                    // Create new array maintaining saved order 
-                    const newCardOrder = [];
-                    const unmatchedCards = [...this.cards];
-                    
-                    // Restore the saved path order
-                    manualOrder.forEach(path => {
-                        if (!path) return; // Skip null/undefined paths
-                        const cardIndex = unmatchedCards.findIndex(c => c.notePath === path);
-                        if (cardIndex !== -1) {
-                            newCardOrder.push(unmatchedCards[cardIndex]);
-                            unmatchedCards.splice(cardIndex, 1);
-                        }
-                    });
-                    
-                    // Add any new cards to the end
-                    this.cards = [...newCardOrder, ...unmatchedCards];
-                    console.log("Manual order restored -", newCardOrder.length, "matched cards,", unmatchedCards.length, "new cards");
-                } else {
-                    // No saved order - use current order as initial manual order
-                    console.log("No saved manual order - saving current order");
-                    this.plugin.settings.manualOrder = this.cards
-                        .map(c => c.notePath)
-                        .filter(path => path !== null);
-                }
-
-                // Update DOM order to match card order
-                if (this.cardsContainer) {
-                    // Remove all cards first
-                    this.cards.forEach(cardData => {
-                        if (cardData.element && cardData.element.parentNode === this.cardsContainer) {
-                            this.cardsContainer.removeChild(cardData.element);
-                        }
-                    });
-                    // Then add them back in the correct order
-                    this.cards.forEach(cardData => {
-                        if (cardData.element) {
-                            this.cardsContainer.appendChild(cardData.element);
-                        }
-                    });
+                const order = this.plugin?.settings?.manualOrder || [];
+                if (order && order.length > 0) {
+                    try {
+                        const cardMap = new Map(this.cards.map(card => [card.id, card]));
+                        const orderedCards = [];
+                        const usedIds = new Set();
+                        order.forEach(id => {
+                            const card = cardMap.get(id);
+                            if (card) {
+                                orderedCards.push(card);
+                                usedIds.add(id);
+                            }
+                        });
+                        const remainingCards = this.cards.filter(card => !usedIds.has(card.id));
+                        this.cards = [...orderedCards, ...remainingCards];
+                        console.log('sidecards: applySort -> manual order applied', { finalOrder: this.cards.map(c => c.id) });
+                    } catch (e) {
+                        console.error('Error applying strict manual order:', e);
+                    }
                 }
             } else if (mode === 'created') {
                 this.cards.sort((a, b) => {
@@ -1818,22 +1860,27 @@ class CardSidebarView extends ItemView {
                     const tb = this.parseDateToMs(b.created);
                     return ascending ? ta - tb : tb - ta;
                 });
+
             } else if (mode === 'modified') {
+                // Prefer file mtime when available, otherwise fall back to card.modified or card.created
                 const withTimes = await Promise.all(this.cards.map(async (c) => {
                     let mtime = 0;
                     try {
                         if (c.notePath) {
                             const file = this.app.vault.getAbstractFileByPath(c.notePath);
-                            if (file && file.stat && file.stat.mtime) mtime = file.stat.mtime;
-                            else if (file && file.mtime) mtime = file.mtime;
+                            if (file) {
+                                if (file.stat && file.stat.mtime) mtime = file.stat.mtime;
+                                else if (file.mtime) mtime = file.mtime;
+                            }
                         }
                     } catch (e) { }
-                    if (!mtime) mtime = this.parseDateToMs(c.created);
+                    if (!mtime) mtime = this.parseDateToMs(c.modified || c.created);
                     return { c, mtime };
                 }));
 
                 withTimes.sort((x, y) => ascending ? x.mtime - y.mtime : y.mtime - x.mtime);
                 this.cards = withTimes.map(x => x.c);
+
             } else if (mode === 'alpha') {
                 this.cards.sort((a, b) => {
                     const ta = (a.content || '').toLowerCase();
@@ -1844,44 +1891,44 @@ class CardSidebarView extends ItemView {
                 });
             }
 
-            // Always keep pinned cards at top unless in manual mode
-            if (mode !== 'manual') {
-                const pinned = this.cards.filter(c => c.pinned);
-                const unpinned = this.cards.filter(c => !c.pinned);
-                this.cards = pinned.concat(unpinned);
-            }
+            try {
+                if (mode !== 'manual') {
+                    const pinned = this.cards.filter(c => c.pinned);
+                    const unpinned = this.cards.filter(c => !c.pinned);
+                    this.cards = pinned.concat(unpinned);
+                }
+            } catch (e) { }
 
-            // Update DOM to reflect new order
-            if (this.cardsContainer) {
-                this.cards.forEach(cd => {
-                    if (cd.element && cd.element.parentNode === this.cardsContainer) {
-                        this.cardsContainer.appendChild(cd.element);
-                    }
-                });
-            }
+            try {
+                if (this.cardsContainer) {
+                    this.cards.forEach(cd => {
+                        if (cd.element && cd.element.parentNode === this.cardsContainer) this.cardsContainer.appendChild(cd.element);
+                    });
+                }
+            } catch (e) { }
+            try {
+                // Avoid saving settings during bulk load operations; saves should occur on
+                // user actions (drag/drop reindex) or when explicitly requested.
+                if (!this._bulkLoading) {
+                    if (this.plugin && this.plugin.saveSettings) await this.plugin.saveSettings();
+                    await this.saveCards();
+                } else {
+                    // Still update in-memory serial if needed but avoid writing to disk.
+                    try { this.plugin.settings.cards = (this.cards || []).map(c => ({ id: c.id, content: c.content, color: c.color, tags: c.tags || [], category: c.category || null, created: c.created, archived: c.archived || false, pinned: c.pinned || false, notePath: c.notePath || null })); } catch (e) {}
+                }
+            } catch (e) { console.error('sidecards: applySort saving error', e); }
 
-            // Save settings and manual order
-            await this.plugin.saveSettings();
-            await this.saveCards();
-            
-            if (mode === 'manual') {
-                // Update saved manual order with file paths
-                this.plugin.settings.manualOrder = (this.cards || [])
-                    .map(c => c.notePath)
-                    .filter(path => path !== null);
-                await this.plugin.saveSettings();
-            }
+            try { console.log('sidecards: applySort end', { mode, ascending, afterOrder: (this.cards || []).map(c => c.id), settingsSortMode: this.plugin?.settings?.sortMode, settingsSortAscending: this.plugin?.settings?.sortAscending }); } catch (e) {}
 
-            // Log final state for debugging
-            console.log("=== AFTER APPLYSORT ===");
-            console.log("Final card count:", this.cards.length);
-            console.log("Final manual order paths:", this.plugin?.settings?.manualOrder?.length || 0);
-            console.log("Final card IDs:", this.cards.map(c => c.id));
-            console.log("Final DOM card IDs:", Array.from(this.cardsContainer?.children || [])
-                .filter(el => el.classList.contains('card-sidebar-card'))
-                .map(el => el.dataset?.id));
-            console.log("=======================");
+            try {
+                // Log actual DOM order so we can compare in-memory order vs DOM
+                if (this.cardsContainer) {
+                    const domOrder = [...this.cardsContainer.querySelectorAll('.card-sidebar-card')].map(n => n.dataset.id);
+                    console.log('sidecards: applySort -> domOrder after append', { domOrder });
+                }
+            } catch (e) {}
 
+            // Do not auto-persist manualOrder here; it must only change on explicit user actions.
         } catch (err) {
             console.error('Error in applySort:', err);
         }
@@ -1964,21 +2011,53 @@ class CardSidebarView extends ItemView {
                         }
                     } else {
                         
-                        try {
-                            const folder = this.plugin.settings.storageFolder || '';
-                            const firstLine = (newContent || '').split('\n')[0] || 'card';
-                            let title = firstLine.slice(0, 30).trim();
-                            let fileName = `${title.replace(/[^a-zA-Z0-9]/g, '-').toLowerCase()}` || `card-${Date.now()}`;
-                            let filePath = folder ? `${folder}/${fileName}.md` : `${fileName}.md`;
-                            
-                            if (await this.app.vault.adapter.exists(filePath)) {
-                                fileName += `-${Date.now()}`;
-                                filePath = folder ? `${folder}/${fileName}.md` : `${fileName}.md`;
-                            }
-                            await this.app.vault.create(filePath, newContent);
-                            cardData.notePath = filePath;
-                            try { await this.saveCards(); } catch (e) {}
-                        } catch (e) { console.error('Error creating note for card content update:', e); }
+                            try {
+                                const folder = this.plugin.settings.storageFolder || '';
+                                const firstLine = (newContent || '').split('\n')[0] || 'card';
+                                let title = firstLine.slice(0, 30).trim();
+                                let baseName = `${title.replace(/[^a-zA-Z0-9]/g, '-').toLowerCase()}` || `card-${Date.now()}`;
+                                let filePath = folder ? `${folder}/${baseName}.md` : `${baseName}.md`;
+
+                                // Try to find an existing file in the same folder that matches the normalized base name
+                                // (case-insensitive). If found, reuse that file path so we don't create duplicates
+                                // and rely on adapter auto-rename behavior.
+                                try {
+                                    const prefix = folder && folder !== '/' ? (folder.endsWith('/') ? folder : folder + '/') : '';
+                                    const all = this.app.vault.getAllLoadedFiles() || [];
+                                    for (const f of all) {
+                                        if (!f.path || !f.path.toLowerCase().endsWith('.md')) continue;
+                                        if (prefix && !f.path.startsWith(prefix)) continue;
+                                        const candidate = f.path.split('/').pop().replace(/\.md$/i, '').toLowerCase();
+                                        if (candidate === baseName || candidate === baseName.replace(/-+/g, '-')) {
+                                            // reuse this path
+                                            filePath = f.path;
+                                            console.debug('sidecards: reusing existing file for updateCardContent ->', filePath);
+                                            break;
+                                        }
+                                    }
+                                } catch (e) {
+                                    console.error('Error searching for existing matching files (updateCardContent):', e);
+                                }
+
+                                // If no reuse found and the exact path exists, append deterministic suffix
+                                try {
+                                    if (this.app.vault.adapter && typeof this.app.vault.adapter.exists === 'function') {
+                                        const exists = await this.app.vault.adapter.exists(filePath);
+                                        if (exists) {
+                                            // If filePath already matches an existing file we didn't catch above,
+                                            // append a deterministic suffix rather than relying on adapter auto-rename.
+                                            const tsName = `${baseName}-${Date.now()}`;
+                                            filePath = folder ? `${folder}/${tsName}.md` : `${tsName}.md`;
+                                        }
+                                    }
+                                } catch (e) {
+                                    console.error('Error checking existing file before create (updateCardContent):', e);
+                                }
+
+                                await this.app.vault.create(filePath, newContent);
+                                cardData.notePath = filePath;
+                                try { await this.saveCards(); } catch (e) {}
+                            } catch (e) { console.error('Error creating note for card content update:', e); }
                     }
                 }
             } catch (e) {
@@ -2076,19 +2155,22 @@ class CardSidebarView extends ItemView {
         });
     }
 
-    applyFilters() {
+    async applyFilters() {
         try {
             const q = (this.activeFilters && this.activeFilters.query) ? String(this.activeFilters.query).trim().toLowerCase() : '';
             const tags = (this.activeFilters && Array.isArray(this.activeFilters.tags)) ? this.activeFilters.tags.slice() : [];
             const showPinnedOnly = !!(this.plugin && this.plugin.settings && this.plugin.settings.showPinnedOnly);
             const catFilter = (this.currentCategoryFilter || null);
-            const toAnimate = [];
+            const isManualMode = this.plugin?.settings?.sortMode === 'manual';
+            const savedOrder = new Map(this.plugin?.settings?.manualOrder?.map((id, index) => [id, index]) || []);
+
+            // First determine visibility for each card
+            const visibilityMap = new Map();
             (this.cards || []).forEach(c => {
                 try {
                     if (!c || !c.element) return;
                     let visible = true;
 
-                    
                     if (showPinnedOnly && !c.pinned) visible = false;
                     if (tags && tags.length > 0) {
                         for (const tg of tags) {
@@ -2101,40 +2183,109 @@ class CardSidebarView extends ItemView {
                         if (hay.indexOf(q) === -1 && tagText.indexOf(q) === -1) visible = false;
                     }
 
-                    try {
-                        if (catFilter) {
-                            const filterNorm = String(catFilter || '').toLowerCase();
-                            const cardCat = (c.category || '').toString().toLowerCase();
-                            let catMatch = false;
+                    if (catFilter) {
+                        const filterNorm = String(catFilter || '').toLowerCase();
+                        const cardCat = (c.category || '').toString().toLowerCase();
+                        let catMatch = false;
 
-                            // Direct match (covers id == id or label == label if stored that way)
-                            if (cardCat === filterNorm) {
-                                catMatch = true;
-                            } else {
-                                // Be tolerant: allow matching id<->label across settings
-                                const cats = Array.isArray(this.plugin.settings.customCategories) ? this.plugin.settings.customCategories : [];
-                                try {
-                                    const byId = cats.find(x => String(x.id || '').toLowerCase() === filterNorm);
-                                    if (byId && String(byId.label || '').toLowerCase() === cardCat) catMatch = true;
-                                } catch (e) {}
-                                try {
-                                    const byLabel = cats.find(x => String(x.label || '').toLowerCase() === filterNorm);
-                                    if (byLabel && String(byLabel.id || '').toLowerCase() === cardCat) catMatch = true;
-                                } catch (e) {}
-                            }
-
-                            if (!catMatch) visible = false;
+                        if (cardCat === filterNorm) {
+                            catMatch = true;
+                        } else {
+                            const cats = Array.isArray(this.plugin.settings.customCategories) ? this.plugin.settings.customCategories : [];
+                            try {
+                                const byId = cats.find(x => String(x.id || '').toLowerCase() === filterNorm);
+                                if (byId && String(byId.label || '').toLowerCase() === cardCat) catMatch = true;
+                            } catch (e) {}
+                            try {
+                                const byLabel = cats.find(x => String(x.label || '').toLowerCase() === filterNorm);
+                                if (byLabel && String(byLabel.id || '').toLowerCase() === cardCat) catMatch = true;
+                            } catch (e) {}
                         }
-                    } catch (e) {}
 
-                    if (visible) {
-                        c.element.style.display = '';
-                        toAnimate.push(c.element);
-                    } else {
-                        c.element.style.display = 'none';
+                        if (!catMatch) visible = false;
                     }
+
+                    visibilityMap.set(c.id, visible);
                 } catch (e) { }
             });
+
+            // Get current order before filtering
+            const currentOrder = this.cards.map(c => c.id);
+            
+            // Separate cards into visible and hidden while maintaining order
+            const visibleCards = [];
+            const hiddenCards = [];
+            
+            this.cards.forEach(c => {
+                if (visibilityMap.get(c.id)) {
+                    visibleCards.push(c);
+                } else {
+                    hiddenCards.push(c);
+                }
+            });
+
+            // Sort cards if in manual mode
+            if (isManualMode) {
+                const splitAndSort = (cards) => {
+                    // Split into pinned and unpinned but preserve relative order within each group
+                    const pinned = cards.filter(c => c.pinned);
+                    const unpinned = cards.filter(c => !c.pinned);
+
+                    // Sort each group by current order
+                    const sortByCurrentOrder = (cards) => {
+                        return cards.sort((a, b) => {
+                            const aIndex = currentOrder.indexOf(a.id);
+                            const bIndex = currentOrder.indexOf(b.id);
+                            if (aIndex === -1 && bIndex === -1) return 0;
+                            if (aIndex === -1) return 1;
+                            if (bIndex === -1) return -1;
+                            return aIndex - bIndex;
+                        });
+                    };
+
+                    const orderedPinned = sortByCurrentOrder(pinned);
+                    const orderedUnpinned = sortByCurrentOrder(unpinned);
+
+                    return [...orderedPinned, ...orderedUnpinned];
+                };
+
+                // Apply ordering to visible cards
+                const orderedVisible = splitAndSort(visibleCards);
+
+                // Apply visibility and reorder in DOM
+                if (this.cardsContainer) {
+                    // Hide non-visible cards
+                    hiddenCards.forEach(c => {
+                        if (c.element) c.element.style.display = 'none';
+                    });
+
+                    // Show and reorder visible cards
+                    orderedVisible.forEach(c => {
+                        if (c.element) {
+                            c.element.style.display = '';
+                            this.cardsContainer.appendChild(c.element);
+                        }
+                    });
+                }
+            } else {
+                // For non-manual mode, just apply visibility
+                visibleCards.forEach(c => {
+                    if (c.element) c.element.style.display = '';
+                });
+                hiddenCards.forEach(c => {
+                    if (c.element) c.element.style.display = 'none';
+                });
+            }
+
+            // Ensure the configured non-manual sort is enforced after filters
+            try {
+                if ((this.plugin && this.plugin.settings && this.plugin.settings.sortMode) && this.plugin.settings.sortMode !== 'manual') {
+                    console.log('sidecards: applyFilters -> enforcing sortMode after filters', { sortMode: this.plugin.settings.sortMode, sortAscending: this.plugin.settings.sortAscending });
+                    try { await this.applySort(this.plugin.settings.sortMode, this.plugin.settings.sortAscending); } catch (e) { console.error('sidecards: applyFilters reapply sort failed', e); }
+                }
+            } catch (e) {}
+
+            // Animate only after any sorting/reordering has finished and DOM is stable
             try { this.animateCardsEntrance(); } catch (e) { }
         } catch (err) {
             console.error('Error in applyFilters:', err);
@@ -2468,12 +2619,6 @@ class CardSidebarView extends ItemView {
             }
 
             await this.saveCards();
-            try {
-                if (this.plugin && this.plugin.settings && this.plugin.settings.sortMode === 'manual') {
-                    this.plugin.settings.manualOrder = (this.cards || []).map(c => c.id);
-                    if (typeof this.plugin.saveSettings === 'function') await this.plugin.saveSettings();
-                }
-            } catch (e) { }
         } catch (err) {
             console.error('Error updating card from note path:', notePath, err);
         }
@@ -2490,20 +2635,12 @@ class CardSidebarView extends ItemView {
             item.setTitle(cardData.pinned ? 'Unpin Card' : 'Pin Card')
                 .setIcon('pin')
                 .onClick(async () => {
+                    try {
+                        cardData.pinned = !cardData.pinned;
+                        console.log('sidecards: context menu pin toggle', { id: cardData.id, pinned: cardData.pinned });
+
+                        // Persist to note frontmatter if applicable
                         try {
-                            // Toggle pinned state
-                            const newPinnedState = !cardData.pinned;
-                            cardData.pinned = newPinnedState;
-                        
-                            // Update card ordering
-                            this.cards = this.cards.filter(c => c.id !== cardData.id);
-                            if (newPinnedState) {
-                                this.cards.unshift(cardData);
-                            } else {
-                                this.cards.push(cardData);
-                            }
-                        
-                            // Update note frontmatter if it exists
                             if (cardData.notePath) {
                                 const file = this.app.vault.getAbstractFileByPath(cardData.notePath);
                                 if (file) {
@@ -2511,54 +2648,48 @@ class CardSidebarView extends ItemView {
                                     const fmMatch = content.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n/);
                                     if (fmMatch) {
                                         let fm = fmMatch[1];
-                                        if (/^\s*pinned\s*:/mi.test(fm)) {
-                                            fm = fm.replace(/^\s*pinned\s*:.*$/mi, `pinned: ${newPinnedState}`);
+                                        if (/^\s*pinned\s*:/gmi.test(fm)) {
+                                            fm = fm.replace(/^\s*pinned\s*:.*$/gmi, `pinned: ${cardData.pinned ? 'true' : 'false'}`);
                                         } else {
-                                            fm = fm + `\npinned: ${newPinnedState}`;
+                                            fm = fm + '\n' + `pinned: ${cardData.pinned ? 'true' : 'false'}`;
                                         }
                                         const newFm = '---\n' + fm + '\n---\n';
                                         content = content.replace(fmMatch[0], newFm);
                                     } else {
-                                        // No existing frontmatter, create new
-                                        content = `---\npinned: ${newPinnedState}\n---\n\n${content}`;
+                                        const newFm = '---\n' + `pinned: ${cardData.pinned ? 'true' : 'false'}` + '\n---\n\n';
+                                        content = newFm + content;
                                     }
-                                    console.debug('sidecards: modify (pin toggle) ->', file.path);
+                                    console.debug('sidecards: modify (context pin) ->', file.path);
                                     await this.app.vault.modify(file, content);
                                 }
                             }
-
-                            // Update UI
-                            if (newPinnedState) {
-                                // Add pin indicator if needed
-                                if (!card.querySelector('.card-pin-indicator')) {
-                                    const pinEl = card.createDiv();
-                                    pinEl.addClass('card-pin-indicator');
-                                    pinEl.style.position = 'absolute';
-                                    pinEl.style.top = '6px';
-                                    pinEl.style.right = '8px';
-                                    pinEl.style.cursor = 'pointer';
-                                    pinEl.style.fontSize = '14px';
-                                    pinEl.title = 'Pinned';
-                                    try { setIcon(pinEl, 'pin'); } catch (e) { pinEl.textContent = '📌'; }
-                                    pinEl.style.color = 'var(--interactive-accent)';
-                                }
-                                // Move card to top
-                                if (this.cardsContainer && this.cardsContainer.firstChild) {
-                                    this.cardsContainer.insertBefore(card, this.cardsContainer.firstChild);
-                                }
-                            } else {
-                                // Remove pin indicator
-                                const indicator = card.querySelector('.card-pin-indicator');
-                                if (indicator) indicator.remove();
-                            }
-
-                            await this.saveCards();
-                            if (typeof this.applyFilters === 'function') this.applyFilters();
-
-                        } catch (error) {
-                            console.error('Error updating pinned state:', error);
-                            new Notice('Error updating pinned state');
+                        } catch (err) {
+                            console.error('Error updating pinned in note frontmatter (context):', err);
                         }
+
+                        // Save in-memory and settings
+                        await this.saveCards();
+
+                        // If in manual mode, update manualOrder
+                        try {
+                            if (this.plugin && this.plugin.settings && this.plugin.settings.sortMode === 'manual') {
+                                this.plugin.settings.manualOrder = (this.cards || []).map(c => c.id);
+                                if (typeof this.plugin.saveSettings === 'function') await this.plugin.saveSettings();
+                                // Protect the user's choice with a short manual lock
+                                try {
+                                    const lockMs = (this.plugin && this.plugin.settings && this.plugin.settings.manualLockMs) || 3000;
+                                    this._manualLock = true;
+                                    this._manualLockUntil = Date.now() + lockMs;
+                                    try { new Notice('Sidecards: manual order saved (pin change)'); } catch (e) {}
+                                    console.log('sidecards: context menu pin toggle -> manual lock set', { lockMs, until: this._manualLockUntil });
+                                } catch (e) { console.error('sidecards: error setting manual lock after pin toggle', e); }
+                            }
+                        } catch (e) { console.error('sidecards: error saving manualOrder after pin toggle', e); }
+
+                        if (typeof this.applyFilters === 'function') this.applyFilters();
+                    } catch (err) {
+                        console.error('Error toggling pin from context menu', err);
+                    }
                 });
         });
 
@@ -2642,7 +2773,7 @@ class CardSidebarView extends ItemView {
                 swatch.style.borderRadius = '50%';
                 swatch.style.backgroundColor = color.var;
                 swatch.style.cursor = 'pointer';
-                swatch.style.transition = 'transform 0.15s ease';
+                swatch.style.transition = 'transform 0.15s ease-out';
                 swatch.style.border = cardData.color === color.var 
                     ? '2px solid var(--text-accent)' 
                     : '1px solid var(--background-modifier-border)';
@@ -2885,88 +3016,179 @@ class CardSidebarView extends ItemView {
         menu.addSeparator();
 
         // Destructive actions at the bottom
-        menu.addItem((item) => {
+                menu.addItem((item) => {
             item.setTitle('Delete Card')
                 .setIcon('trash')
                 .onClick(async () => {
-                    console.log("🔴 DELETION STARTED - Card data:", { id: cardData.id, notePath: cardData.notePath });
+                    // First, remove the card from memory and UI to prevent race conditions
+                    this.cards = this.cards.filter(c => c !== cardData);
+                    try { await this.saveCards(); } catch (e) { console.error('Error saving cards after delete:', e); }
+                    try { card.remove(); } catch (e) {}
+
                     if (cardData.notePath) {
                         try {
-                            const file = this.app.vault.getAbstractFileByPath(cardData.notePath);
-                            if (file) {
-                                console.log("📝 Attempting to delete note file:", file.path);
-                                await this.app.vault.delete(file);
-                                console.log("✅ Note file deleted successfully:", file.path);
+                            const rawPath = String(cardData.notePath || '');
+                            
+                            // Pre-emptively add to recently deleted to prevent race conditions
+                            try {
+                                this._recentlyDeletedPaths = this._recentlyDeletedPaths || {};
+                                this._recentlyDeletedPaths[rawPath] = Date.now() + 10000; // Extended to 10 seconds
+                                
+                                // Also add alternate path format
+                                const altPath = rawPath.startsWith('/') ? rawPath.slice(1) : '/' + rawPath;
+                                this._recentlyDeletedPaths[altPath] = Date.now() + 10000;
+                            } catch (e) {}
+
+                            // First try direct vault API
+                            let file = this.app.vault.getAbstractFileByPath(rawPath);
+                            if (!file) {
+                                const altPath = rawPath.startsWith('/') ? rawPath.slice(1) : '/' + rawPath;
+                                file = this.app.vault.getAbstractFileByPath(altPath);
                             }
+
+                            if (file) {
+                                // Close any open editor leaves for this file
+                                try {
+                                    const allLeaves = this.app.workspace.getLeavesOfType ? 
+                                        this.app.workspace.getLeavesOfType('markdown') : 
+                                        this.app.workspace.getLeaves();
+                                        
+                                    for (const leaf of (allLeaves || [])) {
+                                        try {
+                                            const view = leaf.view;
+                                            if (view && view.file && view.file.path === file.path) {
+                                                await leaf.detach();
+                                            }
+                                        } catch (e) {}
+                                    }
+                                } catch (e) {}
+
+                                // Delete via vault API
+                                await this.app.vault.delete(file);
+                            } else {
+                                // Fallback to adapter if file not found via API
+                                if (this.app.vault.adapter && typeof this.app.vault.adapter.exists === 'function') {
+                                    const exists = await this.app.vault.adapter.exists(rawPath);
+                                    if (exists) {
+                                        await this.app.vault.adapter.remove(rawPath);
+                                    } else {
+                                        const altPath = rawPath.startsWith('/') ? rawPath.slice(1) : '/' + rawPath;
+                                        const existsAlt = await this.app.vault.adapter.exists(altPath);
+                                        if (existsAlt) {
+                                            await this.app.vault.adapter.remove(altPath);
+                                        }
+                                    }
+                                }
+                            }
+
+                            // Force a small delay to allow file system to sync
+                            await new Promise(resolve => setTimeout(resolve, 100));
+
                         } catch (err) {
                             console.error('Error deleting note:', err);
+                            new Notice('Error deleting note file');
                         }
                     }
-                    
-                    console.log("🗑️ Removing card from DOM and internal state");
-                    card.remove();
-                    this.cards = this.cards.filter(c => c !== cardData);
-                    await this.saveCards();
-                    console.log("💾 Card state saved, remaining cards:", this.cards.length);
                 });
-        });
-
+        });        // Show 'Archive Card' or 'Unarchive Card' depending on current archived state
         menu.addItem((item) => {
-            item.setTitle('Archive Card')
+            const isArchived = !!cardData.archived;
+            item.setTitle(isArchived ? 'Unarchive Card' : 'Archive Card')
                 .setIcon('archive')
                 .onClick(async () => {
                     try {
-                        console.log('Archiving card', cardData.id, 'notePath:', cardData.notePath);
-                        cardData.archived = true;
-                        await this.saveCards();
+                        const notePath = cardData.notePath;
 
-                        card.remove();
+                        if (isArchived) {
+                            // Unarchive
+                            console.log('Unarchiving card', cardData.id, 'notePath:', notePath);
+                            cardData.archived = false;
+                            await this.saveCards();
 
-                        if (cardData.notePath) {
+                            // If the user is currently viewing the Archived filter, remove the card element
+                            // so it disappears immediately from that view. Otherwise ensure the card is shown.
                             try {
-                                const file = this.app.vault.getAbstractFileByPath(cardData.notePath);
-                                if (file) {
-                                    let content = await this.app.vault.read(file);
-                                    
-                                    // Extract frontmatter if it exists
-                                    const fmMatch = content.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n/);
-                                    const restContent = fmMatch 
-                                        ? content.slice(fmMatch[0].length)
-                                        : content;
-                                    
-                                    let frontmatter = fmMatch ? fmMatch[1] : '';
-                                    
-                                    // Process existing frontmatter or create new
-                                    const frontmatterLines = frontmatter ? frontmatter.split(/\r?\n/) : [];
-                                    const archivedLine = 'archived: true';
-                                    
-                                    // Remove any existing archived lines
-                                    const cleanedLines = frontmatterLines.filter(line => !line.match(/^\s*archived\s*:/i));
-                                    
-                                    // Add archived line
-                                    cleanedLines.push(archivedLine);
-                                    
-                                    // Rebuild frontmatter block
-                                    const newFrontmatter = cleanedLines.join('\n');
-                                    const newContent = `---\n${newFrontmatter}\n---\n${restContent}`;
-                                    
-                                    console.debug('sidecards: modify (archive) ->', file.path);
-                                    await this.app.vault.modify(file, newContent);
-                                    console.log('Modified file to set archived flag:', cardData.notePath);
-                                    new Notice('Card archived and note updated');
+                                const viewingArchived = !!(this._lastLoadArchived || (this.currentCategoryFilter && String(this.currentCategoryFilter).toLowerCase() === 'archived'));
+                                if (viewingArchived) {
+                                    try { if (card && card.remove) card.remove(); } catch (e) {}
+                                    try { if (typeof this.applyFilters === 'function') this.applyFilters(); } catch (e) {}
                                 } else {
-                                    console.warn('Associated note file not found for path:', cardData.notePath);
-                                    new Notice('Card archived (no associated note found)');
+                                    try { if (card && card.style) card.style.display = ''; } catch (e) {}
                                 }
-                            } catch (err) {
-                                console.error('Error updating archived flag in note:', err);
-                                new Notice('Archived flag could not be written to note (see console)');
+                            } catch (e) {}
+
+                            // Update note frontmatter to remove archived flag
+                            if (notePath) {
+                                try {
+                                    const file = this.app.vault.getAbstractFileByPath(notePath);
+                                    if (file) {
+                                        let content = await this.app.vault.read(file);
+                                        const fmMatch = content.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n/);
+                                        const restContent = fmMatch ? content.slice(fmMatch[0].length) : content;
+                                        let frontmatter = fmMatch ? fmMatch[1] : '';
+
+                                        // Remove archived lines from frontmatter
+                                        const lines = frontmatter.split(/\r?\n/).filter(l => !/^\s*archived\s*:/i.test(l) && l.trim() !== '');
+                                        const newFmFull = '---\n' + (lines.length ? lines.join('\n') + '\n' : '') + '---\n';
+                                        const newContent = newFmFull + restContent;
+
+                                        console.debug('sidecards: modify (unarchive) ->', file.path);
+                                        await this.app.vault.modify(file, newContent);
+                                        new Notice('Card unarchived and note updated');
+                                    } else {
+                                        console.warn('Associated note file not found for unarchive:', notePath);
+                                        new Notice('Card unarchived (no associated note found)');
+                                    }
+                                } catch (err) {
+                                    console.error('Error updating note when unarchiving:', err);
+                                    new Notice('Error updating note frontmatter for unarchive (see console)');
+                                }
+                            } else {
+                                new Notice('Card unarchived');
                             }
                         } else {
-                            new Notice('Card archived');
+                            // Archive
+                            console.log('Archiving card', cardData.id, 'notePath:', notePath);
+                            cardData.archived = true;
+                            await this.saveCards();
+
+                            try { card.remove(); } catch (e) {}
+
+                            if (notePath) {
+                                try {
+                                    const file = this.app.vault.getAbstractFileByPath(notePath);
+                                    if (file) {
+                                        let content = await this.app.vault.read(file);
+                                        const fmMatch = content.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n/);
+                                        const restContent = fmMatch ? content.slice(fmMatch[0].length) : content;
+                                        let frontmatter = fmMatch ? fmMatch[1] : '';
+
+                                        const frontmatterLines = frontmatter ? frontmatter.split(/\r?\n/) : [];
+                                        const archivedLine = 'archived: true';
+                                        const cleanedLines = frontmatterLines.filter(line => !line.match(/^\s*archived\s*:/i));
+                                        cleanedLines.push(archivedLine);
+                                        const newFrontmatter = cleanedLines.join('\n');
+                                        const newContent = `---\n${newFrontmatter}\n---\n${restContent}`;
+
+                                        console.debug('sidecards: modify (archive) ->', file.path);
+                                        await this.app.vault.modify(file, newContent);
+                                        console.log('Modified file to set archived flag:', notePath);
+                                        new Notice('Card archived and note updated');
+                                    } else {
+                                        console.warn('Associated note file not found for path:', notePath);
+                                        new Notice('Card archived (no associated note found)');
+                                    }
+                                } catch (err) {
+                                    console.error('Error updating archived flag in note:', err);
+                                    new Notice('Archived flag could not be written to note (see console)');
+                                }
+                            } else {
+                                new Notice('Card archived');
+                            }
                         }
                     } catch (err) {
-                        console.error('Error archiving card:', err);
+                        console.error('Error archiving/unarchiving card:', err);
+                        new Notice('Error updating card archive status');
                     }
                 });
         });
@@ -3128,47 +3350,25 @@ class CardSidebarView extends ItemView {
 
     // Convert an in-memory card to a persistent Markdown note with frontmatter metadata
     async createNoteFromCard(cardData) {
-        console.log("🆕 createNoteFromCard called", { cardData: { id: cardData.id, content: cardData.content.slice(0, 50) + "..." } });
-        console.log("📍 Creation stack trace:", new Error().stack);
         try {
-            // Mark this as a user-initiated create
-            if (this.plugin) {
-                this.plugin._userInitiatedCreate = true;
-                setTimeout(() => {
-                    this.plugin._userInitiatedCreate = false;
-                }, 1000); // Reset after 1 second
-            }
             const firstLine = cardData.content.split('\n')[0] || cardData.content;
             const title = firstLine.slice(0, 30).trim();
-            const baseFileName = `${title.replace(/[^a-zA-Z0-9]/g, '-').toLowerCase()}.md`;
-            
-            // Check if a similar file was recently deleted
-            if (this.plugin && this.plugin._recentlyDeletedPaths) {
-                const normalizedBase = baseFileName.toLowerCase();
-                for (const deletedPath of this.plugin._recentlyDeletedPaths) {
-                    const deletedBaseName = deletedPath.split('/').pop().toLowerCase();
-                    if (deletedBaseName.replace(/\s+\d+/g, '') === normalizedBase.replace(/\s+\d+/g, '')) {
-                        console.log("🚫 Preventing creation of note similar to recently deleted file:", baseFileName);
-                        throw new Error("Cannot create note - similar file was recently deleted");
-                    }
+            const fileName = `${title.replace(/[^a-zA-Z0-9]/g, '-').toLowerCase()}.md`;
+            const folder = this.plugin.settings.storageFolder || '';
+            const prefix = folder && folder !== '/' ? (folder.endsWith('/') ? folder : folder + '/') : '';
+            let filePath = prefix ? `${prefix}${fileName}` : fileName;
+
+            // ensure folder exists if applicable
+            try {
+                if (prefix && this.app.vault.adapter && typeof this.app.vault.adapter.exists === 'function') {
+                    const folderExists = await this.app.vault.adapter.exists(folder);
+                    if (!folderExists) await this.app.vault.createFolder(folder);
                 }
+            } catch (e) {
+                console.error('Error ensuring storage folder exists in createNoteFromCard:', e);
             }
-            
-            const fileName = baseFileName;
-            let filePath;
-            
-            if (this.plugin.settings.storageFolder === '/') {
-                filePath = fileName;
-            } else {
-                const folder = this.plugin.settings.storageFolder;
-                if (!(await this.app.vault.adapter.exists(folder))) {
-                    await this.app.vault.createFolder(folder);
-                }
-                filePath = `${folder}/${fileName}`;
-            }
-            
+
             const created = this.formatTimestamp(new Date());
-            
             let tagArray = (cardData.tags || []).map(t => String(t).trim()).filter(t => t.length > 0);
             const tagsYaml = tagArray.length > 0 ? `Tags: [${tagArray.map(t => `"${String(t).replace(/"/g, '\\"')}"`).join(', ')}]` : 'Tags: []';
 
@@ -3188,7 +3388,6 @@ class CardSidebarView extends ItemView {
             const colorLine = colorKey ? `card-color: ${colorKey}` : '';
             const colorNameLine = colorLabel ? `card-color-name: "${String(colorLabel).replace(/"/g, '\\"')}"` : '';
 
-            
             let categoryBlock = '';
             try {
                 if (cardData.category) {
@@ -3200,35 +3399,89 @@ class CardSidebarView extends ItemView {
             } catch (e) { }
 
             const noteContent = `---\nCreated-Date: ${created}\n${tagsYaml}${colorLine ? '\n' + colorLine : ''}${colorNameLine ? '\n' + colorNameLine : ''}\n${categoryBlock}---\n\n${cardData.content}`;
-            
-            console.log("📄 About to create file", { filePath, contentPreview: noteContent.slice(0, 100) + "..." });
-            const file = await this.app.vault.create(filePath, noteContent);
-            console.log("✅ File created successfully:", file.path);
-            const leaf = this.app.workspace.getLeaf();
-            await leaf.openFile(file);
 
+            // Try to find an existing matching file (case-insensitive, normalized) and reuse it
             try {
-                cardData.notePath = file.path || filePath;
-                this.saveCards();
-            } catch (e) {
-            }
+                try {
+                    const all = this.app.vault.getAllLoadedFiles() || [];
+                    const desired = fileName.replace(/\.md$/i, '').toLowerCase();
+                    for (const f of all) {
+                        if (!f.path || !f.path.toLowerCase().endsWith('.md')) continue;
+                        if (prefix && !f.path.startsWith(prefix)) continue;
+                        const candidate = f.path.split('/').pop().replace(/\.md$/i, '').toLowerCase();
+                        if (candidate === desired || candidate === desired.replace(/-+/g, '-')) {
+                            filePath = f.path;
+                            console.debug('sidecards: reusing existing file for createNoteFromCard ->', filePath);
+                            break;
+                        }
+                    }
+                } catch (e) {
+                    console.error('Error searching for existing matching files (createNoteFromCard):', e);
+                }
 
-            new Notice(`Note created in ${this.plugin.settings.storageFolder || 'root folder'}`);
-        } catch (error) {
-            new Notice('Error creating note');
-            console.error('Error creating note:', error);
+                // If exact path still exists, append deterministic suffix instead of relying on adapter auto-rename
+                try {
+                    if (this.app.vault.adapter && typeof this.app.vault.adapter.exists === 'function') {
+                        const exists = await this.app.vault.adapter.exists(filePath);
+                        if (exists) {
+                            const baseName = fileName.replace(/\.md$/i, '');
+                            const tsName = `${baseName}-${Date.now()}`;
+                            const newFileName = `${tsName}.md`;
+                            filePath = prefix ? `${prefix}${newFileName}` : newFileName;
+                        }
+                    }
+                } catch (e) {
+                    console.error('Error checking existing file before createNoteFromCard:', e);
+                }
+
+                const file = await this.app.vault.create(filePath, noteContent);
+                const leaf = this.app.workspace.getLeaf();
+                await leaf.openFile(file);
+
+                try {
+                    cardData.notePath = file.path || filePath;
+                    await this.saveCards();
+                } catch (e) { }
+
+                new Notice(`Note created in ${this.plugin.settings.storageFolder || 'root folder'}`);
+            } catch (error) {
+                new Notice('Error creating note');
+                console.error('Error creating note:', error);
+            }
+        } catch (err) {
+            console.error('Unexpected error in createNoteFromCard:', err);
+            new Notice('Error creating note (see console)');
         }
     }
 
     async loadCards(showArchived = false) {
-        console.log("📥 loadCards called with showArchived:", showArchived, "Stack trace:", new Error().stack);
         try {
             this._bulkLoading = true;
             try { if (this.cardsContainer) this.cardsContainer.style.visibility = 'hidden'; } catch (e) {}
             if (this.cardsContainer) this.cardsContainer.empty();
-        } catch (e) {}
-
+            try { console.log('sidecards: loadCards start', { manualOrderFromSettings: this.plugin?.settings?.manualOrder, settingsCardsIds: (this.plugin?.settings?.cards || []).map(c => c.id) }); } catch (e) {}
+            
+            // Get current sort mode
+            const isManualMode = this.plugin?.settings?.sortMode === 'manual';
+            
+            // Store original order before loading if in manual mode (do not overwrite saved settings here)
+            let originalOrder = [];
+            if (isManualMode && this.cards && this.cards.length > 0) {
+                originalOrder = this.cards.map(c => c.id);
+                // Don't save this during bulk load — we only persist manualOrder when the user
+                // explicitly reorders via drag/drop (reindexCardsFromDOM).
+            }
+        } catch (e) {
+            console.error('Error initializing loadCards:', e);
+        }
+        
+        // remember whether this load was archived-only so other UI can reload if needed
         try { this._lastLoadArchived = !!showArchived; } catch (e) {}
+        
+    // Get the manual order from settings before clearing cards array
+    const manualOrder = this.plugin?.settings?.manualOrder || [];
+    // Create an efficient lookup map for manual order positions
+    const savedOrder = new Map(Array.isArray(manualOrder) ? manualOrder.map((id, index) => [id, index]) : []);
         this.cards = [];
         const folder = this.plugin.settings.storageFolder;
 
@@ -3251,9 +3504,11 @@ class CardSidebarView extends ItemView {
                                             else if (/^\s*archived:\s*false$/mi.test(fm_)) archivedFromNote = false;
                                         }
                                     }
-                                } catch (e) { }
+                                } catch (e) {  }
                             }
 
+                            
+                            // Only create cards that match the requested archived filter
                             try {
                                 if (Boolean(archivedFromNote) !== Boolean(showArchived)) {
                                     continue;
@@ -3286,25 +3541,61 @@ class CardSidebarView extends ItemView {
                 console.error('Error importing notes from storage folder during load:', e);
             }
 
-            // Apply saved sorting preference (mode + direction) so order persists across reloads
-                try {
-                const mode = (this.plugin && this.plugin.settings && this.plugin.settings.sortMode) || 'manual';
-                const asc = (this.plugin && this.plugin.settings && typeof this.plugin.settings.sortAscending !== 'undefined') ? !!this.plugin.settings.sortAscending : true;
-                try { console.log('sidecards: calling applySort (loadCards folder branch)', new Error().stack); } catch (e) {}
-                await this.applySort(mode, asc);
-            } catch (e) {
-                console.error('Error applying saved sort after folder-load:', e);
-            }
-
             this.refreshAllCardTimestamps();
             try { this.animateCardsEntrance(); } catch (e) {}
             try { if (this.cardsContainer) this.cardsContainer.style.visibility = ''; } catch (e) {}
-            try { this._applySortLoadInProgress = false; } catch (e) {}
+
+            // Ensure sorting is applied when using a storage folder path as well
+            try {
+                console.log('sidecards: loadCards (folder branch) -> applying sort', { sortMode: this.plugin?.settings?.sortMode, sortAscending: this.plugin?.settings?.sortAscending, manualOrderFromSettings: this.plugin?.settings?.manualOrder, settingsCardsIds: (this.plugin?.settings?.cards || []).map(c => c.id), currentCardsIds: (this.cards||[]).map(c=>c.id) });
+                await this.applySort(this.plugin.settings.sortMode || 'manual', this.plugin.settings.sortAscending != null ? this.plugin.settings.sortAscending : true);
+            } catch (e) { console.error('sidecards: error applying sort in folder branch', e); }
+
+            // Deferred enforcement for folder branch as well: re-apply manual order shortly
+            // after load to guard against async re-appends (vault events, imports, etc.).
+            try {
+                if (this.plugin && this.plugin.settings && this.plugin.settings.sortMode === 'manual') {
+                    setTimeout(async () => {
+                        try {
+                            console.log('sidecards: deferred applySort enforcing manual order (folder branch)');
+                            if (typeof this.applySort === 'function') await this.applySort('manual', this.plugin.settings.sortAscending != null ? this.plugin.settings.sortAscending : true);
+                            // Do NOT persist manualOrder here; only user actions should update saved manualOrder.
+                        } catch (e) { console.error('sidecards: deferred applySort error (folder branch)', e); }
+                    }, 120);
+                }
+            } catch (e) {}
+
+            // Extra strict enforcement: schedule a few re-applies of manual order after load
+            // to guard against late async re-appends from the vault or other plugins.
+            try {
+                if (this.plugin && this.plugin.settings && this.plugin.settings.sortMode === 'manual') {
+                    const schedule = [120, 600, 2000];
+                    schedule.forEach((ms) => {
+                        setTimeout(async () => {
+                            try {
+                                console.log('sidecards: strict deferred enforcement (folder branch)', { ms });
+                                // applySort('manual') will not persist manualOrder; it only enforces DOM order
+                                if (typeof this.applySort === 'function') await this.applySort('manual', this.plugin.settings.sortAscending != null ? this.plugin.settings.sortAscending : true);
+                                // set a brief manual lock to avoid races with other quick writes
+                                try {
+                                    const lockMs = (this.plugin && this.plugin.settings && this.plugin.settings.manualLockMs) || 3000;
+                                    this._manualLock = true;
+                                    this._manualLockUntil = Date.now() + lockMs;
+                                    console.log('sidecards: strict enforcement -> manual lock set', { lockMs, until: this._manualLockUntil });
+                                } catch (e) { }
+                            } catch (e) {
+                                console.error('sidecards: strict deferred enforcement error (folder branch)', e);
+                            }
+                        }, ms);
+                    });
+                }
+            } catch (e) {}
+
             this._bulkLoading = false;
             return;
-    }
+        }
 
-    const saved = this.plugin.settings.cards || [];
+        const saved = this.plugin.settings.cards || [];
         if (saved && saved.length > 0) {
             for (const savedCard of saved) {
                 try {
@@ -3354,8 +3645,14 @@ class CardSidebarView extends ItemView {
                     } catch (e) {}
                 } catch (err) { console.error('Error loading saved card', err); }
             }
+            try {
+                // Diagnostic: log cards loaded and manualOrder from settings
+                console.log('sidecards: loadCards -> after creating cards (non-folder)', {
+                    manualOrder: this.plugin?.settings?.manualOrder,
+                    cards: this.cards.map(c => ({ id: c.id, pinned: !!c.pinned }))
+                });
+            } catch (e) {}
         } else {
-            console.log("⚠️ No existing cards found - checking if sample cards should be created");
             const sampleCards = [
                 "Welcome to Card Sidebar! This is your quick note-taking space.",
                 "Right-click on cards to change colors, manage categories, or add tags.",
@@ -3363,53 +3660,137 @@ class CardSidebarView extends ItemView {
                 "Drag cards to reorder them."
             ];
 
-            console.log("🎴 Creating sample cards because no cards exist");
             sampleCards.forEach((card, index) => {
                 const colorVar = `var(--card-color-${(index % 10) + 1})`;
                 this.createCard(card, { color: colorVar });
             });
         }
 
-        try {
-            try { console.log('sidecards: calling applySort (loadCards end)', new Error().stack); } catch (e) {}
-            await this.applySort(this.plugin.settings.sortMode || 'manual', this.plugin.settings.sortAscending != null ? this.plugin.settings.sortAscending : true);
-        } catch (e) { }
+            try {
+                // Handle manual mode sorting
+                if (isManualMode) {
+                    const splitAndSort = (cards, orderList) => {
+                        // Split into pinned and unpinned
+                        const pinned = cards.filter(c => c.pinned);
+                        const unpinned = cards.filter(c => !c.pinned);
+                        
+                        // Define sort function using the provided order
+                        const sortByOrder = (cards, order) => {
+                            return cards.sort((a, b) => {
+                                const aIndex = order.indexOf(a.id);
+                                const bIndex = order.indexOf(b.id);
+                                // Put new cards at the end within their group
+                                if (aIndex === -1 && bIndex === -1) return 0;
+                                if (aIndex === -1) return 1;
+                                if (bIndex === -1) return -1;
+                                return aIndex - bIndex;
+                            });
+                        };
+
+                        // Sort each group separately
+                        const orderedPinned = sortByOrder(pinned, orderList);
+                        const orderedUnpinned = sortByOrder(unpinned, orderList);
+
+                        return [...orderedPinned, ...orderedUnpinned];
+                    };
+
+                    if (originalOrder.length > 0) {
+                        // Use the order from before filtering
+                        this.cards = splitAndSort(this.cards, originalOrder);
+                    } else if (savedOrder.size > 0) {
+                        // Fall back to saved order
+                        this.cards = splitAndSort(this.cards, manualOrder);
+                    }
+
+                    // NOTE: Do not persist manualOrder to settings here during load. Saved manualOrder
+                    // should only be updated when the user explicitly reorders cards (reindexCardsFromDOM
+                    // or other direct user actions). This avoids accidental overwrites when rebuilding
+                    // the view (filters, imports, etc.).
+                    try { console.log('sidecards: loadCards -> applied manual ordering (load-time), not persisting to settings', { appliedOrder: this.cards.map(c => c.id) }); } catch (e) {}
+                }
+                
+                // Always apply the selected sorting mode after cards are loaded.
+                // Add a debug log so we can diagnose cases where the wrong sort
+                // order (e.g. alphabetical) appears after reload.
+                try {
+                    console.log('sidecards: loadCards -> applying sort', {
+                        settingsSortMode: this.plugin?.settings?.sortMode,
+                        settingsSortAscending: this.plugin?.settings?.sortAscending,
+                        manualOrderSize: Array.isArray(this.plugin?.settings?.manualOrder) ? this.plugin.settings.manualOrder.length : 0,
+                        originalOrderSize: originalOrder ? originalOrder.length : 0,
+                        cardCount: this.cards.length
+                    });
+
+                    try { new Notice(`Sidecards: applying sort ${String(this.plugin?.settings?.sortMode || 'manual')} ${this.plugin?.settings?.sortAscending ? 'asc' : 'desc'}`); } catch (e) {}
+                } catch (e) {}
+
+                await this.applySort(this.plugin.settings.sortMode || 'manual',
+                                this.plugin.settings.sortAscending != null ? this.plugin.settings.sortAscending : true);
+            } catch (e) { 
+                console.error('Error applying sort in loadCards:', e);
+            }
+
+            // Deferred enforcement: some other operations (filters/imports/vault events)
+            // may re-append nodes after load. Re-apply manual ordering shortly after
+            // the load completes to ensure final DOM order matches the saved manual order.
+            try {
+                if (this.plugin && this.plugin.settings && this.plugin.settings.sortMode === 'manual') {
+                    setTimeout(async () => {
+                        try {
+                            console.log('sidecards: deferred applySort enforcing manual order');
+                            if (typeof this.applySort === 'function') await this.applySort('manual', this.plugin.settings.sortAscending != null ? this.plugin.settings.sortAscending : true);
+                            // Do NOT persist manualOrder here; only user actions should update saved manualOrder.
+                        } catch (e) { console.error('sidecards: deferred applySort error', e); }
+                    }, 120);
+                }
+            } catch (e) {}
+
+            // Extra strict enforcement: schedule a few re-applies of manual order after load
+            // to guard against late async re-appends from the vault or other plugins.
+            try {
+                if (this.plugin && this.plugin.settings && this.plugin.settings.sortMode === 'manual') {
+                    const schedule = [120, 600, 2000];
+                    schedule.forEach((ms) => {
+                        setTimeout(async () => {
+                            try {
+                                console.log('sidecards: strict deferred enforcement', { ms });
+                                if (typeof this.applySort === 'function') await this.applySort('manual', this.plugin.settings.sortAscending != null ? this.plugin.settings.sortAscending : true);
+                                try {
+                                    const lockMs = (this.plugin && this.plugin.settings && this.plugin.settings.manualLockMs) || 3000;
+                                    this._manualLock = true;
+                                    this._manualLockUntil = Date.now() + lockMs;
+                                    console.log('sidecards: strict enforcement -> manual lock set', { lockMs, until: this._manualLockUntil });
+                                } catch (e) { }
+                            } catch (e) { console.error('sidecards: strict deferred enforcement error', e); }
+                        }, ms);
+                    });
+                }
+            } catch (e) {}
+        
         this.refreshAllCardTimestamps();
-    try { this.animateCardsEntrance(); } catch (e) {}
-    // Reveal container now that only filtered cards will be visible
-    try { if (this.cardsContainer) this.cardsContainer.style.visibility = ''; } catch (e) {}
-    try { this._applySortLoadInProgress = false; } catch (e) {}
-    this._bulkLoading = false;
+        try { this.animateCardsEntrance(); } catch (e) {}
+        // Reveal container now that only filtered cards will be visible
+        try { if (this.cardsContainer) this.cardsContainer.style.visibility = ''; } catch (e) {}
+        this._bulkLoading = false;
     }
 
     async importNotesFromFolder(folder, silent = false, showArchived = false) {
-        console.log("📁 importNotesFromFolder called", { folder, silent, showArchived, stack: new Error().stack });
         if (!folder) return 0;
         try {
             const allFiles = this.app.vault.getAllLoadedFiles();
             const prefix = folder.endsWith('/') ? folder : folder + '/';
             const mdFiles = allFiles.filter(f => {
+                // Only include .md files that exist in the folder
                 if (!f.path || !f.path.startsWith(prefix) || !f.path.toLowerCase().endsWith('.md')) {
                     return false;
                 }
-                
-                // Check if this file was recently deleted
-                if (this.plugin && this.plugin._recentlyDeletedPaths) {
-                    const normalizedPath = f.path.toLowerCase();
-                    const baseName = f.path.split('/').pop().toLowerCase();
-                    
-                    for (const deletedPath of this.plugin._recentlyDeletedPaths) {
-                        const deletedBaseName = deletedPath.split('/').pop();
-                        if (deletedBaseName.replace(/\s+\d+/g, '') === baseName.replace(/\s+\d+/g, '')) {
-                            console.log("🚫 Skipping import of recently deleted file:", f.path);
-                            return false;
-                        }
-                    }
+                // Additional check to ensure file actually exists
+                try {
+                    return this.app.vault.adapter.exists(f.path);
+                } catch (e) {
+                    return false;
                 }
-                
-                return true;
             });
-            console.log("📄 Found markdown files in folder:", mdFiles.map(f => f.path));
 
             
 
@@ -3424,6 +3805,33 @@ class CardSidebarView extends ItemView {
 
             for (const file of mdFiles) {
                 try {
+                    // Skip files we very recently deleted to avoid re-import races
+                    try {
+                        if (this._recentlyDeletedPaths && this._recentlyDeletedPaths[file.path] && Date.now() < this._recentlyDeletedPaths[file.path]) continue;
+                        if (this._recentlyDeletedPaths) {
+                            for (const rp in this._recentlyDeletedPaths) {
+                                if (!this._recentlyDeletedPaths.hasOwnProperty(rp)) continue;
+                                try { if (Date.now() >= this._recentlyDeletedPaths[rp]) delete this._recentlyDeletedPaths[rp]; } catch (e) {}
+                            }
+                        }
+                    } catch (e) {}
+
+                    // Skip files that were very recently deleted by this view to avoid re-import races
+                    try {
+                        if (this._recentlyDeletedPaths && this._recentlyDeletedPaths[file.path] && Date.now() < this._recentlyDeletedPaths[file.path]) {
+                            // expired entries will be cleaned opportunistically below
+                            continue;
+                        }
+                        // cleanup expired entries occasionally
+                        if (this._recentlyDeletedPaths) {
+                            for (const rp in this._recentlyDeletedPaths) {
+                                if (!this._recentlyDeletedPaths.hasOwnProperty(rp)) continue;
+                                try {
+                                    if (Date.now() >= this._recentlyDeletedPaths[rp]) delete this._recentlyDeletedPaths[rp];
+                                } catch (e) {}
+                            }
+                        }
+                    } catch (e) {}
                     const path = file.path;
                     if (this.cards.find(c => c.notePath === path)) continue;
 
@@ -4558,69 +4966,8 @@ class FolderSuggest {
 class CardSidebarPlugin extends Plugin {
     async onload() {
         await this.loadSettings();
-    try { console.log('sidecards: onload loaded settings', { manualOrder: this.settings && this.settings.manualOrder, sortMode: this.settings && this.settings.sortMode, sortAscending: this.settings && this.settings.sortAscending }); } catch (e) {}
-    try { this._applySortLoadInProgress = true; this._applySortLoadSeen = false; } catch (e) {}
 
-            // Track recently deleted files to prevent auto-recreation
-            this._recentlyDeletedPaths = new Set();
-            
-            // Register file change watcher
-            this.registerEvent(
-                this.app.vault.on('delete', (file) => {
-                    console.log("📁 File delete event detected:", file.path);
-                    // Track deleted path for 5 seconds to prevent recreation
-                    const normalizedPath = file.path.toLowerCase();
-                    this._recentlyDeletedPaths.add(normalizedPath);
-                    setTimeout(() => {
-                        this._recentlyDeletedPaths.delete(normalizedPath);
-                    }, 5000);
-                })
-            );
-            
-            this.registerEvent(
-                this.app.vault.on('modify', (file) => {
-                    console.log("📝 File modify event detected:", file.path);
-                })
-            );
-            
-            this.registerEvent(
-                this.app.vault.on('create', async (file) => {
-                    console.log("➕ File create event detected:", file.path);
-                    
-                    // Skip if this is a user-initiated create
-                    if (this._userInitiatedCreate) {
-                        console.log("✨ Allowing user-initiated file creation:", file.path);
-                        return;
-                    }
-                    
-                    // Check if this is an auto-recreation of a recently deleted file
-                    const normalizedPath = file.path.toLowerCase();
-                    const baseName = file.path.split('/').pop().toLowerCase();
-                    
-                    // Check if any recently deleted file had a similar name
-                    for (const deletedPath of this._recentlyDeletedPaths) {
-                        const deletedBaseName = deletedPath.split('/').pop();
-                        if (deletedBaseName.replace(/\s+\d+/g, '') === baseName.replace(/\s+\d+/g, '')) {
-                            console.log("🚫 Preventing auto-recreation of recently deleted file:", file.path);
-                            
-                            // Add a small delay to avoid race conditions
-                            await new Promise(resolve => setTimeout(resolve, 50));
-                            
-                            // Double check file still exists before trying to delete
-                            try {
-                                const exists = await this.app.vault.adapter.exists(file.path);
-                                if (exists) {
-                                    await this.app.vault.delete(file);
-                                    console.log("✅ Successfully prevented auto-recreation");
-                                }
-                            } catch (e) {
-                                console.log("ℹ️ File already removed or inaccessible");
-                            }
-                            return;
-                        }
-                    }
-                })
-            );        
+        
         try {
             if (typeof this.applyGlobalStyles === 'function') this.applyGlobalStyles();
         } catch (e) { console.error('Error applying global styles on load:', e); }
@@ -4665,12 +5012,10 @@ class CardSidebarPlugin extends Plugin {
 
     
         if (this.settings.storageFolder && this.settings.storageFolder !== '/') {
-            console.log("📂 Checking storage folder for auto-import:", this.settings.storageFolder);
+            
             if (!this.settings.cards || this.settings.cards.length === 0) {
-                console.log("🔄 No cards in settings, will attempt auto-import when layout is ready");
                 this.app.workspace.onLayoutReady(async () => {
                     try {
-                        console.log("🔃 Layout ready - starting auto-import from folder");
                         await this.importNotesFromFolderToSettings(this.settings.storageFolder, true);
                         this._importedFromFolderOnLoad = true;
                     } catch (e) {
@@ -4691,37 +5036,6 @@ class CardSidebarPlugin extends Plugin {
             name: 'Open Card Sidebar',
             callback: () => {
                 this.activateView();
-            }
-        });
-
-        // Command to reset sorting (clear manual order and set default sort)
-        this.addCommand({
-            id: 'sidecards-reset-sorting',
-            name: 'SideCards: Reset Sorting to Default',
-            callback: async () => {
-                try {
-                    this.settings.manualOrder = [];
-                    this.settings.sortMode = 'manual';
-                    this.settings.sortAscending = true;
-                    await this.saveSettings();
-
-                    // Reapply to any open views
-                    const leaves = this.app.workspace.getLeavesOfType('card-sidebar');
-                    leaves.forEach(async (l) => {
-                        try {
-                            const view = l.view;
-                            if (view && typeof view.applySort === 'function') {
-                                try { console.log('sidecards: reset-sorting command calling applySort on view', new Error().stack); } catch (e) {}
-                                await view.applySort('manual', true);
-                            }
-                        } catch (e) {}
-                    });
-
-                    new Notice('SideCards sorting reset to default');
-                } catch (e) {
-                    console.error('Error resetting SideCards sorting:', e);
-                    new Notice('Failed to reset SideCards sorting (see console)');
-                }
             }
         });
 
@@ -5150,6 +5464,13 @@ class CardSidebarPlugin extends Plugin {
 
                     const content = body.trim() || '(empty)';
 
+                    // detect pinned flag in frontmatter when importing to settings
+                    let pinnedFlag = false;
+                    try {
+                        if (fm && /^\s*pinned\s*:\s*true$/gmi.test(fm)) pinnedFlag = true;
+                        if (fm && /^\s*pinned\s*:\s*false$/gmi.test(fm)) pinnedFlag = false;
+                    } catch (e) {}
+
                     createdSerial.push({
                         id: Date.now().toString() + Math.random().toString(36).slice(2, 8),
                         content,
@@ -5158,7 +5479,7 @@ class CardSidebarPlugin extends Plugin {
                         category: parsedCategoryId || null,
                         created,
                         archived: archived || false,
-                        pinned: false,
+                        pinned: pinnedFlag || false,
                         notePath: path
                     });
 
