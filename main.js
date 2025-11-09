@@ -1289,7 +1289,18 @@ class CardSidebarView extends ItemView {
 
         
         
-        var cardData = this.createCard(content);
+        // If the user is currently viewing a category filter, assign the new card to that category
+        let assignedCategory = null;
+        try {
+            const cf = (this.currentCategoryFilter || '').toString().trim().toLowerCase();
+            if (cf) {
+                const cats = Array.isArray(this.plugin.settings.customCategories) ? this.plugin.settings.customCategories : [];
+                const found = cats.find(x => String(x.id || '').toLowerCase() === cf || String(x.label || '').toLowerCase() === cf);
+                assignedCategory = found ? (found.label || found.id) : this.currentCategoryFilter;
+            }
+        } catch (e) { assignedCategory = this.currentCategoryFilter || null; }
+
+        var cardData = this.createCard(content, { category: assignedCategory });
         
         try {
             const folder = this.plugin.settings.storageFolder || '';
@@ -1330,7 +1341,8 @@ class CardSidebarView extends ItemView {
             const colorLine = colorKey ? `card-color: ${colorKey}` : '';
             const colorNameLine = colorLabel ? `card-color-name: "${String(colorLabel).replace(/"/g, '\\"')}"` : '';
 
-            const noteContent = `---\n${tagsYaml}${colorLine ? '\n' + colorLine : ''}${colorNameLine ? '\n' + colorNameLine : ''}\nCreated-Date: ${yamlDate}\n---\n\n${content}`;
+            const categoryLine = cardData.category ? ('\nCategory: ' + String(cardData.category).replace(/\n/g, ' ')) : '';
+            const noteContent = `---\n${tagsYaml}${colorLine ? '\n' + colorLine : ''}${colorNameLine ? '\n' + colorNameLine : ''}${categoryLine}\nCreated-Date: ${yamlDate}\n---\n\n${content}`;
 
             await this.app.vault.create(filePath, noteContent);
 
@@ -1994,8 +2006,27 @@ class CardSidebarView extends ItemView {
 
                     try {
                         if (catFilter) {
-                            const cid = (c.category || '').toLowerCase();
-                            if (cid !== String(catFilter).toLowerCase()) visible = false;
+                            const filterNorm = String(catFilter || '').toLowerCase();
+                            const cardCat = (c.category || '').toString().toLowerCase();
+                            let catMatch = false;
+
+                            // Direct match (covers id == id or label == label if stored that way)
+                            if (cardCat === filterNorm) {
+                                catMatch = true;
+                            } else {
+                                // Be tolerant: allow matching id<->label across settings
+                                const cats = Array.isArray(this.plugin.settings.customCategories) ? this.plugin.settings.customCategories : [];
+                                try {
+                                    const byId = cats.find(x => String(x.id || '').toLowerCase() === filterNorm);
+                                    if (byId && String(byId.label || '').toLowerCase() === cardCat) catMatch = true;
+                                } catch (e) {}
+                                try {
+                                    const byLabel = cats.find(x => String(x.label || '').toLowerCase() === filterNorm);
+                                    if (byLabel && String(byLabel.id || '').toLowerCase() === cardCat) catMatch = true;
+                                } catch (e) {}
+                            }
+
+                            if (!catMatch) visible = false;
                         }
                     } catch (e) {}
 
@@ -2728,28 +2759,31 @@ class CardSidebarView extends ItemView {
                                 const file = this.app.vault.getAbstractFileByPath(cardData.notePath);
                                 if (file) {
                                     let content = await this.app.vault.read(file);
+                                    
+                                    // Extract frontmatter if it exists
+                                    const fmMatch = content.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n/);
+                                    const restContent = fmMatch 
+                                        ? content.slice(fmMatch[0].length)
+                                        : content;
+                                    
+                                    let frontmatter = fmMatch ? fmMatch[1] : '';
+                                    
+                                    // Process existing frontmatter or create new
+                                    const frontmatterLines = frontmatter ? frontmatter.split(/\r?\n/) : [];
                                     const archivedLine = 'archived: true';
-
-                                    const hasFrontmatter = /^---\r?\n/.test(content);
-                                    console.log('Note has frontmatter?', hasFrontmatter);
-
-                                    if (/^\s*archived:.*$/mi.test(content)) {
-                                        content = content.replace(/^\s*archived:.*$/mi, archivedLine);
-                                        console.log('Replaced existing archived line in note');
-                                    } else {
-                                        const fmStart = content.match(/^---\r?\n/);
-                                        if (fmStart) {
-                                            const insertPos = fmStart.index + fmStart[0].length;
-                                            content = content.slice(0, insertPos) + archivedLine + '\n' + content.slice(insertPos);
-                                            console.log('Inserted archived line into existing frontmatter');
-                                        } else {
-                                            content = '---\n' + archivedLine + '\n---\n\n' + content;
-                                            console.log('Created new frontmatter with archived line');
-                                        }
-                                    }
-
+                                    
+                                    // Remove any existing archived lines
+                                    const cleanedLines = frontmatterLines.filter(line => !line.match(/^\s*archived\s*:/i));
+                                    
+                                    // Add archived line
+                                    cleanedLines.push(archivedLine);
+                                    
+                                    // Rebuild frontmatter block
+                                    const newFrontmatter = cleanedLines.join('\n');
+                                    const newContent = `---\n${newFrontmatter}\n---\n${restContent}`;
+                                    
                                     console.debug('sidecards: modify (archive) ->', file.path);
-                                    await this.app.vault.modify(file, content);
+                                    await this.app.vault.modify(file, newContent);
                                     console.log('Modified file to set archived flag:', cardData.notePath);
                                     new Notice('Card archived and note updated');
                                 } else {
@@ -3833,6 +3867,18 @@ class CardSidebarSettingTab extends PluginSettingTab {
             .onChange(async (value) => {
                 this.plugin.settings.enableCustomCategories = value;
                 await this.plugin.saveSettings();
+                
+                // Immediately refresh any open sidecards header so filter buttons update
+                try {
+                    const view = this.app.workspace.getLeavesOfType('card-sidebar')[0]?.view;
+                    if (view) {
+                        const main = view.containerEl.querySelector('.card-sidebar-main');
+                        const old = main?.querySelector('.card-sidebar-header');
+                        if (old) old.remove();
+                        if (main) view.createHeader(main);
+                        try { if (typeof view.applyFilters === 'function') view.applyFilters(); } catch (e) {}
+                    }
+                } catch (e) {}
             }));
 
     new Setting(containerEl)
@@ -3975,6 +4021,7 @@ class CardSidebarSettingTab extends PluginSettingTab {
             txt.addEventListener('change', async (e) => {
                 this.plugin.settings.customCategories[idx].label = e.target.value || '';
                 await this.plugin.saveSettings();
+                try { renderCategories(); } catch (e) {}
             });
 
             const chk = row.createEl('input');
@@ -3984,6 +4031,7 @@ class CardSidebarSettingTab extends PluginSettingTab {
             chk.addEventListener('change', async (e) => {
                 this.plugin.settings.customCategories[idx].showInMenu = !!e.target.checked;
                 await this.plugin.saveSettings();
+                try { renderCategories(); } catch (e) {}
             });
 
             const del = row.createEl('button');
@@ -4000,10 +4048,10 @@ class CardSidebarSettingTab extends PluginSettingTab {
             row.appendChild(txt);
             row.appendChild(chk);
             row.appendChild(del);
-        });
+    });
 
         
-        catsContainer.addEventListener('dragover', (e) => {
+    catsContainer.addEventListener('dragover', (e) => {
             try {
                 e.preventDefault();
                 const afterElement = getDragAfterElement(catsContainer, e.clientY);
@@ -4017,7 +4065,7 @@ class CardSidebarSettingTab extends PluginSettingTab {
             } catch (err) {}
         });
 
-        const addRow = catsContainer.createDiv();
+    const addRow = catsContainer.createDiv();
     addRow.className = 'categories-add-row';
     addRow.style.display = 'flex';
         addRow.style.gap = '8px';
@@ -4032,6 +4080,18 @@ class CardSidebarSettingTab extends PluginSettingTab {
             renderCategories();
         });
         addRow.appendChild(addBtn);
+        
+        // After rendering categories, update the header in any open Card Sidebar views
+        try {
+            const view = this.app.workspace.getLeavesOfType('card-sidebar')[0]?.view;
+            if (view) {
+                const main = view.containerEl.querySelector('.card-sidebar-main');
+                const old = main?.querySelector('.card-sidebar-header');
+                if (old) old.remove();
+                if (main) view.createHeader(main);
+                try { if (typeof view.applyFilters === 'function') view.applyFilters(); } catch (e) {}
+            }
+        } catch (e) {}
     };
 
     try { renderCategories(); } catch (e) { console.error('Error rendering custom categories UI:', e); }
