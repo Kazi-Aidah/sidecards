@@ -12,6 +12,89 @@ class CardSidebarView extends ItemView {
         this._universalCardOrder = [];  // Store complete universal order across all views
     }
 
+    // Toggle archive state for a card and write to note frontmatter (or create frontmatter if missing)
+    async toggleArchive(cardData, setArchived = true) {
+        try {
+            if (!cardData) return;
+
+            // Update in-memory state immediately
+            cardData.archived = !!setArchived;
+            try { await this.saveCards(); } catch (e) { console.error('Error saving cards after archive toggle:', e); }
+
+            if (!cardData.notePath) return;
+
+            const file = this.app.vault.getAbstractFileByPath(cardData.notePath);
+            if (!file) {
+                console.warn('toggleArchive: file not found for path', cardData.notePath);
+                return;
+            }
+
+            try {
+                const content = await this.app.vault.read(file);
+                const updated = this.updateFrontmatter(content, 'archived', !!setArchived);
+                console.debug('sidecards: modify (toggleArchive) ->', file.path);
+                await this.app.vault.modify(file, updated);
+            } catch (err) {
+                console.error('Error writing archived flag to note frontmatter:', err);
+            }
+        } catch (err) {
+            console.error('Error in toggleArchive:', err);
+        }
+    }
+
+    // Update YAML frontmatter in a note content string.
+    // - content: full file content (string)
+    // - key: frontmatter key to add/update/remove
+    // - value: new value. If null/undefined, the key will be removed.
+    updateFrontmatter(content, key, value) {
+        try {
+            if (typeof content !== 'string') return content;
+
+            const keyName = String(key || '').trim();
+            if (!keyName) return content;
+
+            const fmMatch = content.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n/);
+            const fm = fmMatch ? fmMatch[1] : '';
+            const rest = fmMatch ? content.slice(fmMatch[0].length) : content;
+
+            // Build array of existing frontmatter lines (if any)
+            const lines = fm ? fm.split(/\r?\n/) : [];
+
+            // Remove existing lines for the key (case-insensitive)
+            const escKey = keyName.replace(/[-/\\^$*+?.()|[\]{}]/g, '\\$&');
+            const keyRegex = new RegExp('^\\s*' + escKey + '\\s*:\\s*.*$', 'i');
+            const filtered = lines.filter(l => !keyRegex.test(l));
+
+            // If value is null or undefined, just remove the key
+            if (value === null || typeof value === 'undefined') {
+                if (filtered.length === 0) {
+                    // No frontmatter left - return body only
+                    return rest.startsWith('\n') ? rest.slice(1) : rest;
+                }
+                const rebuilt = filtered.join('\n');
+                return '---\n' + rebuilt + '\n---\n' + rest;
+            }
+
+            // Serialize the value appropriately
+            let valueStr;
+            if (typeof value === 'boolean' || typeof value === 'number') {
+                valueStr = String(value);
+            } else {
+                const s = String(value);
+                // Use unquoted simple tokens when safe
+                if (/^[A-Za-z0-9 _\-]+$/.test(s)) valueStr = s;
+                else valueStr = '"' + s.replace(/"/g, '\\"') + '"';
+            }
+
+            filtered.push(keyName + ': ' + valueStr);
+            const newFm = filtered.join('\n');
+            return '---\n' + newFm + '\n---\n' + rest;
+        } catch (err) {
+            console.error('Error in updateFrontmatter:', err);
+            return content;
+        }
+    }
+
     // Convert hex color codes to RGBA for card background transparency
     hexToRgba(hex, alpha = 1) {
         if (!hex) return '';
@@ -3148,57 +3231,17 @@ class CardSidebarView extends ItemView {
                 .setIcon('archive')
                 .onClick(async () => {
                     try {
+                        // Toggle archive state and write to frontmatter (centralized)
                         console.log('Archiving card', cardData.id, 'notePath:', cardData.notePath);
-                        cardData.archived = true;
-                        await this.saveCards();
+                        await this.toggleArchive(cardData, true);
 
-                        card.remove();
+                        // Remove from UI immediately
+                        try { card.remove(); } catch (e) {}
 
-                        if (cardData.notePath) {
-                            try {
-                                const file = this.app.vault.getAbstractFileByPath(cardData.notePath);
-                                if (file) {
-                                    let content = await this.app.vault.read(file);
-                                    
-                                    // Extract frontmatter if it exists
-                                    const fmMatch = content.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n/);
-                                    const restContent = fmMatch 
-                                        ? content.slice(fmMatch[0].length)
-                                        : content;
-                                    
-                                    let frontmatter = fmMatch ? fmMatch[1] : '';
-                                    
-                                    // Process existing frontmatter or create new
-                                    const frontmatterLines = frontmatter ? frontmatter.split(/\r?\n/) : [];
-                                    const archivedLine = 'archived: true';
-                                    
-                                    // Remove any existing archived lines
-                                    const cleanedLines = frontmatterLines.filter(line => !line.match(/^\s*archived\s*:/i));
-                                    
-                                    // Add archived line
-                                    cleanedLines.push(archivedLine);
-                                    
-                                    // Rebuild frontmatter block
-                                    const newFrontmatter = cleanedLines.join('\n');
-                                    const newContent = `---\n${newFrontmatter}\n---\n${restContent}`;
-                                    
-                                    console.debug('sidecards: modify (archive) ->', file.path);
-                                    await this.app.vault.modify(file, newContent);
-                                    console.log('Modified file to set archived flag:', cardData.notePath);
-                                    new Notice('Card archived and note updated');
-                                } else {
-                                    console.warn('Associated note file not found for path:', cardData.notePath);
-                                    new Notice('Card archived (no associated note found)');
-                                }
-                            } catch (err) {
-                                console.error('Error updating archived flag in note:', err);
-                                new Notice('Archived flag could not be written to note (see console)');
-                            }
-                        } else {
-                            new Notice('Card archived');
-                        }
+                        new Notice('Card archived');
                     } catch (err) {
                         console.error('Error archiving card:', err);
+                        new Notice('Error archiving card (see console)');
                     }
                 });
         });
