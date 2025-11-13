@@ -406,6 +406,54 @@
   }
 }
 
+/* Quick Card Add Modal styles */
+.quick-card-textarea {
+    font-family: var(--font-text);
+    padding: 10px;
+    border-radius: 4px;
+    border: 1px solid var(--background-modifier-border);
+    background-color: var(--background-primary);
+    resize: vertical;
+}
+
+.quick-card-textarea:focus {
+    outline: none;
+    border-color: var(--interactive-accent);
+    box-shadow: 0 0 0 2px var(--background-modifier-border-hover);
+}
+
+.filter-dropdown {
+    padding: 8px;
+    border-radius: 4px;
+    border: 1px solid var(--background-modifier-border);
+    background-color: var(--background-primary);
+    color: var(--text-normal);
+}
+
+.filter-dropdown:focus {
+    outline: none;
+    border-color: var(--interactive-accent);
+}
+
+.modal-button-container button {
+    padding: 8px 16px;
+    border-radius: 4px;
+    font-size: 14px;
+}
+
+.modal-button-container button:hover {
+    background-color: var(--interactive-hover);
+}
+
+.modal-button-container button.mod-cta {
+    background-color: var(--interactive-accent);
+    color: var(--text-on-accent);
+}
+
+.modal-button-container button.mod-cta:hover {
+    background-color: var(--interactive-accent-hover);
+}
+
 /* Categories */
 .categories-add-row {
   margin-bottom: 12px;

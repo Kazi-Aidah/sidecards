@@ -1,5 +1,342 @@
 const { Plugin, ItemView, Setting, PluginSettingTab, Modal, Menu, Notice, setIcon, MarkdownView } = require('obsidian');
 
+// Modal for quick card creation with filter picker
+class QuickCardWithFilterModal extends Modal {
+    constructor(app, plugin) {
+        super(app);
+        this.plugin = plugin;
+        console.log("🔍 Quick Card Add: Modal initialized", {
+            hasPlugin: !!plugin,
+            pluginSettings: plugin?.settings ? Object.keys(plugin.settings) : null
+        });
+    }
+
+    getAvailableFilters() {
+        console.log("🔍 Quick Card Add: Getting available filters");
+        const filters = [
+            { type: 'all', label: 'All', value: 'all' }
+        ];
+        console.log("Base filter added:", filters[0]);
+
+        // Add time-based filters if not disabled
+        console.log("🔍 Quick Card Add: Checking time-based filters");
+        const showTimeBasedChips = !(this.plugin && this.plugin.settings && this.plugin.settings.disableTimeBasedFiltering);
+        console.log("Time-based filters enabled:", showTimeBasedChips);
+        if (showTimeBasedChips) {
+            const timeBasedFilters = [
+                { type: 'category', label: 'Today', value: 'today' },
+                { type: 'category', label: 'Tomorrow', value: 'tomorrow' },
+                { type: 'category', label: 'This Week', value: 'this_week' }
+            ];
+            filters.push(...timeBasedFilters);
+            console.log("Added time-based filters:", timeBasedFilters);
+        }
+
+        // Add custom categories if enabled
+        try {
+            const enabled = !!(this.plugin && this.plugin.settings && this.plugin.settings.enableCustomCategories);
+            if (enabled) {
+                const cats = Array.isArray(this.plugin.settings.customCategories) ? this.plugin.settings.customCategories : [];
+                cats.forEach(cat => {
+                    if (cat && cat.showInMenu !== false) {
+                        filters.push({ 
+                            type: 'category', 
+                            label: cat.label || '', 
+                            value: cat.id || cat.label || ''
+                        });
+                    }
+                });
+            }
+        } catch (e) {
+            console.error('Error loading custom categories:', e);
+        }
+
+        // Add archived filter if not hidden
+        if (!this.plugin.settings.hideArchivedFilterButton) {
+            filters.push({ type: 'archived', label: 'Archived', value: 'archived' });
+        }
+
+        return filters;
+    }
+    
+    onOpen() {
+        const {contentEl} = this;
+        contentEl.empty();
+        
+        // Modal title
+        const title = contentEl.createEl('h2', {text: 'Quick Card Add'});
+        title.style.marginTop = '-8px';
+        title.style.marginBottom = '12px';
+        
+        // Card content section
+        const contentHeading = contentEl.createEl('h3', {text: 'Card Content'});
+        contentHeading.style.marginTop = '8px';
+        contentHeading.style.marginBottom = '6px';
+        
+        const textarea = contentEl.createEl('textarea', {
+            placeholder: 'Enter your card content here...',
+            cls: 'quick-card-textarea'
+        });
+        textarea.style.width = '100%';
+        textarea.style.height = '120px';
+        textarea.style.marginBottom = '8px';
+        textarea.focus();
+        
+        // Color selection section
+        const colorHeading = contentEl.createEl('h3', {text: 'Color'});
+        colorHeading.style.marginTop = '8px';
+        colorHeading.style.marginBottom = '6px';
+        
+        const colorContainer = contentEl.createDiv();
+        colorContainer.style.display = 'flex';
+        colorContainer.style.gap = '8px';
+        colorContainer.style.marginBottom = '18px';
+        colorContainer.style.flexWrap = 'wrap';
+        
+        let selectedColor = 'var(--card-color-1)';
+        const colors = [
+            { name: 'gray', var: 'var(--card-color-1)' },
+            { name: 'red', var: 'var(--card-color-2)' },
+            { name: 'orange', var: 'var(--card-color-3)' },
+            { name: 'yellow', var: 'var(--card-color-4)' },
+            { name: 'green', var: 'var(--card-color-5)' },
+            { name: 'blue', var: 'var(--card-color-6)' },
+            { name: 'purple', var: 'var(--card-color-7)' },
+            { name: 'magenta', var: 'var(--card-color-8)' },
+            { name: 'pink', var: 'var(--card-color-9)' },
+            { name: 'brown', var: 'var(--card-color-10)' }
+        ];
+        
+        colors.forEach(color => {
+            const swatch = colorContainer.createDiv();
+            swatch.style.width = '24px';
+            swatch.style.height = '24px';
+            swatch.style.borderRadius = '50%';
+            swatch.style.cursor = 'pointer';
+            swatch.style.transition = 'transform 0.15s ease, border 0.15s ease';
+            swatch.style.border = selectedColor === color.var 
+                ? '2px solid var(--text-accent)' 
+                : '2px solid var(--background-modifier-border)';
+            
+            try {
+                const m = String(color.var).match(/--card-color-(\d+)/);
+                if (m) {
+                    const idx = Number(m[1]) - 1;
+                    const lbl = (this.plugin.settings.colorNames && this.plugin.settings.colorNames[idx]) || color.name;
+                    swatch.title = lbl;
+                }
+            } catch (e) { }
+            
+            // Get computed color value
+            const root = document.documentElement;
+            const computedColor = getComputedStyle(root).getPropertyValue(color.var.replace('var(', '').replace(')', ''));
+            swatch.style.backgroundColor = computedColor.trim() || color.var;
+            
+            swatch.addEventListener('mouseenter', () => {
+                swatch.style.transform = 'scale(1.25)';
+            });
+            
+            swatch.addEventListener('mouseleave', () => {
+                swatch.style.transform = 'scale(1)';
+            });
+            
+            swatch.addEventListener('click', () => {
+                // Update all swatches
+                colorContainer.querySelectorAll('div').forEach(s => {
+                    s.style.border = '2px solid var(--background-modifier-border)';
+                });
+                swatch.style.border = '2px solid var(--text-accent)';
+                selectedColor = color.var;
+            });
+        });
+        
+        // Tags section
+        const tagsHeading = contentEl.createEl('h3', {text: 'Tags'});
+        tagsHeading.style.marginTop = '6px';
+        tagsHeading.style.marginBottom = '6px';
+        
+        const tagsInput = contentEl.createEl('input', {
+            placeholder: 'Enter tags separated by commas (e.g., work, urgent)',
+            cls: 'quick-card-tags-input'
+        });
+        tagsInput.style.width = '100%';
+        tagsInput.style.padding = '8px';
+        tagsInput.style.marginBottom = '8px';
+        tagsInput.style.border = '1px solid var(--background-modifier-border)';
+        tagsInput.style.borderRadius = '4px';
+        tagsInput.style.boxSizing = 'border-box';
+        
+        // Filter selection section
+        const filterHeading = contentEl.createEl('h3', {text: 'Apply Filters'});
+        filterHeading.style.marginTop = '8px';
+        filterHeading.style.marginBottom = '6px';
+        
+        const select = contentEl.createEl('select', {cls: 'filter-dropdown'});
+        select.style.width = '100%';
+        select.style.marginBottom = '12px';
+        
+        this.getAvailableFilters().forEach(filter => {
+            const option = select.createEl('option', {
+                value: filter.value,
+                text: filter.label
+            });
+            option.dataset.filterType = filter.type;
+        });
+        
+        // Action buttons
+        const buttonContainer = contentEl.createEl('div', {cls: 'modal-button-container'});
+        buttonContainer.style.display = 'flex';
+        buttonContainer.style.justifyContent = 'flex-end';
+        buttonContainer.style.gap = '10px';
+        buttonContainer.style.marginTop = '8px';
+        
+        // Cancel button
+        const cancelButton = buttonContainer.createEl('button', {
+            text: 'Cancel'
+        });
+        cancelButton.addEventListener('click', () => this.close());
+        
+        // Create button
+        const createButton = buttonContainer.createEl('button', {
+            text: 'Create Card',
+            cls: 'mod-cta'
+        });
+        createButton.addEventListener('click', () => {
+            console.log("🔍 Quick Card Add Debug: Create button clicked");
+            console.log("Selected filter:", { value: select.value, type: select.selectedOptions[0].dataset.filterType });
+            console.log("Card content:", textarea.value);
+            console.log("Selected color:", selectedColor);
+            console.log("Tags:", tagsInput.value);
+            this.createCardAndFilter(textarea.value, select.value, select.selectedOptions[0].dataset.filterType, selectedColor, tagsInput.value);
+            this.close();
+        });
+
+        // Handle Enter key
+        textarea.addEventListener('keydown', (event) => {
+            if (event.key === 'Enter' && !event.shiftKey) {
+                event.preventDefault();
+                console.log("🔍 Quick Card Add Debug: Enter key pressed");
+                console.log("Selected filter:", { value: select.value, type: select.selectedOptions[0].dataset.filterType });
+                console.log("Card content:", textarea.value);
+                this.createCardAndFilter(textarea.value, select.value, select.selectedOptions[0].dataset.filterType, selectedColor, tagsInput.value);
+                this.close();
+            }
+        });
+    }
+    
+    async createCardAndFilter(content, filterValue, filterType, selectedColor = 'var(--card-color-1)', tagsString = '') {
+        console.log("🔍 Quick Card Add Debug: createCardAndFilter start", {
+            content: content,
+            filterValue: filterValue,
+            filterType: filterType,
+            selectedColor: selectedColor,
+            tagsString: tagsString,
+            timestamp: new Date().toISOString()
+        });
+
+        if (!content.trim()) {
+            console.log("❌ Quick Card Add: Empty content detected");
+            new Notice('Card content cannot be empty');
+            return;
+        }
+
+        try {
+            // Get first Sidebar view
+            console.log("🔍 Looking for sidebar view...");
+            const view = this.app.workspace.getLeavesOfType('card-sidebar')?.[0]?.view;
+            if (!view) {
+                console.log("❌ Quick Card Add: No sidebar view found");
+                throw new Error('Card sidebar not found');
+            }
+            console.log("✅ Quick Card Add: Found sidebar view");
+            
+            // Create textarea to use existing addCardFromInput logic
+            console.log("📝 Creating temporary input element");
+            const tempInput = document.createElement('textarea');
+            tempInput.value = content;
+
+            // Parse tags from comma-separated string
+            const parsedTags = tagsString
+                .split(',')
+                .map(t => t.trim())
+                .filter(t => t.length > 0);
+
+            // Set the category on creation if a category filter is selected
+            let category = null;
+            if (filterType === 'category' && filterValue) {
+                // Convert filter value to proper category name
+                const cats = Array.isArray(this.plugin.settings.customCategories) ? this.plugin.settings.customCategories : [];
+                const found = cats.find(x => String(x.id || '').toLowerCase() === String(filterValue).toLowerCase() || 
+                                           String(x.label || '').toLowerCase() === String(filterValue).toLowerCase());
+                category = found ? (found.label || String(found.id || filterValue)) : filterValue;
+            }
+            
+            // Create the card using the existing proven implementation, passing filter info and color/tags
+            await view.addCardFromInput(tempInput, { 
+                category,
+                filterType,
+                filterValue,
+                selectedColor,
+                tags: parsedTags
+            });
+            
+            // Apply the filter using the existing sidebar logic
+            if (filterType && filterValue) {
+                // Reset all filter buttons first
+                const filterGroup = view.containerEl.querySelector('.filter-group');
+                if (filterGroup) {
+                    filterGroup.querySelectorAll('.card-filter-btn').forEach(b => {
+                        b.removeClass('active');
+                        b.style.backgroundColor = 'var(--background-primary)';
+                        b.style.color = 'var(--text-muted)';
+                    });
+                }
+
+                // Set new filter state and activate appropriate button
+                if (filterType === 'archived' || filterType === 'all') {
+                    view.currentCategoryFilter = null;
+                    await view.loadCards(filterType === 'archived');
+                    
+                    // Activate the corresponding button
+                    if (filterGroup) {
+                        const btn = filterGroup.querySelector(`[data-filter-type="${filterType}"]`);
+                        if (btn) {
+                            btn.addClass('active');
+                            btn.style.backgroundColor = 'var(--background-modifier-hover)';
+                            btn.style.color = 'var(--text-normal)';
+                        }
+                    }
+                } else if (filterType === 'category') {
+                    // Set the category filter and find the matching button
+                    view.currentCategoryFilter = String(filterValue).toLowerCase();
+                    if (filterGroup) {
+                        const btn = filterGroup.querySelector(`[data-filter-type="category"][data-filter-value="${filterValue}"]`);
+                        if (btn) {
+                            btn.addClass('active');
+                            btn.style.backgroundColor = 'var(--background-modifier-hover)';
+                            btn.style.color = 'var(--text-normal)';
+                        }
+                    }
+                }
+                
+                // Apply filters and animate
+                console.log("🔍 Quick Card Add: Applying filters after card creation", {
+                    filterValue: filterValue,
+                    filterType: filterType,
+                    currentCategoryFilter: view.currentCategoryFilter,
+                    numCards: view.cards ? view.cards.length : 0
+                });
+                view.applyFilters();
+                console.log("✅ Quick Card Add: Filters applied");
+                view.animateCardsEntrance({ duration: 300, offset: 28 });
+            }
+        } catch (error) {
+            console.error('Error creating card:', error);
+            new Notice('Error creating card with filter');
+        }
+    }
+}
+
 // View component for the sidebar that manages card state and UI interactions
 class CardSidebarView extends ItemView {
     constructor(leaf, plugin) {
@@ -1388,24 +1725,58 @@ class CardSidebarView extends ItemView {
         });
     }
 
-    async addCardFromInput(input) {
+    getFormattedDate() {
+        const now = new Date();
+        return now.toLocaleDateString('en-GB', {
+            day: '2-digit',
+            month: 'short',
+            year: '2-digit'
+        }) + ', ' + now.toLocaleTimeString('en-GB', {
+            hour: '2-digit',
+            minute: '2-digit'
+        });
+    }
+
+    async addCardFromInput(input, filterInfo = {}) {
         const content = input.value.trim();
         if (!content) return;
 
+        // Extract filter type, value, color, and tags from the input
+        const filterType = filterInfo.filterType || '';
+        const filterValue = filterInfo.filterValue || '';
+        const selectedColor = filterInfo.selectedColor || 'var(--card-color-1)';
+        const additionalTags = filterInfo.tags || [];
         
+        // Determine category and additional metadata
+        let category = '';
+        let archived = false;
+        let pinned = false;
+        let tagsArray = [...additionalTags]; // Start with provided tags
         
-        // If the user is currently viewing a category filter, assign the new card to that category
-        let assignedCategory = null;
-        try {
-            const cf = (this.currentCategoryFilter || '').toString().trim().toLowerCase();
-            if (cf) {
-                const cats = Array.isArray(this.plugin.settings.customCategories) ? this.plugin.settings.customCategories : [];
-                const found = cats.find(x => String(x.id || '').toLowerCase() === cf || String(x.label || '').toLowerCase() === cf);
-                assignedCategory = found ? (found.label || found.id) : this.currentCategoryFilter;
-            }
-        } catch (e) { assignedCategory = this.currentCategoryFilter || null; }
+        if (filterType === 'today') {
+            category = 'Today';
+            if (!tagsArray.includes('today')) tagsArray.push('today');
+        } else if (filterType === 'tomorrow') {
+            category = 'Tomorrow';
+            if (!tagsArray.includes('tomorrow')) tagsArray.push('tomorrow');
+        } else if (filterType === 'archived') {
+            category = 'Archived';
+            archived = true;
+        } else if (filterType === 'pinned') {
+            category = 'Pinned';
+            pinned = true;
+        } else if (filterType === 'category' && filterValue) {
+            category = filterValue;
+        }
 
-        var cardData = this.createCard(content, { category: assignedCategory });
+        // Create card in memory (without frontmatter displayed)
+        const cardData = this.createCard(content, { 
+            category: category,
+            archived: archived,
+            pinned: pinned,
+            tags: tagsArray,
+            color: selectedColor
+        });
         
         try {
             const folder = this.plugin.settings.storageFolder || '';
@@ -1413,9 +1784,9 @@ class CardSidebarView extends ItemView {
                 await this.app.vault.createFolder(folder);
             }
 
-            // Get the first sentence (up to the period)
+            // Get the first sentence (up to the period) for filename
             const firstSentence = (content.split('.')[0] || content).trim();
-            let title = firstSentence;
+            let title = firstSentence.substring(0, 50); // Limit title length
             const timestamp = new Date();
             let fileName = `${title.replace(/[^a-zA-Z0-9\s]/g, ' ').trim()} ${timestamp.getHours().toString().padStart(2, '0')}${timestamp.getMinutes().toString().padStart(2, '0')}`;
             let filePath = folder ? `${folder}/${fileName}.md` : `${fileName}.md`;
@@ -1424,18 +1795,18 @@ class CardSidebarView extends ItemView {
                 filePath = folder ? `${folder}/${fileName}.md` : `${fileName}.md`;
             }
 
+            // Build frontmatter
             const createdDate = new Date(cardData.created);
             const pad = n => String(n).padStart(2, '0');
             const yamlDate = `${pad(createdDate.getDate())}${createdDate.toLocaleString('en-US', { month: 'short' })}${String(createdDate.getFullYear()).slice(-2)}, ${pad(createdDate.getHours())}:${pad(createdDate.getMinutes())}`;
 
-            
-            
-            let tagArray = (cardData.tags || []).map(t => String(t).trim()).filter(t => t.length > 0);
+            let tagArray = (tagsArray || []).map(t => String(t).trim()).filter(t => t.length > 0);
             const tagsYaml = tagArray.length > 0 ? ('Tags:\n' + tagArray.map(t => `  - ${t}`).join('\n')) : 'Tags: []';
-            let colorKey = '';
+            
+            let colorKey = 'color-1';
             let colorLabel = '';
             try {
-                const cv = cardData.color || '';
+                const cv = selectedColor || '';
                 const m = String(cv).match(/--card-color-(\d+)/);
                 if (m) {
                     colorKey = `color-${m[1]}`;
@@ -1445,16 +1816,38 @@ class CardSidebarView extends ItemView {
                 }
             } catch (e) { }
 
-            const colorLine = colorKey ? `card-color: ${colorKey}` : '';
-            const colorNameLine = colorLabel ? `card-color-name: "${String(colorLabel).replace(/"/g, '\\"')}"` : '';
+            const colorLine = `card-color: ${colorKey}`;
+            const colorNameLine = colorLabel ? `card-color-name: "${String(colorLabel).replace(/"/g, '\\"')}"` : 'card-color-name: "Gray"';
 
-            const categoryLine = cardData.category ? ('\nCategory: ' + String(cardData.category).replace(/\n/g, ' ')) : '';
-            const noteContent = `---\n${tagsYaml}${colorLine ? '\n' + colorLine : ''}${colorNameLine ? '\n' + colorNameLine : ''}${categoryLine}\nCreated-Date: ${yamlDate}\n---\n\n${content}`;
+            // Build full frontmatter
+            let frontmatterLines = [
+                '---',
+                tagsYaml,
+                colorLine,
+                colorNameLine,
+                `Created-Date: ${yamlDate}`
+            ];
+
+            if (archived) {
+                frontmatterLines.push('Archived: true');
+            }
+            
+            if (pinned) {
+                frontmatterLines.push('Pinned: true');
+            }
+            
+            if (category) {
+                frontmatterLines.push(`Category: ${String(category).replace(/\n/g, ' ')}`);
+            }
+
+            frontmatterLines.push('---');
+
+            const noteContent = frontmatterLines.join('\n') + '\n\n' + content;
 
             await this.app.vault.create(filePath, noteContent);
 
             cardData.notePath = filePath;
-            this.saveCards();
+            await this.saveCards();
 
         } catch (error) {
             console.error('Error auto-saving card to note:', error);
@@ -2056,12 +2449,10 @@ class CardSidebarView extends ItemView {
                 });
             }
 
-            // Always keep pinned cards at top unless in manual mode
-            if (mode !== 'manual') {
-                const pinned = this.cards.filter(c => c.pinned);
-                const unpinned = this.cards.filter(c => !c.pinned);
-                this.cards = pinned.concat(unpinned);
-            }
+            // Always keep pinned cards at top
+            const pinned = this.cards.filter(c => c.pinned);
+            const unpinned = this.cards.filter(c => !c.pinned);
+            this.cards = pinned.concat(unpinned);
 
             // Update DOM to reflect new order
             if (this.cardsContainer) {
@@ -2316,7 +2707,18 @@ class CardSidebarView extends ItemView {
     applyFilters(skipAnimation = false) {
         try {
             const startTime = performance.now();
-            console.log("🔍 Applying filters - current cards:", this.cards.length);
+            console.log("🔍 Filter Application Started", {
+                totalCards: this.cards.length,
+                currentCategory: this.currentCategoryFilter,
+                activeFilters: {
+                    query: this.activeFilters?.query || '',
+                    tags: this.activeFilters?.tags || []
+                },
+                sortMode: this.plugin?.settings?.sortMode || 'manual',
+                showArchived: this._lastLoadArchived || false,
+                showPinnedOnly: this.plugin?.settings?.showPinnedOnly || false
+            });
+            
             const isManualSort = this.plugin && this.plugin.settings && this.plugin.settings.sortMode === 'manual';
             const universalManualOrder = isManualSort ? (this.plugin.settings.manualOrder || []) : [];
             
@@ -2338,44 +2740,97 @@ class CardSidebarView extends ItemView {
                 try {
                     if (!c || !c.element) return;
                     let visible = true;
+                    const filterChecks = {
+                        pinCheck: true,
+                        tagCheck: true,
+                        searchCheck: true,
+                        categoryCheck: true
+                    };
 
-                    if (showPinnedOnly && !c.pinned) visible = false;
+                    // Pin Check
+                    if (showPinnedOnly && !c.pinned) {
+                        filterChecks.pinCheck = false;
+                        visible = false;
+                    }
+
+                    // Tag Check
                     if (tags && tags.length > 0) {
                         for (const tg of tags) {
-                            if (!c.tags || !c.tags.map(t => String(t)).includes(tg)) { visible = false; break; }
+                            if (!c.tags || !c.tags.map(t => String(t)).includes(tg)) { 
+                                filterChecks.tagCheck = false;
+                                visible = false;
+                                break;
+                            }
                         }
                     }
+
+                    // Search Check
                     if (visible && q) {
                         const hay = String(c.content || '').toLowerCase();
                         const tagText = (c.tags || []).join(' ').toLowerCase();
-                        if (hay.indexOf(q) === -1 && tagText.indexOf(q) === -1) visible = false;
+                        if (hay.indexOf(q) === -1 && tagText.indexOf(q) === -1) {
+                            filterChecks.searchCheck = false;
+                            visible = false;
+                        }
                     }
 
+                    // Category Check
                     try {
                         if (catFilter) {
                             const filterNorm = String(catFilter || '').toLowerCase();
                             const cardCat = (c.category || '').toString().toLowerCase();
                             let catMatch = false;
 
+                            console.log("🏷️ Category Check", {
+                                cardId: c.id,
+                                filterCategory: filterNorm,
+                                cardCategory: cardCat,
+                                cardContent: c.content.slice(0, 30) + "..."
+                            });
+
                             // Direct match (covers id == id or label == label if stored that way)
                             if (cardCat === filterNorm) {
                                 catMatch = true;
+                                console.log("✅ Direct category match");
                             } else {
                                 // Be tolerant: allow matching id<->label across settings
                                 const cats = Array.isArray(this.plugin.settings.customCategories) ? this.plugin.settings.customCategories : [];
                                 try {
                                     const byId = cats.find(x => String(x.id || '').toLowerCase() === filterNorm);
-                                    if (byId && String(byId.label || '').toLowerCase() === cardCat) catMatch = true;
+                                    if (byId && String(byId.label || '').toLowerCase() === cardCat) {
+                                        catMatch = true;
+                                        console.log("✅ Category matched by ID mapping");
+                                    }
                                 } catch (e) {}
                                 try {
                                     const byLabel = cats.find(x => String(x.label || '').toLowerCase() === filterNorm);
-                                    if (byLabel && String(byLabel.id || '').toLowerCase() === cardCat) catMatch = true;
+                                    if (byLabel && String(byLabel.id || '').toLowerCase() === cardCat) {
+                                        catMatch = true;
+                                        console.log("✅ Category matched by label mapping");
+                                    }
                                 } catch (e) {}
                             }
 
-                            if (!catMatch) visible = false;
+                            if (!catMatch) {
+                                filterChecks.categoryCheck = false;
+                                visible = false;
+                                console.log("❌ No category match found");
+                            }
                         }
-                    } catch (e) {}
+                    } catch (e) {
+                        console.error("Error in category matching:", e);
+                    }
+                    
+                    // Log filter results for each card
+                    console.log("🔍 Card Filter Results", {
+                        cardId: c.id,
+                        content: c.content.slice(0, 30) + "...",
+                        isVisible: visible,
+                        checks: filterChecks,
+                        category: c.category,
+                        tags: c.tags,
+                        pinned: c.pinned
+                    });
 
                     if (visible) {
                         visibleCards.push(c);
@@ -2439,14 +2894,31 @@ class CardSidebarView extends ItemView {
             });
 
             const endTime = performance.now();
-            console.log(`🎯 Filter applied: ${visibleCards.length} visible cards${isManualSort ? ' (preserving manual order)' : ''}`);
-            console.log(`⚡ Filter operation took ${Math.round(endTime - startTime)}ms`);
-            
+            console.log("✨ Filter Application Complete", {
+                visibleCards: visibleCards.length,
+                totalCards: this.cards.length,
+                timeElapsed: Math.round(endTime - startTime) + "ms",
+                appliedFilters: {
+                    category: catFilter,
+                    searchQuery: q,
+                    tags: tags,
+                    pinnedOnly: showPinnedOnly
+                },
+                sortMode: isManualSort ? "manual" : this.plugin?.settings?.sortMode || "none",
+                cardOrder: visibleCards.map(c => ({
+                    id: c.id,
+                    content: c.content.slice(0, 30) + "...",
+                    category: c.category,
+                    pinned: c.pinned
+                }))
+            });
+
             if (!skipAnimation) {
                 try { this.animateCardsEntrance(); } catch (e) { }
             }
         } catch (err) {
             console.error('Error in applyFilters:', err);
+            console.error('Stack trace:', err.stack);
         }
     }
 
@@ -3507,6 +3979,15 @@ class CardSidebarView extends ItemView {
         this.cards = [];
         const folder = this.plugin.settings.storageFolder;
 
+        // CRITICAL FIX: Initialize universal order before any card loading
+        if (!this._universalCardOrder || this._universalCardOrder.length === 0) {
+            this._universalCardOrder = this.plugin.settings.manualOrder || [];
+            console.log("🔄 Initialized universal card order from settings:", {
+                orderLength: this._universalCardOrder.length,
+                samplePaths: this._universalCardOrder.slice(0, 3)
+            });
+        }
+
         if (folder && folder !== '/') {
             try {
                 if (this.plugin._importedFromFolderOnLoad && this.plugin.settings.cards && this.plugin.settings.cards.length > 0) {
@@ -3562,10 +4043,10 @@ class CardSidebarView extends ItemView {
             }
 
             // Apply saved sorting preference (mode + direction) so order persists across reloads
-                try {
+            try {
                 const mode = (this.plugin && this.plugin.settings && this.plugin.settings.sortMode) || 'manual';
                 const asc = (this.plugin && this.plugin.settings && typeof this.plugin.settings.sortAscending !== 'undefined') ? !!this.plugin.settings.sortAscending : true;
-                try { console.log('sidecards: calling applySort (loadCards folder branch)', new Error().stack); } catch (e) {}
+                console.log('sidecards: calling applySort (loadCards folder branch)', { mode, asc, universalOrder: this._universalCardOrder?.length });
                 await this.applySort(mode, asc);
             } catch (e) {
                 console.error('Error applying saved sort after folder-load:', e);
@@ -3577,15 +4058,12 @@ class CardSidebarView extends ItemView {
             try { this._applySortLoadInProgress = false; } catch (e) {}
             this._bulkLoading = false;
             return;
-    }
+        }
 
-    const saved = this.plugin.settings.cards || [];
+        const saved = this.plugin.settings.cards || [];
         if (saved && saved.length > 0) {
             for (const savedCard of saved) {
                 try {
-                    
-
-
                     let pinnedFromNote = savedCard.pinned || false;
                     let archivedFromNote = savedCard.archived || false;
                     if (savedCard.notePath) {
@@ -3645,16 +4123,24 @@ class CardSidebarView extends ItemView {
             });
         }
 
+        // CRITICAL FIX: Ensure manual order is applied consistently
         try {
-            try { console.log('sidecards: calling applySort (loadCards end)', new Error().stack); } catch (e) {}
+            console.log('sidecards: calling applySort (loadCards end)', { 
+                mode: this.plugin.settings.sortMode || 'manual', 
+                ascending: this.plugin.settings.sortAscending != null ? this.plugin.settings.sortAscending : true,
+                universalOrder: this._universalCardOrder?.length 
+            });
             await this.applySort(this.plugin.settings.sortMode || 'manual', this.plugin.settings.sortAscending != null ? this.plugin.settings.sortAscending : true);
-        } catch (e) { }
+        } catch (e) { 
+            console.error('Error in final applySort call:', e);
+        }
+        
         this.refreshAllCardTimestamps();
-    try { this.animateCardsEntrance(); } catch (e) {}
-    // Reveal container now that only filtered cards will be visible
-    try { if (this.cardsContainer) this.cardsContainer.style.visibility = ''; } catch (e) {}
-    try { this._applySortLoadInProgress = false; } catch (e) {}
-    this._bulkLoading = false;
+        try { this.animateCardsEntrance(); } catch (e) {}
+        // Reveal container now that only filtered cards will be visible
+        try { if (this.cardsContainer) this.cardsContainer.style.visibility = ''; } catch (e) {}
+        try { this._applySortLoadInProgress = false; } catch (e) {}
+        this._bulkLoading = false;
     }
 
     async importNotesFromFolder(folder, silent = false, showArchived = false) {
@@ -4966,6 +5452,15 @@ class CardSidebarPlugin extends Plugin {
             name: 'Open Card Sidebar',
             callback: () => {
                 this.activateView();
+            }
+        });
+
+        // Add Quick Card Add with Filter command
+        this.addCommand({
+            id: 'quick-card-add-with-filter',
+            name: 'Quick Card Add with Filter',
+            callback: () => {
+                new QuickCardWithFilterModal(this.app, this).open();
             }
         });
 
