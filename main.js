@@ -5458,7 +5458,7 @@ class CardSidebarPlugin extends Plugin {
         // Add Quick Card Add with Filter command
         this.addCommand({
             id: 'quick-card-add-with-filter',
-            name: 'Quick Card Add with Filter',
+            name: 'Quick Card Add',
             callback: () => {
                 new QuickCardWithFilterModal(this.app, this).open();
             }
