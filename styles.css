@@ -225,6 +225,7 @@
 .card-content {
   white-space: pre-wrap;
   word-wrap: break-word;
+  line-height: 1.15;
 }
 
 .card-content:focus {
@@ -232,7 +233,7 @@
   background: var(--background-modifier-hover);
   border-radius: 2px;
   padding: 2px 4px;
-  margin: -2px -4px 6px;
+  margin: -2px -4px -2px;
 }
 
 .card-separator {
@@ -528,3 +529,11 @@
 padding-bottom: 12px !important;
 padding-top: 12px !important;
 } */
+.card-content p {
+  margin: 0;
+}
+
+.card-content ul,
+.card-content ol {
+  margin: 0;
+}

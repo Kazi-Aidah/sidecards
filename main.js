@@ -1,4 +1,4 @@
-const { Plugin, ItemView, Setting, PluginSettingTab, Modal, Menu, Notice, setIcon, MarkdownView } = require('obsidian');
+const { Plugin, ItemView, Setting, PluginSettingTab, Modal, Menu, Notice, setIcon, MarkdownView, MarkdownRenderer } = require('obsidian');
 
 // Modal for quick card creation with filter picker
 class QuickCardWithFilterModal extends Modal {
@@ -2041,17 +2041,56 @@ class CardSidebarView extends ItemView {
 
         const contentEl = card.createDiv();
         contentEl.addClass('card-content');
-        contentEl.textContent = content;
-        contentEl.setAttribute('contenteditable', 'true');
+        contentEl.setAttribute('tabindex', '0');
+        const renderingDisabled = !!(this.plugin && this.plugin.settings && this.plugin.settings.disableCardRendering);
+        if (renderingDisabled) {
+            contentEl.setAttribute('contenteditable', 'true');
+            contentEl.textContent = content;
+        } else {
+            contentEl.setAttribute('contenteditable', 'false');
+            try {
+                contentEl.empty();
+                MarkdownRenderer.render(this.app, String(content || ''), contentEl, options.notePath || '');
+            } catch (e) {
+                contentEl.textContent = content;
+            }
+        }
+
+        contentEl.addEventListener('click', (ev) => {
+            try {
+                if (renderingDisabled) return;
+                if (contentEl.getAttribute('contenteditable') === 'false') {
+                    ev.stopPropagation();
+                    contentEl.setAttribute('contenteditable', 'true');
+                    const cd = this.cards.find(c => c.element === card);
+                    contentEl.empty();
+                    contentEl.textContent = cd && cd.content != null ? cd.content : content;
+                    setTimeout(() => { try { contentEl.focus(); } catch (_) {} }, 0);
+                }
+            } catch (_) {}
+        });
 
         contentEl.addEventListener('blur', () => {
-            
             try {
                 const text = contentEl.innerText != null ? contentEl.innerText : contentEl.textContent;
                 this.updateCardContent(card, text);
             } catch (e) {
-                
                 this.updateCardContent(card, contentEl.innerHTML);
+            }
+            if (renderingDisabled) {
+                try {
+                    const cd = this.cards.find(c => c.element === card);
+                    contentEl.setAttribute('contenteditable', 'true');
+                    contentEl.empty();
+                    contentEl.textContent = (cd && cd.content) || '';
+                } catch (_) {}
+            } else {
+                try {
+                    const cd = this.cards.find(c => c.element === card);
+                    contentEl.setAttribute('contenteditable', 'false');
+                    contentEl.empty();
+                    MarkdownRenderer.render(this.app, String((cd && cd.content) || ''), contentEl, (cd && cd.notePath) || options.notePath || '');
+                } catch (_) {}
             }
         });
 
@@ -2464,7 +2503,7 @@ class CardSidebarView extends ItemView {
             if (this.plugin.settings.verticalCardMode) {
                 this.cardsContainer.addClass('vertical-card-mode');
                 this.cardsContainer.style.display = 'grid';
-                this.cardsContainer.style.gridTemplateColumns = 'repeat(auto-fill, minmax(280px, 1fr))';
+                this.cardsContainer.style.gridTemplateColumns = 'repeat(auto-fill, minmax(260px, 1fr))';
                 this.cardsContainer.style.gridAutoRows = '1px';
                 this.cardsContainer.style.gap = '0px 6px'; // imp
                 this.cardsContainer.style.alignItems = 'start';
@@ -2583,11 +2622,16 @@ class CardSidebarView extends ItemView {
 
         card.addEventListener('dragend', () => {
             card.classList.remove('dragging');
-            this.reindexCardsFromDOM();
+            try {
+                if (this.plugin && this.plugin.settings && this.plugin.settings.sortMode === 'manual') {
+                    this.reindexCardsFromDOM();
+                }
+            } catch (e) {}
         });
 
         if (!this._dragListenersAttached) {
             this.cardsContainer.addEventListener('dragover', (e) => {
+                if (!(this.plugin && this.plugin.settings && this.plugin.settings.sortMode === 'manual')) return;
                 e.preventDefault();
                 const afterElement = this.getDragAfterElement(this.cardsContainer, e.clientY);
                 const dragging = this.cardsContainer.querySelector('.dragging');
@@ -2600,6 +2644,7 @@ class CardSidebarView extends ItemView {
             });
 
             this.cardsContainer.addEventListener('drop', (e) => {
+                if (!(this.plugin && this.plugin.settings && this.plugin.settings.sortMode === 'manual')) return;
                 e.preventDefault();
                 this.reindexCardsFromDOM();
             });
@@ -2610,6 +2655,9 @@ class CardSidebarView extends ItemView {
 
     reindexCardsFromDOM() {
         try { this.plugin.debugLog('sidecards: reindexCardsFromDOM start', { settingsSortMode: this.plugin && this.plugin.settings ? this.plugin.settings.sortMode : null }); } catch (e) {}
+        if (this.plugin && this.plugin.settings && this.plugin.settings.sortMode !== 'manual') {
+            return;
+        }
         
         // Get ALL cards and current universal order
         const allCards = this.plugin.settings.cards || [];
@@ -3517,12 +3565,12 @@ class CardSidebarView extends ItemView {
             input.style.flex = '1';
             input.style.padding = '6px 8px';
 
-            const clearBtn = row.createEl('button');
-            clearBtn.textContent = '✕';
-            clearBtn.title = 'Clear search';
-            clearBtn.style.border = 'none';
-            clearBtn.style.background = 'none';
-            clearBtn.style.cursor = 'pointer';
+        const clearBtn = row.createEl('button');
+        clearBtn.textContent = '✕';
+        clearBtn.title = 'Clear search';
+        clearBtn.style.border = 'none';
+        clearBtn.style.background = 'none';
+        clearBtn.style.cursor = 'pointer';
 
             const chipRow = searchWrap.createDiv();
             chipRow.addClass('card-search-chips');
@@ -3542,10 +3590,16 @@ class CardSidebarView extends ItemView {
             clearBtn.addEventListener('click', () => {
                 input.value = '';
                 this.activeFilters.query = '';
+                let chipsUpdated = false;
                 if (this.activeFilters && Array.isArray(this.activeFilters.tags) && this.activeFilters.tags.length > 0) {
                     this.activeFilters.tags = [];
-                    if (typeof this.updateSearchChips === 'function') this.updateSearchChips();
+                    chipsUpdated = true;
                 }
+                if (this.activeFilters && this.activeFilters.status) {
+                    this.activeFilters.status = null;
+                    chipsUpdated = true;
+                }
+                if (chipsUpdated && typeof this.updateSearchChips === 'function') this.updateSearchChips();
                 this.applyFilters();
             });
 
@@ -5816,6 +5870,31 @@ class CardSidebarSettingTab extends PluginSettingTab {
 
     containerEl.createEl('h4', { text: 'Visibility' });
     new Setting(containerEl)
+        .setName('Disable card markdown rendering')
+        .setDesc('When enabled, cards display raw text and never switch to rendered markdown on blur. Links, images, and formatting won’t render in the sidebar.')
+        .addToggle(toggle => toggle
+            .setValue(this.plugin.settings.disableCardRendering || false)
+            .onChange(async (value) => {
+                this.plugin.settings.disableCardRendering = value;
+                await this.plugin.saveSettings();
+                const view = this.app.workspace.getLeavesOfType('card-sidebar')[0]?.view;
+                if (view && view.cards) {
+                    view.cards.forEach(cd => {
+                        const el = cd.element?.querySelector('.card-content');
+                        if (!el) return;
+                        if (value) {
+                            el.setAttribute('contenteditable', 'true');
+                            el.innerHTML = '';
+                            el.textContent = cd.content || '';
+                        } else {
+                            el.setAttribute('contenteditable', 'false');
+                            el.innerHTML = '';
+                            MarkdownRenderer.render(this.app, String(cd.content || ''), el, cd.notePath || '');
+                        }
+                    });
+                }
+            }));
+    new Setting(containerEl)
         .setName('Hide Clear button')
         .setDesc('Hide the Clear button in the input area (hidden by default)')
         .addToggle(toggle => toggle
@@ -7349,7 +7428,8 @@ class CardSidebarPlugin extends Plugin {
             cards: [],
             replaceHomepageWithSidecards: false,
             filterColors: {},
-            sidebarPosition: 'right'
+            sidebarPosition: 'right',
+            disableCardRendering: false
         }, await this.loadData());
     }
 
