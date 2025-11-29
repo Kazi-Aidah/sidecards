@@ -127,6 +127,32 @@
   padding: 8px;
 }
 
+.vertical-card-mode .card-sidebar-card {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+.vertical-card-mode .card-content {
+  flex: unset;
+}
+
+.card-pill-bar {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.card-expiry-pill, .card-status-pill {
+  background-color: var(--background-modifier-hover);
+  color: var(--text-normal);
+  padding: 2px 8px;
+  border-radius: 3px;
+  font-size: 12px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
 .card-sidebar-button-container {
   padding-bottom: 26px;
 }
@@ -135,6 +161,7 @@
 .card-sidebar-card {
   background: var(--background-primary);
   padding: 12px;
+  padding-top: 6px;
   position: relative;
   font-size: 14px;
   line-height: 1.4;
@@ -144,6 +171,10 @@
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
   cursor: pointer;
   width: 100%;
+}
+
+.card-sidebar-card.has-pills {
+  padding-top: 12px;
 }
 
 .card-sidebar-card .card-border-left,
@@ -469,3 +500,31 @@
   color: var(--text-muted) !important;
   margin-right: 0 !important;
 }
+/* 
+.card-sidebar-cards-container {
+  gap: 8px;
+}
+
+.vertical-card-mode {
+  gap: 0.2px 7px !important;
+}
+
+.vertical-card-mode .card-sidebar-card {
+  padding: 12px;
+  padding-top: 5px;
+}
+
+.vertical-card-mode .card-sidebar-card.has-pills {
+  padding-top: 10px !important;
+  padding-bottom: 16px !important;
+}
+
+.vertical-card-mode .card-sidebar-card:has(.card-tags) {
+  padding-bottom: 14px !important;
+  padding-top: 12px !important;
+}
+
+.vertical-card-mode .card-sidebar-card.has-pills, .card-sidebar-card:has(.card-tags) {
+padding-bottom: 12px !important;
+padding-top: 12px !important;
+} */
