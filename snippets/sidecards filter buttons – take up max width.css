@@ -1,0 +1,37 @@
+
+
+/* --- FILTER BUTTONS: STRETCH TO MAX WIDTH */
+.filter-group, .card-sidebar-filter-group {
+gap: 6px !important;
+width: 100% !important;
+}
+
+.card-filter-btn {
+border-radius: 0px !important;
+padding: 0px 37px !important;
+width: 100% !important;
+/* box-shadow: none !important; */
+filter: brightness(0.9) !important; /* DARKEN ALL OTHERS */
+text-transform: uppercase; /* CAPITALIZE NAMES */
+}
+
+.card-filter-btn.active {
+border: 1.7px solid #ffffff30 !important;
+transition: all 100ms ease;
+filter: brightness(1.7) !important;
+/* box-shadow: 0px 0px 4px #ffffff !important; */ 
+/* uncomment box-shadow if you want glow */
+transform: scale(1.02) !important;
+z-index: 2000 !important;
+}
+
+.card-filter-btn:first-child {
+border-top-left-radius: 10px !important;
+border-bottom-left-radius: 10px !important;
+}
+
+.card-filter-btn:last-child {
+background-color: var(--background-primary) !important;
+border-top-right-radius: 10px !important;
+border-bottom-right-radius: 10px !important;
+}

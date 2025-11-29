@@ -1,0 +1,21 @@
+/* --- DARKEN ALL OTHER CARDS EXCEPT THE ONE HOVERED UPON */
+/* styling for all cards */
+.card-sidebar-card {
+  transition: all 0.3s ease;
+}
+
+/* When a card is hovered, select its container,
+   and then select all the OTHER cards in that container and darken them. */
+.card-sidebar-cards-container:has(.card-sidebar-card:hover) .card-sidebar-card:not(:hover) {
+  filter: brightness(0.6); /* blur(2px); */
+  transition: all 0.3s ease;
+}
+
+/* Style the card that is being hovered */
+.card-sidebar-cards-container .card-sidebar-card:hover {
+  filter: contrast(1.3) brightness(1);
+  transform: translateY(-0px) scale(1.025);
+  border-radius: 8px !important;
+  outline: 3px solid #ffffff !important;
+  transition: all 0.3s ease-out, outline 0s ease;
+}

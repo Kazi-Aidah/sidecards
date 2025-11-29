@@ -125,6 +125,9 @@
   flex-direction: column;
   gap: 8px;
   padding: 8px;
+  scrollbar-width: auto;
+  -ms-overflow-style: auto;
+    margin-right: 0px !important;
 }
 
 .vertical-card-mode .card-sidebar-card {
@@ -171,6 +174,8 @@
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
   cursor: pointer;
   width: 100%;
+  /* Prevent layout shift during masonry span recalculation */
+  will-change: grid-row-end;
 }
 
 .card-sidebar-card.has-pills {
@@ -381,6 +386,7 @@
 /* Scrollbar */
 .card-sidebar-cards-container::-webkit-scrollbar {
   width: 6px;
+  display: block !important;
 }
 
 .card-sidebar-cards-container::-webkit-scrollbar-track {

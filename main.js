@@ -221,6 +221,28 @@ class QuickCardWithFilterModal extends Modal {
                 this.close();
             }
         });
+
+        const wrapSelectionInTextarea = (ta, before, after) => {
+            try {
+                const start = ta.selectionStart || 0;
+                const end = ta.selectionEnd || 0;
+                const sel = ta.value.slice(start, end);
+                const replaced = before + sel + after;
+                ta.value = ta.value.slice(0, start) + replaced + ta.value.slice(end);
+                const pos = start + replaced.length;
+                ta.selectionStart = ta.selectionEnd = pos;
+            } catch (e) {}
+        };
+
+        textarea.addEventListener('keydown', (e) => {
+            if (e.ctrlKey && !e.shiftKey && !e.altKey) {
+                const k = String(e.key || '').toLowerCase();
+                if (k === 'b') { e.preventDefault(); wrapSelectionInTextarea(textarea, '**', '**'); }
+                if (k === 'i') { e.preventDefault(); wrapSelectionInTextarea(textarea, '*', '*'); }
+                if (k === 'k') { e.preventDefault(); wrapSelectionInTextarea(textarea, '[', ']( )'); }
+                if (k === '`') { e.preventDefault(); wrapSelectionInTextarea(textarea, '`', '`'); }
+            }
+        });
     }
     
     async createCardAndFilter(content, filterValue, filterType, selectedColor = 'var(--card-color-1)', tagsString = '') {
@@ -286,8 +308,18 @@ class QuickCardWithFilterModal extends Modal {
                 if (filterGroup) {
                     filterGroup.querySelectorAll('.card-filter-btn').forEach(b => {
                         b.removeClass('active');
-                        b.style.backgroundColor = 'var(--background-primary)';
-                        b.style.color = 'var(--text-muted)';
+                        const customBg = b.dataset.customBg;
+                        const customText = b.dataset.customText;
+                        if (customBg) {
+                            b.style.setProperty('background-color', customBg, 'important');
+                        } else {
+                            b.style.setProperty('background-color', 'var(--background-primary)', 'important');
+                        }
+                        if (customText) {
+                            b.style.setProperty('color', customText, 'important');
+                        } else {
+                            b.style.setProperty('color', 'var(--text-muted)', 'important');
+                        }
                     });
                 }
 
@@ -342,7 +374,7 @@ class CardSidebarView extends ItemView {
         super(leaf);
         this.plugin = plugin;
         this.cards = [];
-        this.activeFilters = { query: '', tags: [], status: null };
+        this.activeFilters = { query: '', tags: [], status: null, untaggedOnly: false };
         this._pendingTagWrites = {};
         this._reapplyingTags = {};
         this._universalCardOrder = [];  // Store complete universal order across all views
@@ -478,6 +510,25 @@ class CardSidebarView extends ItemView {
     }
 
     
+    // Helper function to apply the correct color to a card, respecting status color inheritance
+    applyCardColor(cardData, cardEl) {
+        if (!cardEl || !cardData) return;
+        
+        try {
+            // If inherit status color is enabled and card has a status with color, use status color
+            if (this.plugin.settings.inheritStatusColor && cardData.status && cardData.status.color) {
+                this.applyCardColorToElement(cardEl, cardData.status.color);
+                return;
+            }
+            
+            // Otherwise use the card's color
+            const colorToApply = cardData.color || 'var(--card-color-1)';
+            this.applyCardColorToElement(cardEl, colorToApply);
+        } catch (e) {
+            this.plugin.debugLog('Error in applyCardColor:', e);
+        }
+    }
+
     applyCardColorToElement(cardEl, colorVar) {
         const style = (this.plugin.settings.cardStyle != null) ? this.plugin.settings.cardStyle : 2;
         const opacity = (this.plugin.settings.cardBgOpacity != null) ? this.plugin.settings.cardBgOpacity : 0.08;
@@ -536,6 +587,16 @@ class CardSidebarView extends ItemView {
         this.cardsContainer.style.position = 'relative';
         this.cardsContainer.style.overflow = 'auto';
         this.cardsContainer.style.minHeight = '200px';
+        try { this.cardsContainer.style.contentVisibility = 'auto'; } catch (e) {}
+        try { this.cardsContainer.style.containIntrinsicSize = '600px'; } catch (e) {}
+
+        // Apply layout mode early to avoid layout flash
+        try { this.applyLayoutMode(); } catch (e) {}
+        try {
+            if (this.plugin.settings.verticalCardMode && this.cardsContainer) {
+                this.cardsContainer.style.visibility = 'hidden';
+            }
+        } catch (e) {}
 
         
 
@@ -558,43 +619,106 @@ class CardSidebarView extends ItemView {
 
         try { this.showLoadingOverlay(); } catch (e) {}
         try {
-            await this.loadCards(false);
+            // Let layout calculate before first card creation to prevent flash
+            await new Promise(r => {
+                try { requestAnimationFrame(() => r()); } catch (e) { setTimeout(r, 0); }
+            });
+            await this.scheduleLoadCards(false);
         } catch (e) {
             console.error('Error during loadCards onOpen:', e);
         }
 
-        
-    try { if (typeof this.applyFilters === 'function') this.applyFilters(); } catch (e) {}
-        try { if (typeof this.applyFilters === 'function') this.applyFilters(); } catch (e) {}
+        // Defer filter application until cards are fully rendered
+        this._deferFiltersUntilReady = true;
+
+        // NOTE: Do NOT call applyFilters() here - loadCardsPrioritized already handles card visibility.
+        // Calling applyFilters() causes an unnecessary show/hide cycle that creates the double rendering effect.
+        // Only apply filters if user explicitly changes them via UI interactions.
 
         try {
             const openVal = (this.plugin && this.plugin.settings && this.plugin.settings.openCategoryOnLoad) ? String(this.plugin.settings.openCategoryOnLoad) : null;
             if (openVal) {
                 const lower = String(openVal).toLowerCase();
                 if (['all', 'archived'].includes(lower)) {
-                    try {
-                        if (lower === 'archived') await this.loadCards(true);
-                        else await this.loadCards(false);
-                    } catch (e) {}
-                    try { if (typeof this.applyFilters === 'function') this.applyFilters(); } catch (e) {}
-                } else {
-                    
-                    try { this.currentCategoryFilter = String(openVal).toLowerCase(); } catch (e) { this.currentCategoryFilter = String(openVal); }
-                    try { this.applyFilters(); } catch (e) {}
+                    // Don't call applyFilters - just update UI button states
                     try {
                         const btns = this.containerEl.querySelectorAll('.card-filter-btn');
                         btns.forEach(b => {
                             try {
                                 const t = (b.dataset && b.dataset.filterType) ? String(b.dataset.filterType) : '';
                                 const v = (b.dataset && b.dataset.filterValue) ? String(b.dataset.filterValue).toLowerCase() : '';
-                                if (t === 'category' && v === String(this.currentCategoryFilter).toLowerCase()) {
+                                const customBg = b.dataset.customBg;
+                                const customText = b.dataset.customText;
+                                
+                                if (t === lower) {
                                     b.addClass('active');
-                                    b.style.backgroundColor = 'var(--background-modifier-hover)';
-                                    b.style.color = 'var(--text-normal)';
+                                    if (customBg) {
+                                        b.style.setProperty('background-color', customBg, 'important');
+                                        b.style.filter = 'brightness(1.2)';
+                                    } else {
+                                        b.style.setProperty('background-color', 'var(--background-modifier-hover)', 'important');
+                                    }
+                                    if (customText) {
+                                        b.style.setProperty('color', customText, 'important');
+                                    } else {
+                                        b.style.setProperty('color', 'var(--text-normal)', 'important');
+                                    }
                                 } else {
                                     b.removeClass('active');
-                                    b.style.backgroundColor = 'var(--background-primary)';
-                                    b.style.color = 'var(--text-muted)';
+                                    if (customBg) {
+                                        b.style.setProperty('background-color', customBg, 'important');
+                                    } else {
+                                        b.style.setProperty('background-color', 'var(--background-primary)', 'important');
+                                    }
+                                    if (customText) {
+                                        b.style.setProperty('color', customText, 'important');
+                                    } else {
+                                        b.style.setProperty('color', 'var(--text-muted)', 'important');
+                                    }
+                                    b.style.filter = '';
+                                }
+                            } catch (e) {}
+                        });
+                    } catch (e) {}
+                } else {
+                    
+                    try { this.currentCategoryFilter = String(openVal).toLowerCase(); } catch (e) { this.currentCategoryFilter = String(openVal); }
+                    // Don't call applyFilters on initial load - cards are already filtered appropriately
+                    try {
+                        const btns = this.containerEl.querySelectorAll('.card-filter-btn');
+                        btns.forEach(b => {
+                            try {
+                                const t = (b.dataset && b.dataset.filterType) ? String(b.dataset.filterType) : '';
+                                const v = (b.dataset && b.dataset.filterValue) ? String(b.dataset.filterValue).toLowerCase() : '';
+                                const customBg = b.dataset.customBg;
+                                const customText = b.dataset.customText;
+                                
+                                if (t === 'category' && v === String(this.currentCategoryFilter).toLowerCase()) {
+                                    b.addClass('active');
+                                    if (customBg) {
+                                        b.style.setProperty('background-color', customBg, 'important');
+                                        b.style.filter = 'brightness(1.2)';
+                                    } else {
+                                        b.style.setProperty('background-color', 'var(--background-modifier-hover)', 'important');
+                                    }
+                                    if (customText) {
+                                        b.style.setProperty('color', customText, 'important');
+                                    } else {
+                                        b.style.setProperty('color', 'var(--text-normal)', 'important');
+                                    }
+                                } else {
+                                    b.removeClass('active');
+                                    if (customBg) {
+                                        b.style.setProperty('background-color', customBg, 'important');
+                                    } else {
+                                        b.style.setProperty('background-color', 'var(--background-primary)', 'important');
+                                    }
+                                    if (customText) {
+                                        b.style.setProperty('color', customText, 'important');
+                                    } else {
+                                        b.style.setProperty('color', 'var(--text-muted)', 'important');
+                                    }
+                                    b.style.filter = '';
                                 }
                             } catch (e) {}
                         });
@@ -603,38 +727,59 @@ class CardSidebarView extends ItemView {
             }
         } catch (e) {}
 
-        try { this.hideLoadingOverlay(300); } catch (e) {}
+        // Don't fade cards during initial load - they already animate in via loadCardsPrioritized
+        // Calling hideLoadingOverlay(300) causes an unnecessary fade-out/fade-in cycle
+        // that creates the appearance of cards disappearing and re-entering
+        // Only show the overlay without fading during initial load
+        try { this.hideLoadingOverlay(0); } catch (e) {}
 
-        // Detect and save sidebar position
+        // Detect and save sidebar position - CRITICAL: detect where the sidebar was actually placed
         try {
             const detectPosition = () => {
                 let position = 'right';
+                let detectionDetails = {};
                 
-                // Check parent container classes
-                if (this.containerEl && this.containerEl.parentElement) {
-                    const parentEl = this.containerEl.parentElement;
-                    const className = parentEl.className || '';
+                // Traverse up the DOM tree to find the actual container
+                let current = this.containerEl;
+                let depth = 0;
+                const maxDepth = 10;
+                
+                while (current && depth < maxDepth) {
+                    const className = current.className || '';
+                    detectionDetails[`depth_${depth}`] = className;
                     
-                    if (className.includes('left-sidebar') || className.includes('side-dock-left')) {
+                    // Left sidebar detection
+                    if (className.includes('side-dock-left') || className.includes('mod-left-split')) {
                         position = 'left';
-                    } else if (className.includes('main-container') || className.includes('workspace-split') || className.includes('workspace-leaf-content')) {
-                        // Check if it's in the main editor area by looking for editor-container
-                        if (this.leaf && this.leaf.parentEl) {
-                            const leafParent = this.leaf.parentEl.className || '';
-                            if (leafParent.includes('main-container') || leafParent.includes('editor-container')) {
-                                position = 'tab';
-                            }
-                        }
+                        this.plugin.debugLog('Position detected as LEFT at depth', depth, '- class:', className);
+                        break;
                     }
+                    
+                    // Main tab area detection (editor area / homepage)
+                    if (className.includes('workspace-leaf-content') || className.includes('workspace-tabs')) {
+                        position = 'tab';
+                        this.plugin.debugLog('Position detected as TAB at depth', depth, '- class:', className);
+                        break;
+                    }
+                    
+                    // Right sidebar detection
+                    if (className.includes('side-dock-right') || className.includes('mod-right-split')) {
+                        position = 'right';
+                        this.plugin.debugLog('Position detected as RIGHT at depth', depth, '- class:', className);
+                        break;
+                    }
+                    
+                    current = current.parentElement;
+                    depth++;
                 }
                 
-                // Save position if different
+                // Save position if different from what's currently saved
                 if (position !== this.plugin.settings.sidebarPosition) {
                     this.plugin.settings.sidebarPosition = position;
                     this.plugin.saveSettings().catch(e => {
                         this.plugin.debugLog('Error saving sidebar position:', e);
                     });
-                    this.plugin.debugLog('Sidebar position detected and saved:', position);
+                    this.plugin.debugLog('🎯 SIDEBAR POSITION UPDATED TO:', position, detectionDetails);
                 }
                 
                 return position;
@@ -642,20 +787,45 @@ class CardSidebarView extends ItemView {
             
             detectPosition();
             
-            // Also set up a mutation observer to detect if the sidebar is moved
-            if (typeof MutationObserver !== 'undefined' && this.containerEl) {
-                const observer = new MutationObserver(() => {
+            // Set up a mutation observer to detect if the sidebar is moved (e.g., via drag)
+            // This is CRITICAL for detecting drag operations
+            if (typeof MutationObserver !== 'undefined' && this.containerEl && this.containerEl.parentElement) {
+                const observer = new MutationObserver((mutations) => {
                     try {
-                        const newPos = detectPosition();
-                        this.plugin.debugLog('Sidebar position changed:', newPos);
-                    } catch (e) {}
+                        // Check if any structural changes occurred
+                        let hasStructuralChange = false;
+                        for (const mutation of mutations) {
+                            if (mutation.attributeName === 'class') {
+                                hasStructuralChange = true;
+                                break;
+                            }
+                        }
+                        
+                        if (hasStructuralChange) {
+                            const newPos = detectPosition();
+                            this.plugin.debugLog('🔄 MUTATION DETECTED: Sidebar position changed to:', newPos);
+                        }
+                    } catch (e) {
+                        this.plugin.debugLog('Error in position mutation observer:', e);
+                    }
                 });
                 
-                observer.observe(this.containerEl.parentElement || this.containerEl, {
+                // Observe the parent element for class changes
+                observer.observe(this.containerEl.parentElement, {
                     attributes: true,
                     attributeFilter: ['class'],
                     subtree: false
                 });
+                
+                // Also observe higher up to catch moves between sidebars
+                if (this.containerEl.parentElement.parentElement) {
+                    observer.observe(this.containerEl.parentElement.parentElement, {
+                        attributes: true,
+                        attributeFilter: ['class'],
+                        subtree: true,
+                        attributeOldValue: true
+                    });
+                }
                 
                 // Store observer for cleanup
                 this._positionObserver = observer;
@@ -678,6 +848,9 @@ class CardSidebarView extends ItemView {
             this.plugin.registerEvent(this.app.vault.on('modify', async (file) => {
                 try {
                     if (!file || !file.path) return;
+                    // Skip reload if status was just being modified (prevents flickering)
+                    const flagKey = `_statusModifying_${file.path}`;
+                    if (this.plugin[flagKey]) return;
                     await this.updateCardFromNotePath(file.path);
                 } catch (e) {
                     console.error('Error handling modified file for card update:', e);
@@ -687,6 +860,9 @@ class CardSidebarView extends ItemView {
             try {
                 this._rawModifyListener = this.app.vault.on('modify', async (file) => {
                     if (!file || !file.path) return;
+                    // Skip reload if status was just being modified (prevents flickering)
+                    const flagKey = `_statusModifying_${file.path}`;
+                    if (this.plugin[flagKey]) return;
                     try { await this.updateCardFromNotePath(file.path); } catch (e) { console.error(e); }
                 });
             } catch (err) {
@@ -951,16 +1127,39 @@ class CardSidebarView extends ItemView {
                 btn.style.padding = '4px 8px';
                 btn.style.borderRadius = 'var(--button-radius)';
                 btn.style.border = '1px solid var(--background-modifier-border)';
-                btn.style.background = 'var(--background-primary)';
-                btn.style.color = 'var(--text-muted)';
                 btn.style.cursor = 'pointer';
                 btn.style.fontSize = '12px';
 
+                // Store the custom colors if available so we can restore them
+                let customBgColor = null;
+                let customTextColor = null;
+                
                 // Apply custom colors if available from filterColors settings
                 if (this.plugin.settings.filterColors && this.plugin.settings.filterColors[chip.value]) {
                     const colors = this.plugin.settings.filterColors[chip.value];
-                    if (colors.textColor) btn.style.color = colors.textColor;
-                    if (colors.bgColor) btn.style.backgroundColor = colors.bgColor;
+                    if (colors.textColor) {
+                        customTextColor = colors.textColor;
+                    }
+                    if (colors.bgColor) {
+                        customBgColor = colors.bgColor;
+                    }
+                }
+                
+                // Store colors as data attributes for persistence
+                if (customBgColor) btn.dataset.customBg = customBgColor;
+                if (customTextColor) btn.dataset.customText = customTextColor;
+                
+                // Apply styles with !important to ensure they stick
+                if (customBgColor) {
+                    btn.style.setProperty('background-color', customBgColor, 'important');
+                } else {
+                    btn.style.setProperty('background-color', 'var(--background-primary)', 'important');
+                }
+                
+                if (customTextColor) {
+                    btn.style.setProperty('color', customTextColor, 'important');
+                } else {
+                    btn.style.setProperty('color', 'var(--text-muted)', 'important');
                 }
                 
                 try { btn.dataset.filterType = chip.type || ''; } catch (e) {}
@@ -969,11 +1168,11 @@ class CardSidebarView extends ItemView {
                 btn.addEventListener('mouseenter', () => {
                     if (!btn.hasClass('active')) {
                         // Use custom background color if available, otherwise default hover
-                        if (this.plugin.settings.filterColors && this.plugin.settings.filterColors[chip.value] && this.plugin.settings.filterColors[chip.value].bgColor) {
-                            btn.style.backgroundColor = this.plugin.settings.filterColors[chip.value].bgColor;
+                        if (customBgColor) {
+                            btn.style.setProperty('background-color', customBgColor, 'important');
                             btn.style.filter = 'brightness(1.1)'; // Slight highlight on hover
                         } else {
-                            btn.style.backgroundColor = 'var(--background-modifier-hover)';
+                            btn.style.setProperty('background-color', 'var(--background-modifier-hover)', 'important');
                         }
                     }
                 });
@@ -981,31 +1180,40 @@ class CardSidebarView extends ItemView {
                 btn.addEventListener('mouseleave', () => {
                     if (!btn.hasClass('active')) {
                         // Reset to custom colors if available
-                        if (this.plugin.settings.filterColors && this.plugin.settings.filterColors[chip.value]) {
-                            const colors = this.plugin.settings.filterColors[chip.value];
-                            if (colors.bgColor) btn.style.backgroundColor = colors.bgColor;
-                            if (colors.textColor) btn.style.color = colors.textColor;
+                        if (customBgColor) {
+                            btn.style.setProperty('background-color', customBgColor, 'important');
                         } else {
-                            btn.style.backgroundColor = 'var(--background-primary)';
-                            btn.style.color = 'var(--text-muted)';
+                            btn.style.setProperty('background-color', 'var(--background-primary)', 'important');
+                        }
+                        if (customTextColor) {
+                            btn.style.setProperty('color', customTextColor, 'important');
+                        } else {
+                            btn.style.setProperty('color', 'var(--text-muted)', 'important');
                         }
                         btn.style.filter = ''; // Remove brightness filter
                     }
                 });
 
                 btn.addEventListener('click', async () => {
+                    console.log('[SIDECARDS] 🔘 Filter button clicked, type:', chip.type, 'value:', chip.value);
                     
                     filterGroup.querySelectorAll('.card-filter-btn').forEach(b => {
                         const btnChip = b.dataset.filterValue;
                         b.removeClass('active');
-                        // Restore default colors
-                        b.style.backgroundColor = 'var(--background-primary)';
-                        b.style.color = 'var(--text-muted)';
-                        // Re-apply custom colors if they exist
-                        if (this.plugin.settings.filterColors && this.plugin.settings.filterColors[btnChip]) {
-                            const colors = this.plugin.settings.filterColors[btnChip];
-                            if (colors.textColor) b.style.color = colors.textColor;
-                            if (colors.bgColor) b.style.backgroundColor = colors.bgColor;
+                        // Get the stored custom colors for this button
+                        const btnCustomBg = b.dataset.customBg || (this.plugin.settings.filterColors && this.plugin.settings.filterColors[btnChip]) ? this.plugin.settings.filterColors[btnChip].bgColor : null;
+                        const btnCustomText = b.dataset.customText || (this.plugin.settings.filterColors && this.plugin.settings.filterColors[btnChip]) ? this.plugin.settings.filterColors[btnChip].textColor : null;
+                        
+                        // Restore to custom colors if they exist
+                        if (btnCustomBg) {
+                            b.style.setProperty('background-color', btnCustomBg, 'important');
+                        } else {
+                            b.style.setProperty('background-color', 'var(--background-primary)', 'important');
+                        }
+                        if (btnCustomText) {
+                            b.style.setProperty('color', btnCustomText, 'important');
+                        } else {
+                            b.style.setProperty('color', 'var(--text-muted)', 'important');
                         }
                     });
 
@@ -1014,17 +1222,20 @@ class CardSidebarView extends ItemView {
 
                     
                     if (chip.type === 'archived' || chip.type === 'all') {
+                        console.log('[SIDECARDS] 🔘 Archived/All button - calling loadCards with archived=' + (chip.type === 'archived'));
                         btn.addClass('active');
                         // For active state, use a brighter version of custom colors or default
-                        if (this.plugin.settings.filterColors && this.plugin.settings.filterColors[chip.value] && this.plugin.settings.filterColors[chip.value].bgColor) {
-                            btn.style.backgroundColor = this.plugin.settings.filterColors[chip.value].bgColor;
+                        if (customBgColor) {
+                            btn.style.setProperty('background-color', customBgColor, 'important');
                             btn.style.filter = 'brightness(1.2)'; // Make active state brighter
                         } else {
-                            btn.style.backgroundColor = 'var(--background-modifier-hover)';
+                            btn.style.setProperty('background-color', 'var(--background-modifier-hover)', 'important');
                         }
                         // Preserve custom text color if set
-                        if (!(this.plugin.settings.filterColors && this.plugin.settings.filterColors[chip.value] && this.plugin.settings.filterColors[chip.value].textColor)) {
-                            btn.style.color = 'var(--text-normal)';
+                        if (customTextColor) {
+                            btn.style.setProperty('color', customTextColor, 'important');
+                        } else {
+                            btn.style.setProperty('color', 'var(--text-normal)', 'important');
                         }
                         // Clear any category filter when switching to 'all' or 'archived'
                         try { this.currentCategoryFilter = null; } catch (e) { this.currentCategoryFilter = null; }
@@ -1043,22 +1254,24 @@ class CardSidebarView extends ItemView {
                             this._isViewSwitch = true;
                             try {
                                 if (chip.type === 'archived') {
+                                    console.log('[SIDECARDS] 🔘 Calling loadCards(true) for archived');
                                     await this.loadCards(true);
                                 } else {
+                                    console.log('[SIDECARDS] 🔘 Calling loadCards(false) for all');
                                     await this.loadCards(false);
                                 }
                             } finally {
                                 this._isViewSwitch = false;
                             }
 
-                            try { if (typeof this.applyFilters === 'function') this.applyFilters(); } catch (e) {}
+                            // Don't call applyFilters() here - loadCards() already handles card visibility
+                            // applyFilters() would cause a redundant second load cycle
+                            // Also don't call animateCardsEntrance() here - loadCardsPrioritized already calls it
 
-                            try { this.animateCardsEntrance({ duration: 300, offset: 28 }); } catch (e) {}
-                        } finally {
-                            try { this.hideLoadingOverlay(300); } catch (e) {}
-                        }
+                            try { this.hideLoadingOverlay(0); } catch (e) {}
+                        } catch (e) {}
                     } else if (chip.type === 'category') {
-                        
+                        console.log('[SIDECARDS] 🔘 Category button - type:', chip.type, 'wasActive:', wasActive);
                         const catId = String(chip.value || '').toLowerCase();
                         if (wasActive) {
                             
@@ -1067,13 +1280,18 @@ class CardSidebarView extends ItemView {
                             filterGroup.querySelectorAll('.card-filter-btn').forEach(b => { 
                                 const btnChip = b.dataset.filterValue;
                                 b.removeClass('active'); 
-                                b.style.backgroundColor = 'var(--background-primary)'; 
-                                b.style.color = 'var(--text-muted)';
-                                // Re-apply custom colors if they exist
-                                if (this.plugin.settings.filterColors && this.plugin.settings.filterColors[btnChip]) {
-                                    const colors = this.plugin.settings.filterColors[btnChip];
-                                    if (colors.textColor) b.style.color = colors.textColor;
-                                    if (colors.bgColor) b.style.backgroundColor = colors.bgColor;
+                                const btnBg = b.dataset.customBg || (this.plugin.settings.filterColors && this.plugin.settings.filterColors[btnChip]) ? this.plugin.settings.filterColors[btnChip].bgColor : null;
+                                const btnText = b.dataset.customText || (this.plugin.settings.filterColors && this.plugin.settings.filterColors[btnChip]) ? this.plugin.settings.filterColors[btnChip].textColor : null;
+                                
+                                if (btnBg) {
+                                    b.style.setProperty('background-color', btnBg, 'important');
+                                } else {
+                                    b.style.setProperty('background-color', 'var(--background-primary)', 'important');
+                                }
+                                if (btnText) {
+                                    b.style.setProperty('color', btnText, 'important');
+                                } else {
+                                    b.style.setProperty('color', 'var(--text-muted)', 'important');
                                 }
                             });
                             this.applyFilters();
@@ -1083,8 +1301,8 @@ class CardSidebarView extends ItemView {
                         this.currentCategoryFilter = catId;
                         btn.addClass('active');
                         // For active state, use a brighter version of custom colors or default
-                        if (this.plugin.settings.filterColors && this.plugin.settings.filterColors[chip.value] && this.plugin.settings.filterColors[chip.value].bgColor) {
-                            btn.style.backgroundColor = this.plugin.settings.filterColors[chip.value].bgColor;
+                        if (customBgColor) {
+                            btn.style.setProperty('background-color', customBgColor, 'important');
                             btn.style.filter = 'brightness(1.2)'; // Make active state brighter
                         } else {
                             btn.style.backgroundColor = 'var(--background-modifier-hover)';
@@ -1094,14 +1312,17 @@ class CardSidebarView extends ItemView {
                             btn.style.color = 'var(--text-normal)';
                         }
                         
-                        // If the last load showed archived-only cards, reload the non-archived set !
+                        // If the last load showed archived-only cards, reload the non-archived set
                         try {
                             if (this._lastLoadArchived) {
-                                await this.loadCards(false);
+                                // This will reload all non-archived cards, so don't call applyFilters after
+                                await this.scheduleLoadCards(false);
+                            } else {
+                                // If we're already showing non-archived cards, just apply the category filter
+                                this.applyFilters();
                             }
                         } catch (e) {}
 
-                        this.applyFilters();
                     }
                 });
             });
@@ -1698,8 +1919,9 @@ class CardSidebarView extends ItemView {
                 const activeText = activeBtn ? activeBtn.textContent.toLowerCase() : 'all';
                 const showArchived = activeText === 'archived';
 
-                await this.loadCards(showArchived);
-                try { if (typeof this.applyFilters === 'function') this.applyFilters(); } catch (e) {}
+                await this.scheduleLoadCards(showArchived);
+                // Don't call applyFilters here - loadCards already renders cards with proper visibility
+                // Calling applyFilters causes unnecessary hide/show cycles
 
                 new Notice('Cards reloaded');
             } catch (err) {
@@ -1781,6 +2003,26 @@ class CardSidebarView extends ItemView {
             menu.showAtMouseEvent(e);
         });
 
+        const untaggedBtn = buttonContainer.createEl('button');
+        untaggedBtn.addClass('card-untagged-filter-btn');
+        untaggedBtn.setAttribute('aria-label', 'Show untagged only');
+        untaggedBtn.title = 'Show untagged only';
+        untaggedBtn.style.background = 'none';
+        untaggedBtn.style.border = 'none';
+        untaggedBtn.style.cursor = 'pointer';
+        untaggedBtn.style.padding = '4px';
+        untaggedBtn.style.color = this.activeFilters.untaggedOnly ? 'var(--interactive-accent)' : 'var(--text-muted)';
+        try { setIcon(untaggedBtn, 'tag'); } catch (e) { untaggedBtn.textContent = '∅'; }
+        untaggedBtn.addEventListener('mouseenter', () => { untaggedBtn.style.color = 'var(--text-normal)'; });
+        untaggedBtn.addEventListener('mouseleave', () => { untaggedBtn.style.color = this.activeFilters.untaggedOnly ? 'var(--interactive-accent)' : 'var(--text-muted)'; });
+        untaggedBtn.addEventListener('click', (e) => {
+            e.preventDefault(); e.stopPropagation();
+            this.activeFilters.untaggedOnly = !this.activeFilters.untaggedOnly;
+            untaggedBtn.style.color = this.activeFilters.untaggedOnly ? 'var(--interactive-accent)' : 'var(--text-muted)';
+            this.applyFilters();
+        });
+        try { buttonContainer.insertBefore(untaggedBtn, sortBtn); } catch (e) {}
+
         const pinToggleBtn = buttonContainer.createEl('button');
         pinToggleBtn.addClass('card-pin-toggle-btn');
         pinToggleBtn.setAttribute('aria-label', 'Show pinned only');
@@ -1813,13 +2055,24 @@ class CardSidebarView extends ItemView {
         gridToggleBtn.style.border = 'none';
         gridToggleBtn.style.cursor = 'pointer';
         gridToggleBtn.style.padding = '4px';
+        gridToggleBtn.style.color = this.plugin.settings.verticalCardMode ? 'var(--text-normal)' : 'var(--text-muted)';
         try { setIcon(gridToggleBtn, 'layout-grid'); } catch (e) { gridToggleBtn.textContent = '▦'; }
+        gridToggleBtn.addEventListener('mouseenter', () => { gridToggleBtn.style.color = 'var(--text-normal)'; });
+        gridToggleBtn.addEventListener('mouseleave', () => { gridToggleBtn.style.color = this.plugin.settings.verticalCardMode ? 'var(--text-normal)' : 'var(--text-muted)'; });
         gridToggleBtn.addEventListener('click', async (e) => {
             e.preventDefault(); e.stopPropagation();
             try {
                 this.plugin.settings.verticalCardMode = !this.plugin.settings.verticalCardMode;
                 await this.plugin.saveSettings();
+                gridToggleBtn.style.color = this.plugin.settings.verticalCardMode ? 'var(--text-normal)' : 'var(--text-muted)';
+                try { if (this.cardsContainer) this.cardsContainer.style.visibility = 'hidden'; } catch (e) {}
                 this.applyLayoutMode();
+                try { if (this.plugin.settings.verticalCardMode) this.refreshMasonrySpans(); } catch (e) {}
+                const showAfter = () => {
+                    try { if (this.cardsContainer) this.cardsContainer.style.visibility = ''; } catch (e) {}
+                    try { this.animateCardsEntrance(); } catch (e) {}
+                };
+                if (window.requestAnimationFrame) requestAnimationFrame(() => showAfter()); else setTimeout(showAfter, 0);
             } catch (err) { console.error('Error toggling grid layout', err); }
         });
 
@@ -2003,7 +2256,7 @@ class CardSidebarView extends ItemView {
                 this.currentCategoryFilter = null;
                 this.activeFilters = { query: '', tags: [], status: null };
                 
-                await this.loadCards(this._lastLoadArchived || false);
+                await this.scheduleLoadCards(this._lastLoadArchived || false);
                 await this.applyFilters();
                 await this.animateCardsEntrance({ duration: 300, offset: 28 });
             } catch (e) {
@@ -2023,7 +2276,7 @@ class CardSidebarView extends ItemView {
     }
 
     createCard(content, options = {}) {
-        const card = this.cardsContainer.createDiv();
+        const card = document.createElement('div');
         card.addClass('card-sidebar-card');
         card.style.position = 'relative';
         card.style.width = '100%';
@@ -2048,12 +2301,17 @@ class CardSidebarView extends ItemView {
             contentEl.textContent = content;
         } else {
             contentEl.setAttribute('contenteditable', 'false');
-            try {
-                contentEl.empty();
-                MarkdownRenderer.render(this.app, String(content || ''), contentEl, options.notePath || '');
-            } catch (e) {
-                contentEl.textContent = content;
-            }
+            // PERFORMANCE: Defer markdown rendering to avoid blocking card creation
+            // Set plain text first, then render asynchronously
+            contentEl.textContent = content;
+            
+            // Queue this for deferred rendering
+            if (!this._deferredRenderQueue) this._deferredRenderQueue = [];
+            this._deferredRenderQueue.push({
+                contentEl,
+                content: String(content || ''),
+                notePath: options.notePath || ''
+            });
         }
 
         contentEl.addEventListener('click', (ev) => {
@@ -2090,6 +2348,18 @@ class CardSidebarView extends ItemView {
                     contentEl.setAttribute('contenteditable', 'false');
                     contentEl.empty();
                     MarkdownRenderer.render(this.app, String((cd && cd.content) || ''), contentEl, (cd && cd.notePath) || options.notePath || '');
+                    
+                    // CRITICAL FIX: Always reapply the correct color after editing
+                    // This ensures status color inheritance is maintained
+                    if (cd) {
+                        setTimeout(() => {
+                            try {
+                                this.applyCardColor(cd, card);
+                            } catch (e) {
+                                this.plugin.debugLog('Error applying card color after edit:', e);
+                            }
+                        }, 0);
+                    }
                 } catch (_) {}
             }
         });
@@ -2134,6 +2404,32 @@ class CardSidebarView extends ItemView {
                 insertLineBreakInContentEditable(contentEl);
                 return;
             }
+
+            const wrapSelectionEditable = (el, before, after) => {
+                try {
+                    const sel = window.getSelection();
+                    if (!sel || sel.rangeCount === 0) return;
+                    const range = sel.getRangeAt(0);
+                    if (!el.contains(range.startContainer)) return;
+                    const text = range.toString();
+                    const node = document.createTextNode(before + text + after);
+                    range.deleteContents();
+                    range.insertNode(node);
+                    const newRange = document.createRange();
+                    newRange.setStart(node, (before + text + after).length);
+                    newRange.collapse(true);
+                    sel.removeAllRanges();
+                    sel.addRange(newRange);
+                } catch (err) {}
+            };
+
+            if (e.ctrlKey && !e.shiftKey && !e.altKey) {
+                const k = String(e.key || '').toLowerCase();
+                if (k === 'b') { e.preventDefault(); wrapSelectionEditable(contentEl, '**', '**'); return; }
+                if (k === 'i') { e.preventDefault(); wrapSelectionEditable(contentEl, '*', '*'); return; }
+                if (k === 'k') { e.preventDefault(); wrapSelectionEditable(contentEl, '[', ']( )'); return; }
+                if (k === '`') { e.preventDefault(); wrapSelectionEditable(contentEl, '`', '`'); return; }
+            }
         });
 
         const footer = card.createDiv();
@@ -2177,18 +2473,20 @@ class CardSidebarView extends ItemView {
             return tagsEl;
         };
 
-        if (this.plugin.settings.timestampBelowTags && options.tags && options.tags.length > 0) {
-            const tagsEl = createTagsNode(leftSection);
-            if (this.plugin.settings.showTimestamps) {
-                createTimestampNode(leftSection);
-            }
-        } else {
-            if (this.plugin.settings.showTimestamps) {
-                createTimestampNode(leftSection);
-            }
-            if (options.tags && options.tags.length > 0) {
+        if (!options.detached) {
+            if (this.plugin.settings.timestampBelowTags && options.tags && options.tags.length > 0) {
                 const tagsEl = createTagsNode(leftSection);
-                if (!this.plugin.settings.groupTags) tagsEl.remove();
+                if (this.plugin.settings.showTimestamps) {
+                    createTimestampNode(leftSection);
+                }
+            } else {
+                if (this.plugin.settings.showTimestamps) {
+                    createTimestampNode(leftSection);
+                }
+                if (options.tags && options.tags.length > 0) {
+                    const tagsEl = createTagsNode(leftSection);
+                    if (!this.plugin.settings.groupTags) tagsEl.remove();
+                }
             }
         }
 
@@ -2276,6 +2574,10 @@ class CardSidebarView extends ItemView {
                         // Also set via regular properties as fallback
                         statusPill.style.backgroundColor = bgColor;
                         statusPill.style.color = textColor;
+                        if (this.plugin.settings.inheritStatusColor && s.color) {
+                            cd.color = s.color;
+                            if (cd.element) this.applyCardColorToElement(cd.element, s.color);
+                        }
                     }
                     updateCardPadding();
                 } else {
@@ -2355,9 +2657,6 @@ class CardSidebarView extends ItemView {
         };
         card.dataset.id = cardData.id;
         if (cardData.pinned) {
-            try {
-                if (this.cardsContainer && this.cardsContainer.firstChild) this.cardsContainer.insertBefore(card, this.cardsContainer.firstChild);
-            } catch (e) { }
             this.cards.unshift(cardData);
         } else {
             this.cards.push(cardData);
@@ -2442,13 +2741,64 @@ class CardSidebarView extends ItemView {
         try { this.applyAutoColorRules(cardData); } catch (e) {}
         try { applyStatusPill(cardData); } catch (e) {}
         try { applyExpiryPill(cardData); scheduleExpiryRemoval(cardData); } catch (e) {}
-        try { if (this.plugin.settings.inheritStatusColor && cardData.status && cardData.status.color) this.applyCardColorToElement(card, cardData.status.color); } catch (e) {}
+        
+        // CRITICAL: Always apply the correct color based on status inheritance and auto-color rules
+        try { this.applyCardColor(cardData, card); } catch (e) {
+            this.plugin.debugLog('Error applying card color on creation:', e);
+        }
+        
         try { this.refreshMasonrySpans(); } catch (e) {}
+
+        try {
+            if (this.plugin.settings.enableCopyCardContent && !options.detached) {
+                const copyBtn = card.createDiv();
+                copyBtn.addClass('card-copy-btn');
+                try { copyBtn.classList.add('sidecards-copy-btn'); } catch (e) {}
+                copyBtn.style.position = 'absolute';
+                copyBtn.style.bottom = '2px';
+                copyBtn.style.right = '8px';
+                copyBtn.style.border = 'none';
+                copyBtn.style.background = 'none';
+                copyBtn.style.cursor = 'pointer';
+                copyBtn.style.padding = '4px';
+                copyBtn.style.color = 'var(--text-muted)';
+                copyBtn.style.display = 'none';
+                try { setIcon(copyBtn, 'copy'); } catch (e) { copyBtn.textContent = '⎘'; }
+                card.addEventListener('mouseenter', () => { copyBtn.style.display = ''; copyBtn.style.color = 'var(--text-normal)'; });
+                card.addEventListener('mouseleave', () => { copyBtn.style.display = 'none'; copyBtn.style.color = 'var(--text-muted)'; });
+                copyBtn.addEventListener('click', async (e) => {
+                    e.preventDefault(); e.stopPropagation();
+                    try {
+                        let text = String(cardData.content || '');
+                        if (cardData.notePath) {
+                            try {
+                                const file = this.app.vault.getAbstractFileByPath(cardData.notePath);
+                                if (file) {
+                                    const content = await this.app.vault.read(file);
+                                    const m = content.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n/);
+                                    text = m ? content.slice(m[0].length) : content;
+                                }
+                            } catch (err) {}
+                        }
+                        try { await navigator.clipboard.writeText(text); } catch (err) {}
+                        try { new Notice('Card content copied'); } catch (err) {}
+                    } catch (err) {}
+                });
+            }
+        } catch (e) {}
+        // Defer non-essential UI setup until idle
+        try {
+            if (!this._deferredUiSetupQueue) this._deferredUiSetupQueue = [];
+            this._deferredUiSetupQueue.push({ cardData });
+            this.scheduleDeferredUiSetup();
+        } catch (e) {}
         return cardData;
     }
 
     enqueueCardCreate(content, options) {
         try {
+            options = options || {};
+            if (this._bulkLoading || this._applySortLoadInProgress) options.detached = true;
             const c = this.createCard(content, options);
             if (!c || !c.element) {
                 this.plugin.debugLog('⚠️ Card creation returned invalid object', { options });
@@ -2633,7 +2983,7 @@ class CardSidebarView extends ItemView {
             this.cardsContainer.addEventListener('dragover', (e) => {
                 if (!(this.plugin && this.plugin.settings && this.plugin.settings.sortMode === 'manual')) return;
                 e.preventDefault();
-                const afterElement = this.getDragAfterElement(this.cardsContainer, e.clientY);
+                const afterElement = this.getDragAfterElement(this.cardsContainer, e.clientY, e.clientX);
                 const dragging = this.cardsContainer.querySelector('.dragging');
                 if (!dragging) return;
                 if (afterElement == null) {
@@ -2765,19 +3115,54 @@ class CardSidebarView extends ItemView {
         this.saveCards();
     }
 
-    getDragAfterElement(container, y) {
+    getDragAfterElement(container, y, x = null) {
         const draggableElements = [...container.querySelectorAll('.card-sidebar-card:not(.dragging)')];
-        let closest = null;
-        let closestOffset = Number.NEGATIVE_INFINITY;
-        draggableElements.forEach(child => {
-            const box = child.getBoundingClientRect();
-            const offset = y - box.top - box.height / 2;
-            if (offset < 0 && offset > closestOffset) {
-                closestOffset = offset;
-                closest = child;
-            }
-        });
-        return closest;
+        
+        // Check if we're in grid mode
+        const isGridMode = this.plugin && this.plugin.settings && this.plugin.settings.verticalCardMode;
+        
+        if (isGridMode && x !== null) {
+            // For grid mode: use both X and Y coordinates for better placement
+            let closest = null;
+            let closestDistance = Number.POSITIVE_INFINITY;
+            
+            draggableElements.forEach(child => {
+                const box = child.getBoundingClientRect();
+                const containerBox = container.getBoundingClientRect();
+                
+                // Calculate distance from cursor to element center
+                const elementCenterX = box.left + box.width / 2;
+                const elementCenterY = box.top + box.height / 2;
+                const distanceX = Math.abs(x - elementCenterX);
+                const distanceY = Math.abs(y - elementCenterY);
+                
+                // Weight: Y distance is more important, but X helps with grid alignment
+                const distance = distanceY + (distanceX * 0.5);
+                
+                // Only consider elements below and to the right of cursor (or very close)
+                const isAfter = (y > box.top - box.height / 4) && (y < box.bottom + box.height / 4);
+                
+                if (isAfter && distance < closestDistance) {
+                    closestDistance = distance;
+                    closest = child;
+                }
+            });
+            
+            return closest;
+        } else {
+            // For vertical mode: use only Y coordinate (original behavior)
+            let closest = null;
+            let closestOffset = Number.NEGATIVE_INFINITY;
+            draggableElements.forEach(child => {
+                const box = child.getBoundingClientRect();
+                const offset = y - box.top - box.height / 2;
+                if (offset < 0 && offset > closestOffset) {
+                    closestOffset = offset;
+                    closest = child;
+                }
+            });
+            return closest;
+        }
     }
 
     parseDateToMs(s) {
@@ -3041,20 +3426,14 @@ class CardSidebarView extends ItemView {
         if (!cardData) return;
 
         try {
-            
-            
-            
             cardData.content = newContent;
 
             if (this.plugin.settings.groupTags) {
                 try { this.updateCardTagDisplay(cardData); } catch (e) {}
             }
 
-            
             try { await this.saveCards(); } catch (e) { console.error('Error saving cards after content edit:', e); }
 
-            
-            
             try {
                 if (cardData.notePath) {
                     const file = this.app.vault.getAbstractFileByPath(cardData.notePath);
@@ -3064,7 +3443,6 @@ class CardSidebarView extends ItemView {
                             const fmMatch = text.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n/);
                             let newText;
                             if (fmMatch) {
-                                
                                 newText = fmMatch[0] + newContent;
                             } else {
                                 newText = newContent;
@@ -3073,7 +3451,6 @@ class CardSidebarView extends ItemView {
                             await this.app.vault.modify(file, newText);
                         } catch (err) {
                             console.error('Error updating note body while preserving frontmatter:', err);
-                            
                             const fmMatch = text.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n/);
                             let fmBlock = '';
                             if (fmMatch) fmBlock = fmMatch[0];
@@ -3086,7 +3463,6 @@ class CardSidebarView extends ItemView {
                             await this.app.vault.modify(file, updated);
                         }
                     } else {
-                        
                         try {
                             const folder = this.plugin.settings.storageFolder || '';
                             const firstLine = (newContent || '').split('\n')[0] || 'card';
@@ -3112,6 +3488,16 @@ class CardSidebarView extends ItemView {
         }
 
         try { this.applyAutoColorRules(cardData); } catch (e) {}
+        
+        // CRITICAL FIX: Always reapply the correct color after all changes
+        // This ensures status color inheritance is never lost
+        if (cardData.element) {
+            try {
+                this.applyCardColor(cardData, cardData.element);
+            } catch (e) {
+                this.plugin.debugLog('Error reapplying card color after content update:', e);
+            }
+        }
     }
 
     applyAutoColorRules(cardData) {
@@ -3324,6 +3710,7 @@ class CardSidebarView extends ItemView {
             const q = (this.activeFilters && this.activeFilters.query) ? String(this.activeFilters.query).trim().toLowerCase() : '';
             const tags = (this.activeFilters && Array.isArray(this.activeFilters.tags)) ? this.activeFilters.tags.slice() : [];
             const statusFilter = (this.activeFilters && this.activeFilters.status) ? String(this.activeFilters.status).trim() : null;
+            const untaggedOnly = !!(this.activeFilters && this.activeFilters.untaggedOnly);
             const showPinnedOnly = !!(this.plugin && this.plugin.settings && this.plugin.settings.showPinnedOnly);
             let catFilter = (this.currentCategoryFilter || null);
             try {
@@ -3340,7 +3727,8 @@ class CardSidebarView extends ItemView {
                         archivedCheck: true,
                         tagCheck: true,
                         searchCheck: true,
-                        categoryCheck: true
+                        categoryCheck: true,
+                        untaggedCheck: true
                     };
 
                     // Pin Check
@@ -3369,6 +3757,15 @@ class CardSidebarView extends ItemView {
                                 visible = false;
                                 break;
                             }
+                        }
+                    }
+
+                    if (visible && untaggedOnly) {
+                        const hasTags = !!(c.tags && c.tags.length > 0);
+                        const hasCategory = !!(c.category && String(c.category).trim() !== '');
+                        if (hasTags || hasCategory) {
+                            filterChecks.untaggedCheck = false;
+                            visible = false;
                         }
                     }
 
@@ -3501,6 +3898,19 @@ class CardSidebarView extends ItemView {
                 })));
             }
 
+            // First, hide all cards and clear animation styles
+            (this.cards || []).forEach(c => {
+                if (c && c.element) {
+                    try {
+                        c.element.style.display = 'none';
+                        c.element.style.transition = '';
+                        c.element.style.transform = '';
+                        c.element.style.opacity = '';
+                        c.element.style.willChange = '';
+                    } catch (e) {}
+                }
+            });
+
             // Show visible cards in correct order
             visibleCards.forEach(c => {
                 if (c.element) {
@@ -3531,8 +3941,15 @@ class CardSidebarView extends ItemView {
                 }))
             });
 
-            if (!skipAnimation) {
-                try { this.animateCardsEntrance(); } catch (e) { }
+            if (!skipAnimation && this.plugin.settings.animatedCards) {
+                try { 
+                    // Use requestAnimationFrame to ensure DOM has been updated before animation
+                    requestAnimationFrame(() => {
+                        try {
+                            this.animateCardsEntrance(); 
+                        } catch (e) { }
+                    });
+                } catch (e) { }
             }
         } catch (err) {
             console.error('Error in applyFilters:', err);
@@ -3543,7 +3960,19 @@ class CardSidebarView extends ItemView {
     // Dedicated function for full reload when needed
     async reloadCards() {
         this.plugin.debugLog("🔄 Performing full card reload");
-        await this.loadCards(this._lastLoadArchived || false);
+        await this.scheduleLoadCards(this._lastLoadArchived || false);
+    }
+
+    scheduleLoadCards(showArchived = false, delay = 100) {
+        this._lastRequestedLoadArchived = !!showArchived;
+        if (this._reloadTimeout) clearTimeout(this._reloadTimeout);
+        return new Promise((resolve) => {
+            this._reloadTimeout = setTimeout(async () => {
+                this._reloadTimeout = null;
+                await this.loadCards(this._lastRequestedLoadArchived);
+                resolve();
+            }, Math.max(0, Number(delay || 100)));
+        });
     }
 
     createSearchBar(container) {
@@ -3842,10 +4271,47 @@ class CardSidebarView extends ItemView {
                     }
                     if (parsedColorVar) {
                         cardData.color = parsedColorVar;
-                        if (cardData.element) this.applyCardColorToElement(cardData.element, cardData.color);
+                        // Apply the correct color (status or original) to element
+                        if (cardData.element) {
+                            this.applyCardColor(cardData, cardData.element);
+                        }
                     }
                 } catch (e) {
                 }
+                
+                // Read Status frontmatter and update cardData.status
+                try {
+                    const stMatch = fm.match(/^\s*Status\s*:\s*(.*)$/mi);
+                    if (this.plugin.settings.enableCardStatus && stMatch) {
+                        const sName = String(stMatch[1]).trim().replace(/^"|"$/g, '');
+                        
+                        // Always look up colors from settings, never from frontmatter
+                        const statusSettings = Array.isArray(this.plugin.settings.cardStatuses) ? this.plugin.settings.cardStatuses : [];
+                        const matchedStatus = statusSettings.find(st => String(st.name || '').toLowerCase() === String(sName).toLowerCase());
+                        if (matchedStatus) {
+                            cardData.status = { name: sName, color: matchedStatus.color || '', textColor: matchedStatus.textColor || '' };
+                            // Update the status pill if it exists
+                            try {
+                                const pill = cardData.element.querySelector('.card-status-pill');
+                                if (pill) {
+                                    pill.style.display = '';
+                                    pill.textContent = sName || '';
+                                    pill.style.backgroundColor = matchedStatus.color || '#ccc';
+                                    pill.style.color = matchedStatus.textColor || '#000';
+                                }
+                            } catch (e) {}
+                            // Reapply status color to card
+                            if (cardData.element) {
+                                this.applyCardColor(cardData, cardData.element);
+                            }
+                        } else {
+                            cardData.status = { name: sName, color: '', textColor: '' };
+                        }
+                    } else {
+                        // Clear status if not enabled or not found in frontmatter
+                        cardData.status = null;
+                    }
+                } catch (e) {}
                 
                 try {
                     // Read Category frontmatter
@@ -4368,7 +4834,7 @@ class CardSidebarView extends ItemView {
                                         .onClick(async () => {
                                             // Update cardData with status including textColor from settings
                                             cardData.status = { name: st.name || '', color: st.color || '', textColor: st.textColor || '#000' };
-                                            try { await this.saveCards(); } catch (e) {}
+                                            
                                             try {
                                                 const pill = card.querySelector('.card-status-pill');
                                                 if (pill) {
@@ -4390,25 +4856,52 @@ class CardSidebarView extends ItemView {
                                                     try { card.classList.add('has-pills'); } catch (e) {}
                                                 }
                                             } catch (e) {}
+                                            
                                             // Refresh masonry spans after status pill changes height
                                             try { this.refreshMasonrySpans(); } catch (e) {}
-                                            if (this.plugin.settings.inheritStatusColor && st.color) {
-                                                try { this.applyCardColorToElement(card, st.color); } catch (e) {}
+                                            
+                                            // CRITICAL: Immediately apply the correct color to the card
+                                            // If inherit status color is enabled, the card MUST show the status color
+                                            try {
+                                                if (this.plugin.settings.inheritStatusColor && st.color) {
+                                                    // Immediately apply status color without any delay
+                                                    // DO NOT overwrite cardData.color - keep original color stored
+                                                    this.applyCardColorToElement(card, st.color);
+                                                } else {
+                                                    // If not inheriting, keep the original color
+                                                    this.applyCardColor(cardData, card);
+                                                }
+                                            } catch (e) {
+                                                this.plugin.debugLog('Error applying status color:', e);
                                             }
+                                            
+                                            // Save all changes at once (avoid flickering from multiple saves)
+                                            try { await this.saveCards(); } catch (e) {}
+                                            
                                             if (cardData.notePath) {
                                                 try {
                                                     const file = this.app.vault.getAbstractFileByPath(cardData.notePath);
                                                     if (file) {
-                                                        let content = await this.app.vault.read(file);
-                                                        const fmMatch = content.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n/);
-                                                        if (fmMatch) {
-                                                            let fm = fmMatch[1];
-                                                            fm = fm.replace(/^\s*Status\s*:.*$/gmi, '').replace(/^\s*Status-Color\s*:.*$/gmi, '').replace(/^\s*Status-Text-Color\s*:.*$/gmi, '');
-                                                            fm = fm.split(/\r?\n/).filter(l => l.trim() !== '').join('\n');
-                                                            fm += `\nStatus: "${(st.name || '').replace(/"/g,'\\"')}"`;
-                                                            const newFm = '---\n' + fm + '\n---\n';
-                                                            content = content.replace(fmMatch[0], newFm);
-                                                            await this.app.vault.modify(file, content);
+                                                        // Set flag to prevent file modification from triggering a reload
+                                                        const flagKey = `_statusModifying_${file.path}`;
+                                                        this.plugin[flagKey] = true;
+                                                        try {
+                                                            let content = await this.app.vault.read(file);
+                                                            const fmMatch = content.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n/);
+                                                            if (fmMatch) {
+                                                                let fm = fmMatch[1];
+                                                                fm = fm.replace(/^\s*Status\s*:.*$/gmi, '').replace(/^\s*Status-Color\s*:.*$/gmi, '').replace(/^\s*Status-Text-Color\s*:.*$/gmi, '');
+                                                                fm = fm.split(/\r?\n/).filter(l => l.trim() !== '').join('\n');
+                                                                fm += `\nStatus: "${(st.name || '').replace(/"/g,'\\"')}"`;
+                                                                const newFm = '---\n' + fm + '\n---\n';
+                                                                content = content.replace(fmMatch[0], newFm);
+                                                                await this.app.vault.modify(file, content);
+                                                            }
+                                                        } finally {
+                                                            // Clear flag after a brief delay to allow the modify to complete
+                                                            setTimeout(() => { 
+                                                                delete this.plugin[flagKey]; 
+                                                            }, 100);
                                                         }
                                                     }
                                                 } catch (e) {}
@@ -4416,6 +4909,37 @@ class CardSidebarView extends ItemView {
                                         });
                                 });
                             });
+                            // Color dropdown for status colors
+                            const container = document.createElement('div');
+                            container.style.display = 'flex';
+                            container.style.gap = '6px';
+                            container.style.padding = '6px 0px';
+                            const label = document.createElement('span');
+                            label.textContent = 'Status Color:';
+                            label.style.color = 'var(--text-muted)';
+                            const colorInput = document.createElement('input');
+                            colorInput.type = 'color';
+                            colorInput.value = cardData.status?.color || '#20bf6b';
+                            colorInput.addEventListener('change', async (e) => {
+                                try {
+                                    const newColor = e.target.value;
+                                    if (cardData.status) {
+                                        cardData.status.color = newColor;
+                                        await this.saveCards();
+                                        const pill = card.querySelector('.card-status-pill');
+                                        if (pill) {
+                                            const a = (this.plugin && this.plugin.settings && typeof this.plugin.settings.statusPillOpacity !== 'undefined') ? this.plugin.settings.statusPillOpacity : 1;
+                                            const hex = String(newColor || '').replace('#','');
+                                            const n = parseInt(hex.length === 3 ? hex.split('').map(x=>x+x).join('') : hex, 16);
+                                            const r=(n>>16)&255,g=(n>>8)&255,b=n&255; const rgba = `rgba(${r}, ${g}, ${b}, ${Math.max(0.1, Math.min(1, a))})`;
+                                            pill.style.backgroundColor = rgba;
+                                        }
+                                    }
+                                } catch (err) {}
+                            });
+                            container.appendChild(label);
+                            container.appendChild(colorInput);
+                            if (menu2.titleEl) menu2.titleEl.appendChild(container);
                             menu2.showAtMouseEvent(event);
                         });
                 });
@@ -4503,21 +5027,27 @@ class CardSidebarView extends ItemView {
         });
 
         menu.addItem((item) => {
-            item.setTitle('Archive Card')
+            item.setTitle(cardData.archived ? 'Unarchive Card' : 'Archive Card')
                 .setIcon('archive')
                 .onClick(async () => {
                     try {
-                        // Toggle archive state and write to frontmatter (centralized)
-                        this.plugin.debugLog('Archiving card', cardData.id, 'notePath:', cardData.notePath);
-                        await this.toggleArchive(cardData, true);
+                        const target = !cardData.archived;
+                        this.plugin.debugLog(target ? 'Archiving card' : 'Unarchiving card', cardData.id, 'notePath:', cardData.notePath);
+                        await this.toggleArchive(cardData, target);
 
                         // Remove from UI immediately
-                        try { card.remove(); } catch (e) {}
+                        try {
+                            if (target) { card.remove(); }
+                            else { card.style.display = ''; }
+                        } catch (e) {}
 
-                        new Notice('Card archived');
+                        new Notice(target ? 'Card archived' : 'Card unarchived');
+                        if (!target) {
+                            try { await this.reloadCards(); } catch (e) {}
+                        }
                     } catch (err) {
                         console.error('Error archiving card:', err);
-                        new Notice('Error archiving card (see console)');
+                        new Notice('Error updating archive state (see console)');
                     }
                 });
         });
@@ -4999,18 +5529,356 @@ class CardSidebarView extends ItemView {
         }
     }
 
+    async loadCardsPrioritized(cardsToRender, showArchived = false) {
+        const renderStartTime = performance.now();
+        console.log("[SIDECARDS] 🚀 IMMEDIATE visibility rendering with", cardsToRender.length, "total cards");
+        
+        try {
+            // STEP 1: Batch append all cards to DOM (all at once, not in batches)
+            // This is the key: get them all in the DOM with plain text immediately
+            const appendStartTime = performance.now();
+            
+            if (this.cardsContainer && cardsToRender.length > 0) {
+                // Use a document fragment for optimal batch DOM operations
+                const fragment = document.createDocumentFragment();
+                
+                for (const cardData of cardsToRender) {
+                    try {
+                        if (cardData.element && !cardData.element.parentNode) {
+                            fragment.appendChild(cardData.element);
+                        }
+                    } catch (e) {
+                        console.error('[SIDECARDS] Error adding card to fragment:', e);
+                    }
+                }
+                
+                // Append all cards in one DOM operation
+                if (fragment.childNodes.length > 0) {
+                    this.cardsContainer.appendChild(fragment);
+                }
+            }
+            
+            console.log(`[SIDECARDS] ⚡ Batch appended ${cardsToRender.length} cards in ${(performance.now() - appendStartTime).toFixed(2)}ms`);
+            
+            // STEP 2: If grid mode, calculate masonry spans BEFORE making visible
+            try {
+                if (this.plugin.settings.verticalCardMode) {
+                    try { this.refreshMasonrySpans(); } catch (e) {}
+                }
+            } catch (e) {}
+            
+            // STEP 3: Make container visible in rAF after layout is stable, then animate
+            const makeVisible = () => {
+                try {
+                    if (this.cardsContainer) {
+                        this.cardsContainer.style.visibility = '';
+                    }
+                } catch (e) {}
+                try { this.animateCardsEntrance(); } catch (e) {}
+            };
+            if (window.requestAnimationFrame) {
+                window.requestAnimationFrame(() => makeVisible());
+            } else {
+                setTimeout(makeVisible, 0);
+            }
+            
+            // STEP 4: Schedule markdown rendering asynchronously and return its completion
+            return this.scheduleMarkdownRenderingIdle(cardsToRender);
+            
+        } catch (e) {
+            console.error('[SIDECARDS] Error in progressive render:', e);
+            // Fallback: show all cards
+            try { if (this.cardsContainer) this.cardsContainer.style.visibility = ''; } catch (e2) {}
+        }
+        return Promise.resolve();
+    }
+
+    scheduleMarkdownRenderingIdle(cardsToRender) {
+        const markdownQueueRaw = this._deferredRenderQueue || [];
+        this._deferredRenderQueue = [];
+        if (markdownQueueRaw.length === 0) {
+            return Promise.resolve();
+        }
+        const visibleFirst = [];
+        const nonVisible = [];
+        for (const item of markdownQueueRaw) {
+            try {
+                const el = item.contentEl;
+                const r = el && el.getBoundingClientRect ? el.getBoundingClientRect() : null;
+                const inView = r ? (r.top < window.innerHeight && r.bottom > 0) : false;
+                (inView ? visibleFirst : nonVisible).push(item);
+            } catch (e) { nonVisible.push(item); }
+        }
+        const markdownQueue = visibleFirst.concat(nonVisible);
+        let index = 0;
+        const token = (this._markdownRenderToken || 0) + 1;
+        this._markdownRenderToken = token;
+        const onUserInteract = () => { this._markdownRenderToken++; };
+        try {
+            if (this.cardsContainer) {
+                this.cardsContainer.addEventListener('scroll', onUserInteract, { passive: true });
+                this.cardsContainer.addEventListener('wheel', onUserInteract, { passive: true });
+                this.cardsContainer.addEventListener('touchstart', onUserInteract, { passive: true });
+                this.cardsContainer.addEventListener('keydown', onUserInteract, { passive: true });
+                this.cardsContainer.addEventListener('mousemove', onUserInteract, { passive: true });
+            }
+        } catch (e) {}
+        const detach = () => {
+            try {
+                if (this.cardsContainer) {
+                    this.cardsContainer.removeEventListener('scroll', onUserInteract);
+                    this.cardsContainer.removeEventListener('wheel', onUserInteract);
+                    this.cardsContainer.removeEventListener('touchstart', onUserInteract);
+                    this.cardsContainer.removeEventListener('keydown', onUserInteract);
+                    this.cardsContainer.removeEventListener('mousemove', onUserInteract);
+                }
+            } catch (e) {}
+        };
+        return new Promise((resolve) => {
+            const processOne = () => {
+                if (token !== this._markdownRenderToken) { detach(); resolve(); return; }
+                if (index >= markdownQueue.length) { 
+                    detach(); 
+                    // CRITICAL: Recalculate masonry spans after ALL markdown rendering is complete
+                    try { this.refreshMasonrySpans(); } catch (e) {}
+                    resolve(); 
+                    return; 
+                }
+                const item = markdownQueue[index++];
+                try {
+                    if (item.contentEl && item.contentEl.isConnected) {
+                        const tmp = document.createElement('div');
+                        MarkdownRenderer.render(this.app, item.content, tmp, item.notePath);
+                        const frag = document.createDocumentFragment();
+                        while (tmp.firstChild) frag.appendChild(tmp.firstChild);
+                        if (window.requestAnimationFrame) {
+                            window.requestAnimationFrame(() => {
+                                if (!item.contentEl.isConnected || token !== this._markdownRenderToken) { setTimeout(next, 1); return; }
+                                item.contentEl.empty();
+                                item.contentEl.appendChild(frag);
+                                // Schedule a small delay to allow DOM to update card height
+                                setTimeout(() => {
+                                    try {
+                                        // Trigger a micro-update for this card's masonry span after content renders
+                                        const card = item.contentEl.closest('.card-sidebar-card');
+                                        if (card && this.plugin.settings.verticalCardMode) {
+                                            const h = card.getBoundingClientRect().height;
+                                            const span = Math.max(1, Math.ceil(h + 6));
+                                            card.style.gridRowEnd = 'span ' + span;
+                                        }
+                                    } catch (e) {}
+                                    next();
+                                }, 8);
+                            });
+                        } else {
+                            item.contentEl.empty();
+                            item.contentEl.appendChild(frag);
+                            next();
+                        }
+                    } else {
+                        setTimeout(next, 1);
+                    }
+                } catch (e) {
+                    setTimeout(next, 1);
+                }
+            };
+            const next = () => {
+                if (token !== this._markdownRenderToken) { detach(); resolve(); return; }
+                if (index >= markdownQueue.length) { 
+                    detach(); 
+                    // CRITICAL: Recalculate masonry spans after ALL markdown rendering is complete
+                    try { this.refreshMasonrySpans(); } catch (e) {}
+                    resolve(); 
+                    return; 
+                }
+                if (window.requestIdleCallback) {
+                    window.requestIdleCallback(() => processOne(), { timeout: 5000 });
+                } else {
+                    setTimeout(processOne, 1);
+                }
+            };
+            next();
+        });
+    }
+
+    scheduleDeferredUiSetup() {
+        const queue = this._deferredUiSetupQueue || [];
+        if (queue.length === 0) return;
+        const run = () => {
+            const items = queue.splice(0, queue.length);
+            for (const item of items) {
+                try {
+                    const cd = item.cardData;
+                    if (!cd || !cd.element) continue;
+                    const footer = cd.element.querySelector('.card-footer-left')?.parentElement || cd.element.querySelector('.card-footer-right')?.parentElement;
+                    if (footer) {
+                        const leftExists = cd.element.querySelector('.card-footer-left');
+                        const rightExists = cd.element.querySelector('.card-footer-right');
+                        if (!leftExists) {
+                            const left = footer.createDiv();
+                            left.addClass('card-footer-left');
+                            if (this.plugin.settings.showTimestamps) {
+                                const ts = left.createDiv();
+                                ts.addClass('card-timestamp');
+                                ts.textContent = this.formatTimestamp(cd.created || new Date().toISOString());
+                            }
+                            if (cd.tags && cd.tags.length > 0 && !this.plugin.settings.groupTags) {
+                                const tagsEl = left.createDiv();
+                                tagsEl.addClass('card-tags');
+                                (cd.tags || []).forEach(t => {
+                                    const tagText = (this.plugin.settings.omitTagHash ? t : `#${t}`);
+                                    const tagEl = tagsEl.createDiv();
+                                    tagEl.addClass('card-tag');
+                                    tagEl.textContent = tagText;
+                                });
+                            }
+                        }
+                        if (!rightExists) {
+                            const right = footer.createDiv();
+                            right.addClass('card-footer-right');
+                        }
+                    }
+                } catch (e) {}
+            }
+        };
+        if (window.requestIdleCallback) {
+            window.requestIdleCallback(() => run());
+        } else {
+            setTimeout(run, 0);
+        }
+    }
+
+    scheduleFrontmatterSyncIdle(cards) {
+        const list = Array.isArray(cards) ? cards.slice() : [];
+        const run = async () => {
+            for (const cd of list) {
+                try {
+                    if (!cd || !cd.notePath) continue;
+                    const file = this.app.vault.getAbstractFileByPath(cd.notePath);
+                    if (!file || !file.stat) continue;
+                    const mtime = file.stat.mtime || 0;
+                    const cache = (this.plugin.settings.frontmatterCache || {});
+                    const cached = cache[cd.notePath];
+                    if (cached && cached.mtime >= mtime) continue;
+                    const text = await this.app.vault.read(file);
+                    const m = text.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n/);
+                    let fm = m ? m[1] : '';
+                    let archived = cd.archived || false;
+                    let pinned = cd.pinned || false;
+                    let statusName = (cd.status && cd.status.name) || '';
+                    let statusColor = (cd.status && cd.status.color) || '';
+                    let statusTextColor = (cd.status && cd.status.textColor) || '';
+                    let expiresAt = cd.expiresAt || null;
+                    let category = cd.category || null;
+                    let colorVar = cd.color || null;
+                    let tags = Array.isArray(cd.tags) ? cd.tags.slice() : [];
+                    if (fm) {
+                        const archMatch = fm.match(/^\s*archived\s*:\s*(true|false)\s*$/mi);
+                        if (archMatch) archived = archMatch[1].toLowerCase() === 'true';
+                        const pinMatch = fm.match(/^\s*pinned\s*:\s*(true|false)\s*$/mi);
+                        if (pinMatch) pinned = pinMatch[1].toLowerCase() === 'true';
+                        const eMatch = fm.match(/^\s*Expires-At\s*:\s*(.*)$/mi);
+                        if (eMatch) expiresAt = String(eMatch[1]).trim().replace(/^"|"$/g, '');
+                        const stMatch = fm.match(/^\s*Status\s*:\s*(.*)$/mi);
+                        if (this.plugin.settings.enableCardStatus && stMatch) {
+                            const sName = String(stMatch[1]).trim().replace(/^"|"$/g, '');
+                            const statusSettings = Array.isArray(this.plugin.settings.cardStatuses) ? this.plugin.settings.cardStatuses : [];
+                            const matchedStatus = statusSettings.find(st => String(st.name || '').toLowerCase() === String(sName).toLowerCase());
+                            statusName = sName;
+                            statusColor = matchedStatus ? (matchedStatus.color || '') : '';
+                            statusTextColor = matchedStatus ? (matchedStatus.textColor || '') : '';
+                        }
+                        const catMatch = fm.match(/^\s*Category\s*:\s*(.*)$/mi);
+                        if (catMatch && catMatch[1]) category = String(catMatch[1]).trim().replace(/^"|"$/g, '');
+                        const ccMatch = fm.match(/^\s*card-color:\s*(.*)$/mi);
+                        if (ccMatch) {
+                            const val = ccMatch[1].trim().replace(/^"|"$/g, '');
+                            const m2 = String(val).match(/^color-(\d+)$/i);
+                            if (m2) colorVar = `var(--card-color-${m2[1]})`;
+                            else if (/^#/.test(val)) colorVar = val;
+                            else {
+                                const idx = (this.plugin.settings.colorNames || []).findIndex(n => String(n).toLowerCase() === String(val).toLowerCase());
+                                if (idx >= 0) colorVar = `var(--card-color-${idx+1})`;
+                            }
+                        }
+                        const parsedTags = this.parseTagsFromFrontmatter ? this.parseTagsFromFrontmatter(fm) : [];
+                        if (parsedTags && parsedTags.length > 0) tags = parsedTags;
+                    }
+                    cd.archived = archived;
+                    cd.pinned = pinned;
+                    cd.expiresAt = expiresAt;
+                    cd.category = category;
+                    cd.color = colorVar || cd.color;
+                    if (statusName) cd.status = { name: statusName, color: statusColor, textColor: statusTextColor };
+                    cd.tags = tags;
+                    if (cd.element) this.applyCardColorToElement(cd.element, cd.color);
+                    this.plugin.settings.frontmatterCache = this.plugin.settings.frontmatterCache || {};
+                    this.plugin.settings.frontmatterCache[cd.notePath] = {
+                        archived,
+                        pinned,
+                        color: colorVar || '',
+                        statusName,
+                        category,
+                        expiresAt,
+                        tags,
+                        mtime
+                    };
+                } catch (e) {}
+            }
+            try { await this.scheduleSaveCards(300); } catch (e) {}
+        };
+        if (window.requestIdleCallback) {
+            window.requestIdleCallback(() => { run(); });
+        } else {
+            setTimeout(() => { run(); }, 0);
+        }
+    }
+
     async loadCards(showArchived = false) {
+        const loadStartTime = performance.now();
         console.log("[SIDECARDS] 📥 loadCards called with showArchived:", showArchived);
         console.log("[SIDECARDS] 📦 Total saved cards in settings:", (this.plugin.settings.cards || []).length);
+        // Prevent multiple simultaneous loads; queue the latest request ONLY if it's different from current load
+        if (this._loadInProgress) {
+            // Only queue if the archived state is different from what's currently loading
+            const currentLoadArchived = this._lastLoadArchived || false;
+            if (!!showArchived !== currentLoadArchived) {
+                this._queuedLoad = !!showArchived;
+                console.log('[SIDECARDS] ⏭️ Different archived state queued: current=' + currentLoadArchived + ' queued=' + !!showArchived);
+            } else {
+                console.log('[SIDECARDS] ⏭️ Skipping loadCards - already loading same state (archived=' + currentLoadArchived + ')');
+            }
+            try { console.trace('[SIDECARDS] 🔍 loadCards called from:'); } catch (e) {}
+            return;
+        }
+        this._loadInProgress = true;
+        try { console.trace('[SIDECARDS] 🔍 loadCards called from:'); } catch (e) {}
+        const _finishLoad = () => {
+            this._loadInProgress = false;
+            const hasQueued = typeof this._queuedLoad !== 'undefined';
+            const next = this._queuedLoad;
+            this._queuedLoad = undefined;
+            if (hasQueued) {
+                try {
+                    if (this._reloadTimeout) clearTimeout(this._reloadTimeout);
+                } catch (e) {}
+                this._reloadTimeout = setTimeout(() => {
+                    try { this.loadCards(next); } catch (e) {}
+                }, 100);
+            }
+        };
         try {
             this._bulkLoading = true;
+            this._applySortLoadInProgress = true;
             try { if (this.cardsContainer) this.cardsContainer.style.visibility = 'hidden'; } catch (e) {}
             if (this.cardsContainer) this.cardsContainer.empty();
         } catch (e) {}
 
         try { this._lastLoadArchived = !!showArchived; } catch (e) {}
+        this._initialLoadInProgress = true;
         this.cards = [];
         this.plugin.debugLog('🧹 Cleared existing cards array before load');
+        try { this.applyLayoutMode(); } catch (e) {}
         const folder = this.plugin.settings.storageFolder;
 
         // CRITICAL FIX: Initialize universal order before any card loading
@@ -5029,60 +5897,32 @@ class CardSidebarView extends ItemView {
                 this.plugin.debugLog('📦 Saved cards available in settings:', savedCardsCount);
                 
                 if (this.plugin._importedFromFolderOnLoad && savedCardsCount > 0) {
-                    // Use cached settings since we've already done a folder import on first load
                     this.plugin.debugLog('💾 Using cached cards from settings (already imported on load)');
-                    const saved = this.plugin.settings.cards || [];
+                    const savedRaw = this.plugin.settings.cards || [];
+                    const seenPaths = new Set();
+                    const saved = savedRaw.filter(sc => {
+                        const key = (sc.notePath || sc.id || '').toLowerCase();
+                        if (!key) return true;
+                        if (seenPaths.has(key)) return false;
+                        seenPaths.add(key);
+                        return true;
+                    });
+                    const cardCreationStart = performance.now();
                     for (const savedCard of saved) {
                         try {
-                            let pinnedFromNote = savedCard.pinned || false;
-                            let archivedFromNote = savedCard.archived || false;
-                            console.log('[SIDECARDS] 📋 Processing saved card - initial state', { id: savedCard.id, path: savedCard.notePath, archivedFromNote, pinnedFromNote });
-                            
-                            if (savedCard.notePath) {
-                                try {
-                                    const file = this.app.vault.getAbstractFileByPath(savedCard.notePath);
-                                    if (file) {
-                                        const text = await this.app.vault.read(file);
-                                        const m = text.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n/);
-                                        console.log('[SIDECARDS] 📄 Read file', { id: savedCard.id, path: savedCard.notePath, fileFound: !!file, hasFrontmatter: !!(m && m[1]) });
-                                        if (m && m[1]) {
-                                            const fm = m[1];
-                                            const archivedTrueMatch = /^\s*archived\s*:\s*true$/mi.test(fm);
-                                            const archivedFalseMatch = /^\s*archived\s*:\s*false$/mi.test(fm);
-                                            console.log('[SIDECARDS] 🏷️ Frontmatter regex results', { id: savedCard.id, archivedTrueMatch, archivedFalseMatch, fmContent: fm.substring(0, 100) });
-                                            
-                                            if (archivedTrueMatch) {
-                                                archivedFromNote = true;
-                                                console.log('[SIDECARDS] ✅ Found archived: true in frontmatter');
-                                            }
-                                            if (archivedFalseMatch) {
-                                                archivedFromNote = false;
-                                                console.log('[SIDECARDS] ✅ Found archived: false in frontmatter');
-                                            }
-                                            if (/^\s*pinned\s*:\s*true$/mi.test(fm)) pinnedFromNote = true;
-                                            if (/^\s*pinned\s*:\s*false$/mi.test(fm)) pinnedFromNote = false;
-                                        }
-                                    } else {
-                                        console.log('[SIDECARDS] ⚠️ File not found', { path: savedCard.notePath });
-                                    }
-                                } catch (e) { 
-                                    console.log('[SIDECARDS] ❌ Error reading file', { path: savedCard.notePath, error: String(e) });
-                                }
-                            }
+                            const pinnedFromNote = savedCard.pinned || false;
+                            const archivedFromNote = savedCard.archived || false;
 
                             // Only create cards that match the requested archived filter
                             try {
                                 if (showArchived && !archivedFromNote) {
                                     // When showing archived cards, skip non-archived cards
-                                    console.log('[SIDECARDS] ⏭️ Skipping non-archived card (showArchived=true)', { id: savedCard.id, path: savedCard.notePath });
                                     continue;
                                 }
                                 if (!showArchived && archivedFromNote) {
                                     // When showing non-archived cards, skip archived cards
-                                    console.log('[SIDECARDS] ⏭️ Skipping archived card (showArchived=false)', { id: savedCard.id, path: savedCard.notePath });
                                     continue;
                                 }
-                                console.log('[SIDECARDS] ✅ Passing archived filter', { id: savedCard.id, path: savedCard.notePath, archivedFromNote, showArchived });
                             } catch (e) {}
 
                             const createOpts = {
@@ -5098,7 +5938,6 @@ class CardSidebarView extends ItemView {
                                 status: savedCard.status || null
                             };
                             const createdCard = this.enqueueCardCreate(savedCard.content || '', createOpts);
-                            if (createdCard) this.plugin.debugLog('➕ Created card from cached settings', { id: createdCard.id, path: createdCard.notePath });
                             try {
                                 if (createdCard && createdCard.archived && !showArchived && createdCard.element) {
                                     createdCard.element.style.display = 'none';
@@ -5106,6 +5945,7 @@ class CardSidebarView extends ItemView {
                             } catch (e) {}
                         } catch (err) { console.error('Error loading cached card', err); }
                     }
+                    console.log(`[SIDECARDS] ⚡ Card creation (cached) took ${(performance.now() - cardCreationStart).toFixed(2)}ms for ${this.cards.length} cards`);
                 } else {
                     // First load or cache is empty - do a full import from folder
                     this.plugin.debugLog('📁 Initial import from storage folder:', folder);
@@ -5117,80 +5957,80 @@ class CardSidebarView extends ItemView {
                 console.error('Error importing notes from storage folder during load:', e);
             }
 
+            // Reveal cards immediately after creation, before sorting
+            this.refreshAllCardTimestamps();
+            try { if (!this.plugin.settings.verticalCardMode) this.animateCardsEntrance(); } catch (e) {}
+            // DON'T reveal yet - wait for rendering to complete
+            console.log(`[SIDECARDS] ⚡ Card creation and sorting complete, waiting for rendering...`);
+
             // Apply saved sorting preference (mode + direction) so order persists across reloads
             try {
                 const mode = (this.plugin && this.plugin.settings && this.plugin.settings.sortMode) || 'manual';
                 const asc = (this.plugin && this.plugin.settings && typeof this.plugin.settings.sortAscending !== 'undefined') ? !!this.plugin.settings.sortAscending : true;
                 
+                if (this.plugin.settings.inheritStatusColor) {
+                    try {
+                        (this.cards || []).forEach(c => {
+                            if (c && c.status && c.status.color) {
+                                c.color = c.status.color;
+                                if (c.element) this.applyCardColorToElement(c.element, c.status.color);
+                            }
+                        });
+                    } catch (e) {}
+                }
                 this.plugin.debugLog('sidecards: calling applySort (loadCards folder branch)', { mode, asc, universalOrder: this._universalCardOrder?.length });
                 await this.applySort(mode, asc);
             } catch (e) {
                 console.error('Error applying saved sort after folder-load:', e);
             }
 
-            this.refreshAllCardTimestamps();
-            try { this.animateCardsEntrance(); } catch (e) {}
-            try { if (this.cardsContainer) this.cardsContainer.style.visibility = ''; } catch (e) {}
             try { this._applySortLoadInProgress = false; } catch (e) {}
             this._bulkLoading = false;
             this.plugin.debugLog('✅ Folder branch load complete', { finalCount: (this.cards || []).length });
+            
+            // PERFORMANCE: Use progressive rendering
+            this.refreshAllCardTimestamps();
+            try { if (!this.plugin.settings.verticalCardMode) this.animateCardsEntrance(); } catch (e) {}
+            
+            const cardsToRender = [...(this.cards || [])];
+            await this.loadCardsPrioritized(cardsToRender, showArchived);
+            
+            // DO NOT sync frontmatter during initial load - this causes saveCards to be called,
+            // which triggers the double-render issue. Frontmatter should only sync after user interaction.
+            
+            console.log(`[SIDECARDS] 🏁 Total loadCards time: ${(performance.now() - loadStartTime).toFixed(2)}ms`);
+            this._initialLoadInProgress = false;
+            _finishLoad();
             return;
         }
 
         const saved = this.plugin.settings.cards || [];
         this.plugin.debugLog('🧾 Settings cards count:', saved.length);
         if (saved && saved.length > 0) {
-            for (const savedCard of saved) {
+            const seenPaths2 = new Set();
+            const savedUnique = saved.filter(sc => {
+                const key = (sc.notePath || sc.id || '').toLowerCase();
+                if (!key) return true;
+                if (seenPaths2.has(key)) return false;
+                seenPaths2.add(key);
+                return true;
+            });
+            const cardCreationStart2 = performance.now();
+            for (const savedCard of savedUnique) {
                 try {
-                    let pinnedFromNote = savedCard.pinned || false;
-                    let archivedFromNote = savedCard.archived || false;
-                    console.log('[SIDECARDS] 📋 Processing saved card (non-folder) - initial state', { id: savedCard.id, path: savedCard.notePath, archivedFromNote, pinnedFromNote });
-                    
-                    if (savedCard.notePath) {
-                        try {
-                            const file = this.app.vault.getAbstractFileByPath(savedCard.notePath);
-                            if (file) {
-                                const text = await this.app.vault.read(file);
-                                const m = text.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n/);
-                                console.log('[SIDECARDS] 📄 Read file (non-folder)', { id: savedCard.id, path: savedCard.notePath, fileFound: !!file, hasFrontmatter: !!(m && m[1]) });
-                                if (m && m[1]) {
-                                    const fm = m[1];
-                                    const archivedTrueMatch = /^\s*archived\s*:\s*true$/mi.test(fm);
-                                    const archivedFalseMatch = /^\s*archived\s*:\s*false$/mi.test(fm);
-                                    console.log('[SIDECARDS] 🏷️ Frontmatter regex results (non-folder)', { id: savedCard.id, archivedTrueMatch, archivedFalseMatch, fmContent: fm.substring(0, 100) });
-                                    
-                                    if (archivedTrueMatch) {
-                                        archivedFromNote = true;
-                                        console.log('[SIDECARDS] ✅ Found archived: true in frontmatter (non-folder)');
-                                    }
-                                    if (archivedFalseMatch) {
-                                        archivedFromNote = false;
-                                        console.log('[SIDECARDS] ✅ Found archived: false in frontmatter (non-folder)');
-                                    }
-                                    if (/^\s*pinned\s*:\s*true$/mi.test(fm)) pinnedFromNote = true;
-                                    if (/^\s*pinned\s*:\s*false$/mi.test(fm)) pinnedFromNote = false;
-                                }
-                            } else {
-                                console.log('[SIDECARDS] ⚠️ File not found (non-folder)', { path: savedCard.notePath });
-                            }
-                        } catch (e) { 
-                            console.log('[SIDECARDS] ❌ Error reading file (non-folder)', { path: savedCard.notePath, error: String(e) });
-                        }
-                    }
+                    const pinnedFromNote = savedCard.pinned || false;
+                    const archivedFromNote = savedCard.archived || false;
 
                     // Only create cards that match the requested archived filter
                     try {
                         if (showArchived && !archivedFromNote) {
                             // When showing archived cards, skip non-archived cards
-                            console.log('[SIDECARDS] ⏭️ Skipping non-archived card (showArchived=true)', { id: savedCard.id, path: savedCard.notePath });
                             continue;
                         }
                         if (!showArchived && archivedFromNote) {
                             // When showing non-archived cards, skip archived cards
-                            console.log('[SIDECARDS] ⏭️ Skipping archived card (showArchived=false)', { id: savedCard.id, path: savedCard.notePath });
                             continue;
                         }
-                        console.log('[SIDECARDS] ✅ Passing archived filter', { id: savedCard.id, path: savedCard.notePath, archivedFromNote, showArchived });
                     } catch (e) {}
 
                     const createOpts = {
@@ -5206,7 +6046,6 @@ class CardSidebarView extends ItemView {
                         status: savedCard.status || null
                     };
                     const createdCard = this.enqueueCardCreate(savedCard.content || '', createOpts);
-                    if (createdCard) this.plugin.debugLog('➕ Created card from settings', { id: createdCard.id, path: createdCard.notePath });
                     try {
                         if (createdCard && createdCard.archived && !showArchived && createdCard.element) {
                             createdCard.element.style.display = 'none';
@@ -5214,6 +6053,7 @@ class CardSidebarView extends ItemView {
                     } catch (e) {}
                 } catch (err) { console.error('Error loading saved card', err); }
             }
+            console.log(`[SIDECARDS] ⚡ Card creation (non-folder cached) took ${(performance.now() - cardCreationStart2).toFixed(2)}ms for ${this.cards.length} cards`);
         } else {
             this.plugin.debugLog("⚠️ No existing cards found - checking if sample cards should be created");
             const sampleCards = [
@@ -5230,28 +6070,50 @@ class CardSidebarView extends ItemView {
             });
         }
 
+        // Don't process deferred rendering here - it will be done after sorting in loadCardsPrioritized
+        
         // CRITICAL FIX: Ensure manual order is applied consistently
         try {
+            if (this.plugin.settings.inheritStatusColor) {
+                try {
+                    (this.cards || []).forEach(c => {
+                        if (c && c.status && c.status.color) {
+                            c.color = c.status.color;
+                            if (c.element) this.applyCardColorToElement(c.element, c.status.color);
+                        }
+                    });
+                } catch (e) {}
+            }
             this.plugin.debugLog('sidecards: calling applySort (loadCards end)', { 
                 mode: this.plugin.settings.sortMode || 'manual', 
                 ascending: this.plugin.settings.sortAscending != null ? this.plugin.settings.sortAscending : true,
                 universalOrder: this._universalCardOrder?.length 
             });
+            const sortStart = performance.now();
             await this.applySort(this.plugin.settings.sortMode || 'manual', this.plugin.settings.sortAscending != null ? this.plugin.settings.sortAscending : true);
+            console.log(`[SIDECARDS] ⚡ applySort took ${(performance.now() - sortStart).toFixed(2)}ms`);
         } catch (e) { 
             console.error('Error in final applySort call:', e);
         }
 
         this.plugin.debugLog('🏁 Non-folder branch load complete', { finalCount: (this.cards || []).length });
-        
-        this.refreshAllCardTimestamps();
-        
-        try { this.animateCardsEntrance(); } catch (e) {}
-        // Reveal container now that only filtered cards will be visible
-        try { if (this.cardsContainer) this.cardsContainer.style.visibility = ''; } catch (e) {}
         try { this._applySortLoadInProgress = false; } catch (e) {}
         this._bulkLoading = false;
         try { this.plugin.validateLoadedCounts(this); } catch (e) {}
+        
+        // PERFORMANCE: Use progressive rendering
+        this.refreshAllCardTimestamps();
+        try { this.animateCardsEntrance(); } catch (e) {}
+        
+        const cardsToRender2 = [...(this.cards || [])];
+        await this.loadCardsPrioritized(cardsToRender2, showArchived);
+        
+        // DO NOT sync frontmatter during initial load - this causes saveCards to be called,
+        // which triggers the double-render issue. Frontmatter should only sync after user interaction.
+        
+        console.log(`[SIDECARDS] 🏁 Total loadCards time: ${(performance.now() - loadStartTime).toFixed(2)}ms`);
+        this._initialLoadInProgress = false;
+        _finishLoad();
     }
 
     async importNotesFromFolder(folder, silent = false, showArchived = false) {
@@ -5505,6 +6367,48 @@ class CardSidebarView extends ItemView {
     }
 
     async saveCards() {
+        if (this._initialLoadInProgress) return Promise.resolve();
+        // PERFORMANCE: Debounce saves during load to prevent multiple writes
+        const isLoading = this._bulkLoading || this._applySortLoadInProgress;
+        
+        if (isLoading) {
+            // During load, debounce saves to prevent thrashing
+            if (this._saveDebouncedTimeout) clearTimeout(this._saveDebouncedTimeout);
+            
+            return new Promise((resolve) => {
+                this._saveDebouncedTimeout = setTimeout(async () => {
+                    this._saveDebouncedTimeout = null;
+                    await this._performSaveCards();
+                    resolve();
+                }, 800);
+            });
+        }
+        
+        // Normal save when not loading: coalesce rapid calls
+        if (this._saveNormalTimeout) clearTimeout(this._saveNormalTimeout);
+        return new Promise((resolve) => {
+            this._saveNormalTimeout = setTimeout(async () => {
+                this._saveNormalTimeout = null;
+                await this._performSaveCards();
+                resolve();
+            }, 250);
+        });
+    }
+
+    async scheduleSaveCards(delay = 250) {
+        if (this._initialLoadInProgress) return Promise.resolve();
+        if (this._bulkLoading || this._applySortLoadInProgress) return this.saveCards();
+        if (this._saveNormalTimeout) clearTimeout(this._saveNormalTimeout);
+        return new Promise((resolve) => {
+            this._saveNormalTimeout = setTimeout(async () => {
+                this._saveNormalTimeout = null;
+                await this._performSaveCards();
+                resolve();
+            }, Math.max(0, Number(delay || 250)));
+        });
+    }
+
+    async _performSaveCards() {
         try {
             const serial = this.cards.map(c => ({
                 id: c.id,
@@ -5776,7 +6680,7 @@ class CardSidebarSettingTab extends PluginSettingTab {
 
                 const view = this.app.workspace.getLeavesOfType('card-sidebar')[0]?.view;
                 if (view && view.cards) {
-                    view.cards.forEach(c => view.applyCardColorToElement(c.element, c.color));
+                    view.cards.forEach(c => view.applyCardColor(c, c.element));
                 }
                 opacityContainer.style.display = (String(this.plugin.settings.cardStyle) === '1' || String(this.plugin.settings.cardStyle) === '2' || String(this.plugin.settings.cardStyle) === '3') ? '' : 'none';
                 if (typeof borderThicknessContainer !== 'undefined' && borderThicknessContainer) {
@@ -5801,7 +6705,7 @@ class CardSidebarSettingTab extends PluginSettingTab {
                 await this.plugin.saveSettings();
                 const view = this.app.workspace.getLeavesOfType('card-sidebar')[0]?.view;
                 if (view && view.cards) {
-                    view.cards.forEach(c => view.applyCardColorToElement(c.element, c.color));
+                    view.cards.forEach(c => view.applyCardColor(c, c.element));
                 }
             }));
 
@@ -5821,7 +6725,7 @@ class CardSidebarSettingTab extends PluginSettingTab {
                 await this.plugin.saveSettings();
                 const view = this.app.workspace.getLeavesOfType('card-sidebar')[0]?.view;
                 if (view && view.cards) {
-                    view.cards.forEach(c => view.applyCardColorToElement(c.element, c.color));
+                    view.cards.forEach(c => view.applyCardColor(c, c.element));
                 }
             }));
 
@@ -5906,6 +6810,16 @@ class CardSidebarSettingTab extends PluginSettingTab {
                     const view = this.app.workspace.getLeavesOfType('card-sidebar')[0]?.view;
                     if (view && view._clearButton) view._clearButton.style.display = value ? 'none' : '';
                 } catch (e) { }
+            }));
+
+    new Setting(containerEl)
+        .setName('Enable copy card content')
+        .setDesc('Show a copy icon on hover to copy card content (frontmatter excluded). Disabled by default.')
+        .addToggle(toggle => toggle
+            .setValue(this.plugin.settings.enableCopyCardContent || false)
+            .onChange(async (value) => {
+                this.plugin.settings.enableCopyCardContent = value;
+                await this.plugin.saveSettings();
             }));
 
     new Setting(containerEl)
@@ -6748,6 +7662,16 @@ class CardSidebarSettingTab extends PluginSettingTab {
                 await this.plugin.saveSettings();
             }));
 
+    // new Setting(containerEl)
+    //     .setName('Replace empty tab/home with SideCards')
+    //     .setDesc('When enabled, the default empty tab/homepage opens SideCards')
+    //     .addToggle(toggle => toggle
+    //         .setValue(this.plugin.settings.replaceHomepageWithSidecards || false)
+    //         .onChange(async (value) => {
+    //             this.plugin.settings.replaceHomepageWithSidecards = value;
+    //             await this.plugin.saveSettings();
+    //         }));
+
     containerEl.createEl('h3', { text: 'Automation' });
 
     
@@ -6783,6 +7707,7 @@ class CardSidebarSettingTab extends PluginSettingTab {
             matchInput.type = 'text'; matchInput.placeholder = 'match'; matchInput.value = r.match || ''; matchInput.style.flex = '1';
             matchInput.addEventListener('input', async (e) => { this.plugin.settings.autoColorRules[idx].match = e.target.value; await this.plugin.saveSettings(); });
             const colorSel = row.createEl('select');
+            colorSel.style.minWidth = '220px';
             for (let i = 1; i <= 10; i++) {
                 const opt = document.createElement('option');
                 opt.value = String(i);
@@ -6808,11 +7733,14 @@ class CardSidebarSettingTab extends PluginSettingTab {
     renderRules();
 
     containerEl.createEl('h3', { text: 'Status' });
+    const statusDesc = containerEl.createEl('p', { text: 'Dropdown colors take precedence over custom unless the dropdown is set to [custom].' });
+    statusDesc.style.marginTop = '-12px';
+    statusDesc.style.color = 'var(--text-muted)';
     const statusSection = containerEl.createDiv();
     statusSection.addClass('card-status-settings');
     new Setting(statusSection)
         .setName('Enable Card Status')
-        .setDesc('Show status pill on cards and configure statuses. Reorder statuses by dragging — the order defines the hierarchy used for sorting.')
+        .setDesc('Drag to reorder status pills and set their sorting priority.')
         .addToggle(toggle => toggle
             .setValue(this.plugin.settings.enableCardStatus || false)
             .onChange(async (value) => {
@@ -6842,80 +7770,132 @@ class CardSidebarSettingTab extends PluginSettingTab {
                 await this.plugin.saveSettings();
             }));
 
-    const statusConfigContainer = statusSection.createDiv();
-    const renderStatusConfig = () => {
-        statusConfigContainer.empty();
-        if (!this.plugin.settings.enableCardStatus) return;
-        const list = Array.isArray(this.plugin.settings.cardStatuses) ? this.plugin.settings.cardStatuses : [];
-        list.forEach((s, idx) => {
-            const row = statusConfigContainer.createDiv();
-            row.addClass('card-status-row');
-            row.style.display = 'flex'; row.style.gap = '8px'; row.style.alignItems = 'center'; row.style.margin = '4px 0';
-            // Drag handle
-            const handle = row.createEl('span', { text: '≡' });
-            handle.title = 'Drag to reorder';
-            handle.style.cursor = 'grab';
-            handle.style.padding = '4px';
-            handle.style.userSelect = 'none';
-            // Inputs
-            const nameInput = row.createEl('input'); nameInput.type = 'text'; nameInput.placeholder = 'Status name'; nameInput.value = s.name || ''; nameInput.style.flex = '1';
-            nameInput.addEventListener('input', async (e) => { this.plugin.settings.cardStatuses[idx].name = e.target.value; await this.plugin.saveSettings(); });
-            const textColorInput = row.createEl('input'); textColorInput.type = 'color'; textColorInput.value = s.textColor || '#000000';
-            textColorInput.title = 'Text color';
-            textColorInput.addEventListener('change', async (e) => { 
-                this.plugin.settings.cardStatuses[idx].textColor = e.target.value; 
-                await this.plugin.saveSettings();
-                // Instantly refresh cards to show new color
+        const statusConfigContainer = statusSection.createDiv();
+        const renderStatusConfig = () => {
+            statusConfigContainer.empty();
+            if (!this.plugin.settings.enableCardStatus) return;
+            const list = Array.isArray(this.plugin.settings.cardStatuses) ? this.plugin.settings.cardStatuses : [];
+            list.forEach((s, idx) => {
+                const row = statusConfigContainer.createDiv();
+                row.addClass('card-status-row');
+                row.style.display = 'flex'; row.style.gap = '8px'; row.style.alignItems = 'center'; row.style.margin = '4px 0';
+                // Drag handle
+                const handle = row.createEl('span', { text: '≡' });
+                handle.title = 'Drag to reorder';
+                handle.style.cursor = 'grab';
+                handle.style.padding = '4px';
+                handle.style.userSelect = 'none';
+                // Inputs
+                const nameInput = row.createEl('input'); nameInput.type = 'text'; nameInput.placeholder = 'Status name'; nameInput.value = s.name || ''; nameInput.style.flex = '1';
+                nameInput.addEventListener('input', async (e) => { this.plugin.settings.cardStatuses[idx].name = e.target.value; await this.plugin.saveSettings(); });
+                const textColorInput = row.createEl('input'); textColorInput.type = 'color'; textColorInput.value = s.textColor || '#000000';
+                textColorInput.title = 'Text color';
+                textColorInput.addEventListener('change', async (e) => { 
+                    this.plugin.settings.cardStatuses[idx].textColor = e.target.value; 
+                    await this.plugin.saveSettings();
+                    // Instantly refresh cards to show new color
+                    try {
+                        const view = this.app.workspace.getLeavesOfType('card-sidebar')[0]?.view;
+                        if (view && view.cards) {
+                            view.cards.forEach(card => {
+                                if (card.status && card.status.name === this.plugin.settings.cardStatuses[idx].name) {
+                                    card.status.textColor = e.target.value;
+                                    const statusPill = card.element?.querySelector('.card-status-pill');
+                                    if (statusPill) statusPill.style.color = e.target.value;
+                                }
+                            });
+                        }
+                    } catch (err) {}
+                });
+                const colorInput = row.createEl('input'); colorInput.type = 'color'; colorInput.value = s.color || '#20bf6b';
+                colorInput.title = 'Background color';
+                colorInput.addEventListener('change', async (e) => { 
+                    this.plugin.settings.cardStatuses[idx].color = e.target.value; 
+                    await this.plugin.saveSettings();
+                    // Instantly refresh cards to show new color
+                    try {
+                        const view = this.app.workspace.getLeavesOfType('card-sidebar')[0]?.view;
+                        if (view && view.cards) {
+                            const statusName = this.plugin.settings.cardStatuses[idx].name;
+                            const hexToRGBA = (hex, alpha) => {
+                                try {
+                                    const h = hex.replace('#','');
+                                    const bigint = parseInt(h.length === 3 ? h.split('').map(x=>x+x).join('') : h, 16);
+                                    const r = (bigint >> 16) & 255;
+                                    const g = (bigint >> 8) & 255;
+                                    const b = bigint & 255;
+                                    const a = Math.max(0, Math.min(1, Number(alpha || 1)));
+                                    return `rgba(${r}, ${g}, ${b}, ${a})`;
+                                } catch (err) { return hex; }
+                            };
+                            const opacityVal = (this.plugin.settings.statusPillOpacity !== undefined) ? this.plugin.settings.statusPillOpacity : 1;
+                            view.cards.forEach(card => {
+                                if (card.status && card.status.name === statusName) {
+                                    card.status.color = e.target.value;
+                                    const statusPill = card.element?.querySelector('.card-status-pill');
+                                    if (statusPill) statusPill.style.backgroundColor = hexToRGBA(e.target.value, opacityVal);
+                                }
+                            });
+                        }
+                    } catch (err) {}
+                });
+                const presetSel = row.createEl('select');
+                // First option: custom
+                { const opt = document.createElement('option'); opt.value = 'custom'; opt.textContent = '[custom]'; presetSel.appendChild(opt); }
+                for (let i = 1; i <= 10; i++) {
+                    const opt = document.createElement('option');
+                    opt.value = String(i);
+                    const names = this.plugin.settings.colorNames || [];
+                    opt.textContent = names[i - 1] ? String(names[i - 1]) : `Color ${i}`;
+                    presetSel.appendChild(opt);
+                }
+                presetSel.title = 'Choose preset color';
+                presetSel.style.minWidth = '160px';
+                // Initialize selection based on current status color
                 try {
-                    const view = this.app.workspace.getLeavesOfType('card-sidebar')[0]?.view;
-                    if (view && view.cards) {
-                        view.cards.forEach(card => {
-                            if (card.status && card.status.name === this.plugin.settings.cardStatuses[idx].name) {
-                                card.status.textColor = e.target.value;
-                                const statusPill = card.element?.querySelector('.card-status-pill');
-                                if (statusPill) statusPill.style.color = e.target.value;
-                            }
-                        });
-                    }
-                } catch (err) {}
-            });
-            const colorInput = row.createEl('input'); colorInput.type = 'color'; colorInput.value = s.color || '#20bf6b';
-            colorInput.title = 'Background color';
-            colorInput.addEventListener('change', async (e) => { 
-                this.plugin.settings.cardStatuses[idx].color = e.target.value; 
-                await this.plugin.saveSettings();
-                // Instantly refresh cards to show new color
-                try {
-                    const view = this.app.workspace.getLeavesOfType('card-sidebar')[0]?.view;
-                    if (view && view.cards) {
-                        const statusName = this.plugin.settings.cardStatuses[idx].name;
-                        const hexToRGBA = (hex, alpha) => {
-                            try {
-                                const h = hex.replace('#','');
-                                const bigint = parseInt(h.length === 3 ? h.split('').map(x=>x+x).join('') : h, 16);
-                                const r = (bigint >> 16) & 255;
-                                const g = (bigint >> 8) & 255;
-                                const b = bigint & 255;
-                                const a = Math.max(0, Math.min(1, Number(alpha || 1)));
-                                return `rgba(${r}, ${g}, ${b}, ${a})`;
-                            } catch (err) { return hex; }
-                        };
-                        const opacityVal = (this.plugin.settings.statusPillOpacity !== undefined) ? this.plugin.settings.statusPillOpacity : 1;
-                        view.cards.forEach(card => {
-                            if (card.status && card.status.name === statusName) {
-                                card.status.color = e.target.value;
-                                const statusPill = card.element?.querySelector('.card-status-pill');
-                                if (statusPill) statusPill.style.backgroundColor = hexToRGBA(e.target.value, opacityVal);
-                            }
-                        });
-                    }
-                } catch (err) {}
-            });
-            const delBtn = row.createEl('button', { text: 'Remove' }); delBtn.addEventListener('click', async () => { this.plugin.settings.cardStatuses.splice(idx,1); await this.plugin.saveSettings(); renderStatusConfig(); });
+                    const current = String(this.plugin.settings.cardStatuses[idx].color || '').toLowerCase();
+                    const presets = Array.from({length: 10}, (_, k) => String(this.plugin.settings[`color${k+1}`] || '').toLowerCase());
+                    const foundIdx = presets.findIndex(h => h && h === current);
+                    presetSel.value = foundIdx >= 0 ? String(foundIdx + 1) : 'custom';
+                } catch (e) { presetSel.value = 'custom'; }
+                presetSel.addEventListener('change', async (e) => {
+                    try {
+                        if (String(e.target.value) === 'custom') {
+                            // Do not overwrite; custom color input remains authoritative
+                            await this.plugin.saveSettings();
+                        } else {
+                            const idxSel = Number(e.target.value);
+                            const key = `color${idxSel}`;
+                            const hex = this.plugin.settings[key] || '#20bf6b';
+                            this.plugin.settings.cardStatuses[idx].color = hex;
+                            await this.plugin.saveSettings();
+                        }
+                        const view = this.app.workspace.getLeavesOfType('card-sidebar')[0]?.view;
+                        if (view && view.cards) {
+                            const statusName = this.plugin.settings.cardStatuses[idx].name;
+                            const statusPillOpacity = (this.plugin.settings.statusPillOpacity !== undefined) ? this.plugin.settings.statusPillOpacity : 1;
+                            const hexToRGBA = (h, a) => { try { const H=h.replace('#',''); const n=parseInt(H.length===3?H.split('').map(x=>x+x).join(''):H,16); const r=(n>>16)&255,g=(n>>8)&255,b=n&255; return `rgba(${r}, ${g}, ${b}, ${Math.max(0.1, Math.min(1, a))})`; } catch (err) { return h; } };
+                            view.cards.forEach(card => {
+                                if (card.status && card.status.name === statusName) {
+                                    if (String(e.target.value) !== 'custom') {
+                                        const hex = this.plugin.settings[`color${Number(e.target.value)}`] || card.status.color || '#20bf6b';
+                                        card.status.color = hex;
+                                        const pill = card.element?.querySelector('.card-status-pill');
+                                        if (pill) pill.style.backgroundColor = hexToRGBA(hex, statusPillOpacity);
+                                    } else {
+                                        const pill = card.element?.querySelector('.card-status-pill');
+                                        if (pill) pill.style.backgroundColor = hexToRGBA(card.status.color || '#20bf6b', statusPillOpacity);
+                                    }
+                                }
+                            });
+                        }
+                    } catch (err) {}
+                });
+                const delBtn = row.createEl('button', { text: 'Remove' }); delBtn.addEventListener('click', async () => { this.plugin.settings.cardStatuses.splice(idx,1); await this.plugin.saveSettings(); renderStatusConfig(); });
 
-            // Make the entire row draggable and handle drop to reorder
-            row.draggable = true;
-            row.dataset.idx = idx;
+                // Make the entire row draggable and handle drop to reorder
+                row.draggable = true;
+                row.dataset.idx = idx;
             row.addEventListener('dragstart', (e) => {
                 try { e.dataTransfer.setData('text/plain', String(idx)); row.style.opacity = '0.5'; } catch (err) {}
             });
@@ -6939,13 +7919,13 @@ class CardSidebarSettingTab extends PluginSettingTab {
                 } catch (err) { console.error('Error reordering statuses:', err); }
             });
 
-            row.appendChild(handle);
-            row.appendChild(nameInput); row.appendChild(textColorInput); row.appendChild(colorInput); row.appendChild(delBtn);
-        });
-        const addRow = statusConfigContainer.createDiv(); addRow.style.display = 'flex'; addRow.style.justifyContent = 'flex-end'; addRow.style.marginTop = '12px';
-        const addBtn = addRow.createEl('button', { text: 'Add Status' }); addBtn.addClass('mod-cta');
-        addBtn.addEventListener('click', async () => { if (!Array.isArray(this.plugin.settings.cardStatuses)) this.plugin.settings.cardStatuses = []; this.plugin.settings.cardStatuses.push({ name: 'focus', color: '#20bf6b', textColor: '#000000' }); await this.plugin.saveSettings(); renderStatusConfig(); });
-    };
+                row.appendChild(handle);
+                row.appendChild(nameInput); row.appendChild(textColorInput); row.appendChild(colorInput); row.appendChild(presetSel); row.appendChild(delBtn);
+            });
+            const addRow = statusConfigContainer.createDiv(); addRow.style.display = 'flex'; addRow.style.justifyContent = 'flex-end'; addRow.style.marginTop = '12px';
+            const addBtn = addRow.createEl('button', { text: 'Add Status' }); addBtn.addClass('mod-cta');
+            addBtn.addEventListener('click', async () => { if (!Array.isArray(this.plugin.settings.cardStatuses)) this.plugin.settings.cardStatuses = []; this.plugin.settings.cardStatuses.push({ name: 'focus', color: '#20bf6b', textColor: '#000000' }); await this.plugin.saveSettings(); renderStatusConfig(); });
+        };
     renderStatusConfig();
 
     // Note: status rows are draggable within the main config above; ordering defines hierarchy.
@@ -7301,34 +8281,156 @@ class CardSidebarPlugin extends Plugin {
     
         if (this.settings.autoOpen) {
             this.app.workspace.onLayoutReady(() => {
-                this.activateView();
+                try {
+                    // If homepage replacement is enabled, avoid double-opening
+                    if (this.settings.replaceHomepageWithSidecards) {
+                        setTimeout(() => {
+                            const leaves = this.app.workspace.getLeavesOfType('card-sidebar');
+                            if (!leaves || leaves.length === 0) this.activateView();
+                        }, 100);
+                    } else {
+                        const leaves = this.app.workspace.getLeavesOfType('card-sidebar');
+                        if (!leaves || leaves.length === 0) this.activateView();
+                    }
+                } catch (e) { this.debugLog('Error in autoOpen onLayoutReady:', e); }
             });
         }
 
         // Optionally replace homepage/empty leaf with SideCards view
         try {
+            const replaceEmptyWithSidecards = () => {
+                try {
+                    const getType = (lf) => {
+                        try { return (lf.view && typeof lf.view.getViewType === 'function') ? lf.view.getViewType() : (lf.view && lf.view.getViewType) || ''; } catch (e) { return ''; }
+                    };
+                    const isEmptyType = (t) => ['empty','welcome','start','home'].includes(String(t || '').toLowerCase());
+                    
+                    // Check active leaf first
+                    const active = this.app.workspace.getActiveLeaf();
+                    if (active && isEmptyType(getType(active))) {
+                        this.debugLog('🔄 Replacing empty active leaf with SideCards');
+                        try { 
+                            active.setViewState({ type: 'card-sidebar' }); 
+                            return true; 
+                        } catch (e) {
+                            this.debugLog('Error replacing active leaf:', e);
+                        }
+                    }
+                    
+                    // Check all leaves for empty ones
+                    const leaves = this.app.workspace.getLeaves();
+                    for (const leaf of leaves) {
+                        const vt = getType(leaf);
+                        if (isEmptyType(vt)) {
+                            this.debugLog('🔄 Replacing empty leaf with SideCards');
+                            try { 
+                                leaf.setViewState({ type: 'card-sidebar' }); 
+                                return true;
+                            } catch (e) {
+                                this.debugLog('Error replacing leaf:', e);
+                            }
+                        }
+                    }
+                } catch (e) {
+                    this.debugLog('Error in replaceEmptyWithSidecards:', e);
+                }
+                return false;
+            };
+            
             if (this.settings.replaceHomepageWithSidecards) {
+                // Replace empty leaves on layout ready
                 this.app.workspace.onLayoutReady(() => {
                     try {
-                        const leaves = this.app.workspace.getLeaves();
-                        for (const leaf of leaves) {
-                            try {
-                                const vt = (leaf.view && typeof leaf.view.getViewType === 'function') ? leaf.view.getViewType() : (leaf.view && leaf.view.getViewType) || '';
-                                const lower = String(vt || '').toLowerCase();
-                                if (['empty', 'welcome', 'start', 'home'].includes(lower)) {
-                                    try {
-                                        leaf.setViewState({ type: 'card-sidebar' });
-                                    } catch (e) {
-                                        try { this.app.workspace.revealLeaf(leaf).then(() => {}); } catch (ee) {}
-                                    }
-                                    break;
-                                }
-                            } catch (e) {}
-                        }
+                        setTimeout(() => {
+                            replaceEmptyWithSidecards();
+                        }, 100);
                     } catch (e) {}
                 });
+                
+                // Set up continuous monitoring for empty tabs
+                // This checks periodically and on various workspace events
+                const checkAndReplaceEmpty = () => {
+                    try {
+                        const getType = (lf) => {
+                            try { return (lf.view && typeof lf.view.getViewType === 'function') ? lf.view.getViewType() : (lf.view && lf.view.getViewType) || ''; } catch (e) { return ''; }
+                        };
+                        const isEmptyType = (t) => ['empty','welcome','start','home'].includes(String(t || '').toLowerCase());
+                        
+                        // Get active leaf and check if it's empty
+                        const active = this.app.workspace.getActiveLeaf();
+                        if (active && isEmptyType(getType(active))) {
+                            this.debugLog('🎯 Active leaf is empty, replacing with SideCards');
+                            active.setViewState({ type: 'card-sidebar' }).catch(e => {
+                                this.debugLog('Error setting view state:', e);
+                            });
+                        }
+                    } catch (e) {
+                        this.debugLog('Error in checkAndReplaceEmpty:', e);
+                    }
+                };
+                
+                // Listen for leaf-open event
+                this.registerEvent(
+                    this.app.workspace.on('leaf-open', (leaf) => {
+                        if (this.settings.replaceHomepageWithSidecards) {
+                            checkAndReplaceEmpty();
+                        }
+                    })
+                );
+                
+                // Also listen for active-leaf-change
+                this.registerEvent(
+                    this.app.workspace.on('active-leaf-change', (leaf) => {
+                        if (this.settings.replaceHomepageWithSidecards && leaf) {
+                            checkAndReplaceEmpty();
+                        }
+                    })
+                );
+                
+                // Patch the workspace containerEl's click handler for the new tab button
+                try {
+                    const workspaceEl = this.app.workspace.containerEl;
+                    const originalClick = workspaceEl.onclick;
+                    
+                    // Create a new click handler that will catch new tab button clicks
+                    workspaceEl.addEventListener('click', (e) => {
+                        try {
+                            // Check if this was a "new tab" button click
+                            const target = e.target;
+                            if (target && (target.classList.contains('workspace-tab-header-new-tab') || 
+                                          target.closest('.workspace-tab-header-new-tab') ||
+                                          (target.title && target.title.includes('New tab')) ||
+                                          (target.getAttribute('aria-label') && target.getAttribute('aria-label').includes('New tab')))) {
+                                
+                                this.debugLog('🆕 New tab button clicked');
+                                
+                                // Give the new leaf time to be created
+                                setTimeout(() => {
+                                    checkAndReplaceEmpty();
+                                }, 100);
+                            }
+                        } catch (e) {
+                            this.debugLog('Error in new tab click handler:', e);
+                        }
+                    }, true); // Use capture phase to catch the event early
+                    
+                    this.debugLog('✅ Attached new tab click listener');
+                } catch (e) {
+                    this.debugLog('Could not attach new tab click listener:', e);
+                }
+                
+                // Also set up a periodic check every 500ms for empty tabs
+                this._emptyTabCheckInterval = setInterval(() => {
+                    if (this.settings.replaceHomepageWithSidecards) {
+                        try {
+                            checkAndReplaceEmpty();
+                        } catch (e) {}
+                    }
+                }, 500);
             }
-        } catch (e) {}
+        } catch (e) {
+            this.debugLog('Error setting up empty tab replacement:', e);
+        }
 
         this.debugLog('Card Sidebar plugin loaded successfully');
         try {
@@ -7426,6 +8528,7 @@ class CardSidebarPlugin extends Plugin {
             maxCardHeight: 0,
             debug: true, // DEBUGMODE AH
             cards: [],
+            frontmatterCache: {},
             replaceHomepageWithSidecards: false,
             filterColors: {},
             sidebarPosition: 'right',
@@ -7514,7 +8617,10 @@ class CardSidebarPlugin extends Plugin {
                         try {
                             const view = l.view;
                             if (view && typeof view.loadCards === 'function') {
-                                try { view.loadCards(); } catch (e) { this.debugWarn('Error reloading view during date change:', e); }
+                                try {
+                                    if (typeof view.scheduleLoadCards === 'function') view.scheduleLoadCards();
+                                    else view.loadCards();
+                                } catch (e) { this.debugWarn('Error reloading view during date change:', e); }
                             }
                             if (view && typeof view.applyFilters === 'function') {
                                 try { view.applyFilters(); } catch (e) { this.debugWarn('Error applying filters during date change:', e); }
@@ -7821,51 +8927,79 @@ class CardSidebarPlugin extends Plugin {
     async activateView() {
         const existing = this.app.workspace.getLeavesOfType('card-sidebar');
         if (existing.length > 0) {
-            // If it exists, always reveal it where it currently is
-            // Don't move it to a different location
+            // View already exists - reveal it in its CURRENT location without moving it
+            // This is critical: we should NEVER try to move it to a different location
             this.app.workspace.revealLeaf(existing[0]);
             
-            // Save the current position
+            // Detect and update the current position
             try {
                 const leaf = existing[0];
-                const leafParent = leaf.getRoot ? leaf.getRoot().type : null;
-                const parentType = leaf.parentEl ? leaf.parentEl.className : '';
                 let detectedPosition = 'right';
                 
-                if (parentType.includes('left-sidebar') || leafParent === 'side-dock-left') {
-                    detectedPosition = 'left';
-                } else if (leaf.parentEl && (leaf.parentEl.className.includes('workspace-split') || leaf.parentEl.className.includes('main-container'))) {
-                    detectedPosition = 'tab';
+                // Traverse up the DOM to find where this leaf actually is
+                let current = leaf.containerEl || (leaf.view && leaf.view.containerEl);
+                let depth = 0;
+                const maxDepth = 10;
+                
+                while (current && depth < maxDepth) {
+                    const className = current.className || '';
+                    
+                    if (className.includes('side-dock-left') || className.includes('mod-left-split')) {
+                        detectedPosition = 'left';
+                        this.debugLog('✅ Existing view detected in LEFT sidebar');
+                        break;
+                    }
+                    
+                    if (className.includes('workspace-leaf-content') || className.includes('workspace-tabs')) {
+                        detectedPosition = 'tab';
+                        this.debugLog('✅ Existing view detected in MAIN tabs/editor area');
+                        break;
+                    }
+                    
+                    if (className.includes('side-dock-right') || className.includes('mod-right-split')) {
+                        detectedPosition = 'right';
+                        this.debugLog('✅ Existing view detected in RIGHT sidebar');
+                        break;
+                    }
+                    
+                    current = current.parentElement;
+                    depth++;
                 }
                 
+                // Update settings with detected position
                 if (detectedPosition !== this.settings.sidebarPosition) {
                     this.settings.sidebarPosition = detectedPosition;
                     await this.saveSettings();
-                    this.debugLog('Sidebar position updated:', detectedPosition);
+                    this.debugLog('✅ Position updated to match actual location:', detectedPosition);
                 }
             } catch (e) {
-                this.debugLog('Could not detect/save sidebar position:', e);
+                this.debugLog('⚠️ Could not detect sidebar position:', e);
             }
             return;
         }
 
         // Create new view - restore to saved position
-        const savedPosition = this.settings.sidebarPosition || 'right';
+        let savedPosition = this.settings.sidebarPosition || 'right';
+        this.debugLog('Creating new card-sidebar view, saved position:', savedPosition);
+        
         let leaf = null;
         
         try {
             if (savedPosition === 'left') {
+                this.debugLog('Opening card-sidebar in LEFT sidebar');
                 leaf = this.app.workspace.getLeftLeaf(false);
             } else if (savedPosition === 'tab') {
                 // Create in the main editor area as a tab
+                this.debugLog('Opening card-sidebar in MAIN editor area (as tab)');
                 leaf = this.app.workspace.getLeaf(true);
             } else {
                 // Default to right sidebar
+                this.debugLog('Opening card-sidebar in RIGHT sidebar');
                 leaf = this.app.workspace.getRightLeaf(false);
             }
         } catch (e) {
             // Fallback to right sidebar if there's an error
-            this.debugLog('Error getting leaf for saved position, falling back to right:', e);
+            this.debugLog('Error getting leaf for saved position, falling back to right sidebar:', e);
             leaf = this.app.workspace.getRightLeaf(false);
         }
         
@@ -7876,26 +9010,45 @@ class CardSidebarPlugin extends Plugin {
             });
             this.app.workspace.revealLeaf(leaf);
             
-            // Save the position where it was opened
+            // Verify and save the actual position where it was opened
             try {
-                const leafParent = leaf.getRoot ? leaf.getRoot().type : null;
-                const parentType = leaf.parentEl ? leaf.parentEl.className : '';
                 let detectedPosition = 'right';
+                let current = leaf.containerEl || (leaf.view && leaf.view.containerEl);
+                let depth = 0;
+                const maxDepth = 10;
                 
-                if (parentType.includes('left-sidebar') || leafParent === 'side-dock-left') {
-                    detectedPosition = 'left';
-                } else if (leaf.parentEl && (leaf.parentEl.className.includes('workspace-split') || leaf.parentEl.className.includes('main-container'))) {
-                    detectedPosition = 'tab';
+                while (current && depth < maxDepth) {
+                    const className = current.className || '';
+                    
+                    if (className.includes('side-dock-left') || className.includes('mod-left-split')) {
+                        detectedPosition = 'left';
+                        break;
+                    }
+                    
+                    if (className.includes('workspace-leaf-content') || className.includes('workspace-tabs')) {
+                        detectedPosition = 'tab';
+                        break;
+                    }
+                    
+                    if (className.includes('side-dock-right') || className.includes('mod-right-split')) {
+                        detectedPosition = 'right';
+                        break;
+                    }
+                    
+                    current = current.parentElement;
+                    depth++;
                 }
                 
                 if (detectedPosition !== this.settings.sidebarPosition) {
                     this.settings.sidebarPosition = detectedPosition;
                     await this.saveSettings();
-                    this.debugLog('Sidebar position saved:', detectedPosition);
+                    this.debugLog('✅ Sidebar opened and saved at position:', detectedPosition);
                 }
             } catch (e) {
-                this.debugLog('Could not detect/save sidebar position:', e);
+                this.debugLog('⚠️ Could not verify sidebar position:', e);
             }
+        } else {
+            this.debugLog('❌ Failed to create leaf');
         }
     }
 
@@ -7905,6 +9058,10 @@ class CardSidebarPlugin extends Plugin {
             if (this._dateCheckInterval) {
                 clearInterval(this._dateCheckInterval);
                 this._dateCheckInterval = null;
+            }
+            if (this._emptyTabCheckInterval) {
+                clearInterval(this._emptyTabCheckInterval);
+                this._emptyTabCheckInterval = null;
             }
         } catch (e) {}
     }
