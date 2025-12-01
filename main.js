@@ -5,30 +5,21 @@ class QuickCardWithFilterModal extends Modal {
     constructor(app, plugin) {
         super(app);
         this.plugin = plugin;
-        this.plugin.debugLog("🔍 Quick Card Add: Modal initialized", {
-            hasPlugin: !!plugin,
-            pluginSettings: plugin?.settings ? Object.keys(plugin.settings) : null
-        });
     }
 
     getAvailableFilters() {
-        this.plugin.debugLog("🔍 Quick Card Add: Getting available filters");
         const filters = [
             { type: 'all', label: 'All', value: 'all' }
         ];
-        this.plugin.debugLog("Base filter added:", filters[0]);
 
         // Add time-based filters if not disabled
-        this.plugin.debugLog("🔍 Quick Card Add: Checking time-based filters");
         const showTimeBasedChips = !(this.plugin && this.plugin.settings && this.plugin.settings.disableTimeBasedFiltering);
-        this.plugin.debugLog("Time-based filters enabled:", showTimeBasedChips);
         if (showTimeBasedChips) {
             const timeBasedFilters = [
                 { type: 'category', label: 'Today', value: 'today' },
                 { type: 'category', label: 'Tomorrow', value: 'tomorrow' }
             ];
             filters.push(...timeBasedFilters);
-            this.plugin.debugLog("Added time-based filters:", timeBasedFilters);
         }
 
         // Add custom categories if enabled
@@ -63,34 +54,21 @@ class QuickCardWithFilterModal extends Modal {
         contentEl.empty();
         
         // Modal title
-        const title = contentEl.createEl('h2', {text: 'Quick Card Add'});
-        title.style.marginTop = '-8px';
-        title.style.marginBottom = '12px';
+        const title = contentEl.createEl('h2', {text: 'Quick Card Add', cls: 'quick-card-modal-title'});
         
         // Card content section
-        const contentHeading = contentEl.createEl('h3', {text: 'Card Content'});
-        contentHeading.style.marginTop = '8px';
-        contentHeading.style.marginBottom = '6px';
+        const contentHeading = contentEl.createEl('h3', {text: 'Card Content', cls: 'quick-card-section-heading'});
         
         const textarea = contentEl.createEl('textarea', {
-            placeholder: 'Enter your card content here...',
+            placeholder: 'Enter your card content here... (e.g., "@today Make coffee" or "#work Important task")',
             cls: 'quick-card-textarea'
         });
-        textarea.style.width = '100%';
-        textarea.style.height = '120px';
-        textarea.style.marginBottom = '8px';
         textarea.focus();
         
         // Color selection section
-        const colorHeading = contentEl.createEl('h3', {text: 'Color'});
-        colorHeading.style.marginTop = '8px';
-        colorHeading.style.marginBottom = '6px';
+        const colorHeading = contentEl.createEl('h3', {text: 'Color', cls: 'quick-card-section-heading'});
         
-        const colorContainer = contentEl.createDiv();
-        colorContainer.style.display = 'flex';
-        colorContainer.style.gap = '8px';
-        colorContainer.style.marginBottom = '18px';
-        colorContainer.style.flexWrap = 'wrap';
+        const colorContainer = contentEl.createDiv({cls: 'color-container'});
         
         let selectedColor = 'var(--card-color-1)';
         const colors = [
@@ -107,12 +85,7 @@ class QuickCardWithFilterModal extends Modal {
         ];
         
         colors.forEach(color => {
-            const swatch = colorContainer.createDiv();
-            swatch.style.width = '24px';
-            swatch.style.height = '24px';
-            swatch.style.borderRadius = '50%';
-            swatch.style.cursor = 'pointer';
-            swatch.style.transition = 'transform 0.15s ease, border 0.15s ease';
+            const swatch = colorContainer.createDiv({cls: 'color-swatch'});
             swatch.style.border = selectedColor === color.var 
                 ? '2px solid var(--text-accent)' 
                 : '2px solid var(--background-modifier-border)';
@@ -150,29 +123,127 @@ class QuickCardWithFilterModal extends Modal {
         });
         
         // Tags section
-        const tagsHeading = contentEl.createEl('h3', {text: 'Tags'});
-        tagsHeading.style.marginTop = '6px';
-        tagsHeading.style.marginBottom = '6px';
+        const tagsHeading = contentEl.createEl('h3', {text: 'Tags', cls: 'quick-card-section-heading'});
         
-        const tagsInput = contentEl.createEl('input', {
+        const tagsWrapper = contentEl.createDiv({cls: 'tags-wrapper'});
+        
+        const tagsInput = tagsWrapper.createEl('input', {
             placeholder: 'Enter tags separated by commas (e.g., work, urgent)',
-            cls: 'quick-card-tags-input'
+            cls: 'tags-input'
         });
-        tagsInput.style.width = '100%';
-        tagsInput.style.padding = '8px';
-        tagsInput.style.marginBottom = '8px';
-        tagsInput.style.border = '1px solid var(--background-modifier-border)';
-        tagsInput.style.borderRadius = '4px';
-        tagsInput.style.boxSizing = 'border-box';
         
-        // Filter selection section
-        const filterHeading = contentEl.createEl('h3', {text: 'Apply Filters'});
-        filterHeading.style.marginTop = '8px';
-        filterHeading.style.marginBottom = '6px';
+        // Add tag autocomplete UI
+        const tagsAutocompleteContainer = tagsWrapper.createDiv({cls: 'tags-autocomplete-container'});
+        tagsAutocompleteContainer.addClass('tag-autocomplete');
         
-        const select = contentEl.createEl('select', {cls: 'filter-dropdown'});
-        select.style.width = '100%';
-        select.style.marginBottom = '12px';
+        const getRecentTags = () => {
+            try {
+                const tags = new Set();
+                const allCards = this.plugin.settings.cards || [];
+                allCards.forEach(c => {
+                    if (c.tags && Array.isArray(c.tags)) {
+                        c.tags.forEach(t => tags.add(String(t).toLowerCase()));
+                    }
+                });
+                return Array.from(tags).sort();
+            } catch (e) { return []; }
+        };
+        
+        let tagsAutocompleteSelectedIndex = -1;
+        const updateTagsAutocomplete = () => {
+            try {
+                const cursorPos = tagsInput.selectionStart;
+                const textBeforeCursor = tagsInput.value.substring(0, cursorPos);
+                const lastCommaIdx = Math.max(
+                    textBeforeCursor.lastIndexOf(','),
+                    textBeforeCursor.lastIndexOf(' ')
+                );
+                
+                const currentWord = (lastCommaIdx === -1 ? textBeforeCursor : textBeforeCursor.substring(lastCommaIdx + 1)).trim().toLowerCase();
+                
+                if (currentWord.length < 1) {
+                    tagsAutocompleteContainer.style.display = 'none';
+                    return;
+                }
+                
+                const allTags = getRecentTags();
+                const suggestions = allTags.filter(t => t.startsWith(currentWord) && t !== currentWord).slice(0, 8);
+                
+                if (suggestions.length === 0) {
+                    tagsAutocompleteContainer.style.display = 'none';
+                    return;
+                }
+                
+                tagsAutocompleteContainer.empty();
+                tagsAutocompleteSelectedIndex = -1;
+                suggestions.forEach((tag, idx) => {
+                    const item = tagsAutocompleteContainer.createDiv({cls: 'tags-autocomplete-item'});
+                    item.textContent = tag;
+                    item.dataset.index = String(idx);
+                    
+                    item.addEventListener('mouseenter', () => {
+                        item.style.background = 'var(--background-modifier-hover)';
+                        tagsAutocompleteSelectedIndex = idx;
+                    });
+                    item.addEventListener('mouseleave', () => {
+                        item.style.background = '';
+                    });
+                    
+                    item.addEventListener('click', () => {
+                        const before = tagsInput.value.substring(0, lastCommaIdx === -1 ? 0 : lastCommaIdx + 1);
+                        const after = tagsInput.value.substring(cursorPos);
+                        tagsInput.value = before + (lastCommaIdx === -1 ? '' : ' ') + tag + ', ' + after;
+                        tagsInput.selectionStart = tagsInput.selectionEnd = before.length + (lastCommaIdx === -1 ? 0 : 1) + tag.length + 2;
+                        tagsInput.focus();
+                        updateTagsAutocomplete();
+                    });
+                });
+                
+                tagsAutocompleteContainer.style.display = '';
+            } catch (e) { }
+        };
+        
+        tagsInput.addEventListener('input', updateTagsAutocomplete);
+        tagsInput.addEventListener('keydown', (e) => {
+            // Handle up/down arrow keys for tag suggestions
+            if ((e.key === 'ArrowUp' || e.key === 'ArrowDown') && tagsAutocompleteContainer.style.display !== 'none') {
+                e.preventDefault();
+                const items = tagsAutocompleteContainer.querySelectorAll('div');
+                if (items.length === 0) return;
+                
+                if (e.key === 'ArrowDown') {
+                    tagsAutocompleteSelectedIndex = (tagsAutocompleteSelectedIndex + 1) % items.length;
+                } else {
+                    tagsAutocompleteSelectedIndex = (tagsAutocompleteSelectedIndex - 1 + items.length) % items.length;
+                }
+                
+                items.forEach((item, idx) => {
+                    if (idx === tagsAutocompleteSelectedIndex) {
+                        item.style.background = 'var(--background-modifier-hover)';
+                    } else {
+                        item.style.background = '';
+                    }
+                });
+                
+                return;
+            }
+            
+            // Handle Enter to select highlighted tag
+            if (e.key === 'Enter' && tagsAutocompleteContainer.style.display !== 'none' && tagsAutocompleteSelectedIndex >= 0) {
+                e.preventDefault();
+                const items = tagsAutocompleteContainer.querySelectorAll('div');
+                const selectedItem = items[tagsAutocompleteSelectedIndex];
+                if (selectedItem) {
+                    selectedItem.click();
+                }
+                return;
+            }
+        });
+        
+        // Category selection section
+        const filterHeading = contentEl.createEl('h3', {text: 'Apply Category', cls: 'filter-heading'});
+        
+        const select = contentEl.createEl('select', {cls: 'filter-select filter-dropdown'});
         
         this.getAvailableFilters().forEach(filter => {
             const option = select.createEl('option', {
@@ -183,11 +254,7 @@ class QuickCardWithFilterModal extends Modal {
         });
         
         // Action buttons
-        const buttonContainer = contentEl.createEl('div', {cls: 'modal-button-container'});
-        buttonContainer.style.display = 'flex';
-        buttonContainer.style.justifyContent = 'flex-end';
-        buttonContainer.style.gap = '10px';
-        buttonContainer.style.marginTop = '8px';
+        const buttonContainer = contentEl.createEl('div', {cls: 'button-container modal-button-container'});
         
         // Cancel button
         const cancelButton = buttonContainer.createEl('button', {
@@ -201,11 +268,6 @@ class QuickCardWithFilterModal extends Modal {
             cls: 'mod-cta'
         });
         createButton.addEventListener('click', () => {
-            this.plugin.debugLog("🔍 Quick Card Add Debug: Create button clicked");
-            this.plugin.debugLog("Selected filter:", { value: select.value, type: select.selectedOptions[0].dataset.filterType });
-            this.plugin.debugLog("Card content:", textarea.value);
-            this.plugin.debugLog("Selected color:", selectedColor);
-            this.plugin.debugLog("Tags:", tagsInput.value);
             this.createCardAndFilter(textarea.value, select.value, select.selectedOptions[0].dataset.filterType, selectedColor, tagsInput.value);
             this.close();
         });
@@ -214,9 +276,6 @@ class QuickCardWithFilterModal extends Modal {
         textarea.addEventListener('keydown', (event) => {
             if (event.key === 'Enter' && !event.shiftKey) {
                 event.preventDefault();
-                this.plugin.debugLog("🔍 Quick Card Add Debug: Enter key pressed");
-                this.plugin.debugLog("Selected filter:", { value: select.value, type: select.selectedOptions[0].dataset.filterType });
-                this.plugin.debugLog("Card content:", textarea.value);
                 this.createCardAndFilter(textarea.value, select.value, select.selectedOptions[0].dataset.filterType, selectedColor, tagsInput.value);
                 this.close();
             }
@@ -246,33 +305,19 @@ class QuickCardWithFilterModal extends Modal {
     }
     
     async createCardAndFilter(content, filterValue, filterType, selectedColor = 'var(--card-color-1)', tagsString = '') {
-        this.plugin.debugLog("🔍 Quick Card Add Debug: createCardAndFilter start", {
-            content: content,
-            filterValue: filterValue,
-            filterType: filterType,
-            selectedColor: selectedColor,
-            tagsString: tagsString,
-            timestamp: new Date().toISOString()
-        });
-
         if (!content.trim()) {
-            this.plugin.debugWarn("❌ Quick Card Add: Empty content detected");
             new Notice('Card content cannot be empty');
             return;
         }
 
         try {
             // Get first Sidebar view
-            this.plugin.debugLog("🔍 Looking for sidebar view...");
             const view = this.app.workspace.getLeavesOfType('card-sidebar')?.[0]?.view;
             if (!view) {
-                this.plugin.debugWarn("❌ Quick Card Add: No sidebar view found");
                 throw new Error('Card sidebar not found');
             }
-            this.plugin.debugLog("✅ Quick Card Add: Found sidebar view");
             
             // Create textarea to use existing addCardFromInput logic
-            this.plugin.debugLog("📝 Creating temporary input element");
             const tempInput = document.createElement('textarea');
             tempInput.value = content;
 
@@ -303,10 +348,10 @@ class QuickCardWithFilterModal extends Modal {
             
             // Apply the filter using the existing sidebar logic
             if (filterType && filterValue) {
-                // Reset all filter buttons first
-                const filterGroup = view.containerEl.querySelector('.filter-group');
+                // Reset all category buttons first
+                const filterGroup = view.containerEl.querySelector('.category-group');
                 if (filterGroup) {
-                    filterGroup.querySelectorAll('.card-filter-btn').forEach(b => {
+                    filterGroup.querySelectorAll('.card-category-btn').forEach(b => {
                         b.removeClass('active');
                         const customBg = b.dataset.customBg;
                         const customText = b.dataset.customText;
@@ -351,14 +396,7 @@ class QuickCardWithFilterModal extends Modal {
                 }
                 
                 // Apply filters and animate
-                this.plugin.debugLog("🔍 Quick Card Add: Applying filters after card creation", {
-                    filterValue: filterValue,
-                    filterType: filterType,
-                    currentCategoryFilter: view.currentCategoryFilter,
-                    numCards: view.cards ? view.cards.length : 0
-                });
                 view.applyFilters();
-                this.plugin.debugLog("✅ Quick Card Add: Filters applied");
                 view.animateCardsEntrance({ duration: 300, offset: 28 });
             }
         } catch (error) {
@@ -572,21 +610,14 @@ class CardSidebarView extends ItemView {
         container.empty();
         container.addClass('card-sidebar-container');
         
-        const mainContainer = container.createDiv();
+        const mainContainer = container.createDiv({cls: 'card-element-container'});
         mainContainer.addClass('card-sidebar-main');
-        mainContainer.style.display = 'flex';
-        mainContainer.style.flexDirection = 'column';
-        mainContainer.style.height = '100%';
 
         this.createHeader(mainContainer);
         try { this.createSearchBar(mainContainer); } catch (e) { }
 
-        this.cardsContainer = mainContainer.createDiv();
+        this.cardsContainer = mainContainer.createDiv({cls: 'cards-container'});
         this.cardsContainer.addClass('card-sidebar-cards-container');
-        this.cardsContainer.style.flex = '1';
-        this.cardsContainer.style.position = 'relative';
-        this.cardsContainer.style.overflow = 'auto';
-        this.cardsContainer.style.minHeight = '200px';
         try { this.cardsContainer.style.contentVisibility = 'auto'; } catch (e) {}
         try { this.cardsContainer.style.containIntrinsicSize = '600px'; } catch (e) {}
 
@@ -642,7 +673,7 @@ class CardSidebarView extends ItemView {
                 if (['all', 'archived'].includes(lower)) {
                     // Don't call applyFilters - just update UI button states
                     try {
-                        const btns = this.containerEl.querySelectorAll('.card-filter-btn');
+                        const btns = this.containerEl.querySelectorAll('.card-category-btn');
                         btns.forEach(b => {
                             try {
                                 const t = (b.dataset && b.dataset.filterType) ? String(b.dataset.filterType) : '';
@@ -685,7 +716,7 @@ class CardSidebarView extends ItemView {
                     try { this.currentCategoryFilter = String(openVal).toLowerCase(); } catch (e) { this.currentCategoryFilter = String(openVal); }
                     // Don't call applyFilters on initial load - cards are already filtered appropriately
                     try {
-                        const btns = this.containerEl.querySelectorAll('.card-filter-btn');
+                        const btns = this.containerEl.querySelectorAll('.card-category-btn');
                         btns.forEach(b => {
                             try {
                                 const t = (b.dataset && b.dataset.filterType) ? String(b.dataset.filterType) : '';
@@ -1053,8 +1084,8 @@ class CardSidebarView extends ItemView {
         header.style.display = 'flex';
 
         if (!this.plugin.settings.disableFilterButtons) {
-            const filterGroup = header.createDiv('filter-group');
-            filterGroup.addClass('card-sidebar-filter-group');
+            const filterGroup = header.createDiv('category-group');
+            filterGroup.addClass('card-sidebar-category-group');
             filterGroup.style.display = 'flex';
             filterGroup.style.gap = '8px';
             // Allow horizontal scrolling of filter chips without showing a scrollbar
@@ -1064,12 +1095,12 @@ class CardSidebarView extends ItemView {
             filterGroup.style.webkitOverflowScrolling = 'touch';
 
             try {
-                if (!document.getElementById('card-filter-scroll-hide')) {
+                if (!document.getElementById('card-category-scroll-hide')) {
                     const s = document.createElement('style');
-                    s.id = 'card-filter-scroll-hide';
+                    s.id = 'card-category-scroll-hide';
                     s.textContent = `
-                        .card-sidebar-header .filter-group { -ms-overflow-style: none; scrollbar-width: none; }
-                        .card-sidebar-header .filter-group::-webkit-scrollbar { display: none; width: 0; height: 0; }
+                        .card-sidebar-header .category-group { -ms-overflow-style: none; scrollbar-width: none; }
+                        .card-sidebar-header .category-group::-webkit-scrollbar { display: none; width: 0; height: 0; }
                     `;
                     document.head.appendChild(s);
                 }
@@ -1107,6 +1138,8 @@ class CardSidebarView extends ItemView {
                 }
                 const cat = cats.find(c => String(c.id) === String(itemId));
                 if (!cat) return;
+                // Skip categories that have showInMenu disabled
+                if (cat.showInMenu === false) return;
                 const id = String(cat.id || '').toLowerCase();
                 const label = String(cat.label || '').toLowerCase();
                 const disabledTime = !!(this.plugin && this.plugin.settings && this.plugin.settings.disableTimeBasedFiltering);
@@ -1123,12 +1156,14 @@ class CardSidebarView extends ItemView {
 
             chips.forEach(chip => {
                 const btn = filterGroup.createEl('button', { text: chip.label });
-                btn.addClass('card-filter-btn');
+                btn.addClass('card-category-btn');
                 btn.style.padding = '4px 8px';
                 btn.style.borderRadius = 'var(--button-radius)';
                 btn.style.border = '1px solid var(--background-modifier-border)';
                 btn.style.cursor = 'pointer';
                 btn.style.fontSize = '12px';
+                btn.dataset.filterType = chip.type;
+                btn.dataset.filterValue = chip.value;
 
                 // Store the custom colors if available so we can restore them
                 let customBgColor = null;
@@ -1195,9 +1230,8 @@ class CardSidebarView extends ItemView {
                 });
 
                 btn.addEventListener('click', async () => {
-                    console.log('[SIDECARDS] 🔘 Filter button clicked, type:', chip.type, 'value:', chip.value);
                     
-                    filterGroup.querySelectorAll('.card-filter-btn').forEach(b => {
+                    filterGroup.querySelectorAll('.card-category-btn').forEach(b => {
                         const btnChip = b.dataset.filterValue;
                         b.removeClass('active');
                         // Get the stored custom colors for this button
@@ -1222,7 +1256,6 @@ class CardSidebarView extends ItemView {
 
                     
                     if (chip.type === 'archived' || chip.type === 'all') {
-                        console.log('[SIDECARDS] 🔘 Archived/All button - calling loadCards with archived=' + (chip.type === 'archived'));
                         btn.addClass('active');
                         // For active state, use a brighter version of custom colors or default
                         if (customBgColor) {
@@ -1254,10 +1287,9 @@ class CardSidebarView extends ItemView {
                             this._isViewSwitch = true;
                             try {
                                 if (chip.type === 'archived') {
-                                    console.log('[SIDECARDS] 🔘 Calling loadCards(true) for archived');
+
                                     await this.loadCards(true);
                                 } else {
-                                    console.log('[SIDECARDS] 🔘 Calling loadCards(false) for all');
                                     await this.loadCards(false);
                                 }
                             } finally {
@@ -1271,13 +1303,13 @@ class CardSidebarView extends ItemView {
                             try { this.hideLoadingOverlay(0); } catch (e) {}
                         } catch (e) {}
                     } else if (chip.type === 'category') {
-                        console.log('[SIDECARDS] 🔘 Category button - type:', chip.type, 'wasActive:', wasActive);
+                        console.log('[SIDECARDS] 🔘 Category button - selected:', chip.value);
                         const catId = String(chip.value || '').toLowerCase();
                         if (wasActive) {
                             
                             this.currentCategoryFilter = null;
                             
-                            filterGroup.querySelectorAll('.card-filter-btn').forEach(b => { 
+                            filterGroup.querySelectorAll('.card-category-btn').forEach(b => { 
                                 const btnChip = b.dataset.filterValue;
                                 b.removeClass('active'); 
                                 const btnBg = b.dataset.customBg || (this.plugin.settings.filterColors && this.plugin.settings.filterColors[btnChip]) ? this.plugin.settings.filterColors[btnChip].bgColor : null;
@@ -1799,7 +1831,7 @@ class CardSidebarView extends ItemView {
 
         const input = inputContainer.createEl('textarea');
         input.addClass('card-sidebar-input');
-        input.placeholder = 'Type your idea here...';
+        input.placeholder = 'Type your idea here... (Use @category to set group, #tag to add tags.)';
         input.rows = 1;
         input.style.width = '100%';
         input.style.minHeight = '36px';
@@ -1816,7 +1848,235 @@ class CardSidebarView extends ItemView {
         };
 
         input.addEventListener('input', autoResize);
+        
+        // Add tag autocomplete UI
+        const autocompleteContainer = inputContainer.createDiv();
+        autocompleteContainer.addClass('card-tag-autocomplete');
+        autocompleteContainer.style.display = 'none';
+        autocompleteContainer.style.position = 'absolute';
+        autocompleteContainer.style.bottom = 'calc(100% + 4px)';
+        autocompleteContainer.style.left = '8px';
+        autocompleteContainer.style.right = '8px';
+        autocompleteContainer.style.maxHeight = '150px';
+        autocompleteContainer.style.overflowY = 'auto';
+        autocompleteContainer.style.border = '1px solid var(--background-modifier-border)';
+        autocompleteContainer.style.borderRadius = '4px';
+        autocompleteContainer.style.background = 'var(--background-primary)';
+        autocompleteContainer.style.zIndex = '1000';
+        inputContainer.style.position = 'relative';
+        
+        let tagAutocompleteSelectedIndex = -1;
+        const getRecentlyUsedTags = () => {
+            try {
+                const tags = new Set();
+                (this.cards || []).forEach(c => {
+                    if (c.tags && Array.isArray(c.tags)) {
+                        c.tags.forEach(t => tags.add(String(t).toLowerCase()));
+                    }
+                });
+                return Array.from(tags).sort();
+            } catch (e) { return []; }
+        };
+        
+        const updateTagAutocomplete = () => {
+            try {
+                const cursorPos = input.selectionStart;
+                const textBeforeCursor = input.value.substring(0, cursorPos);
+                const lastHashIdx = textBeforeCursor.lastIndexOf('#');
+                
+                if (lastHashIdx === -1 || lastHashIdx < textBeforeCursor.length - 1) {
+                    autocompleteContainer.style.display = 'none';
+                    return;
+                }
+                
+                const currentWord = textBeforeCursor.substring(lastHashIdx + 1).toLowerCase();
+                const allTags = getRecentlyUsedTags();
+                const suggestions = allTags.filter(t => t.startsWith(currentWord) && t !== currentWord).slice(0, 8);
+                
+                if (suggestions.length === 0) {
+                    autocompleteContainer.style.display = 'none';
+                    return;
+                }
+                
+                autocompleteContainer.empty();
+                tagAutocompleteSelectedIndex = -1;
+                suggestions.forEach((tag, idx) => {
+                    const item = autocompleteContainer.createDiv();
+                    item.style.padding = '4px 8px';
+                    item.style.cursor = 'pointer';
+                    item.style.borderBottom = '1px solid var(--background-modifier-border)';
+                    item.textContent = '#' + tag;
+                    item.dataset.index = String(idx);
+                    
+                    item.addEventListener('mouseenter', () => {
+                        item.style.background = 'var(--background-modifier-hover)';
+                        tagAutocompleteSelectedIndex = idx;
+                    });
+                    item.addEventListener('mouseleave', () => {
+                        item.style.background = '';
+                    });
+                    
+                    item.addEventListener('click', () => {
+                        const before = input.value.substring(0, lastHashIdx);
+                        const after = input.value.substring(cursorPos);
+                        input.value = before + '#' + tag + after;
+                        input.selectionStart = input.selectionEnd = before.length + tag.length + 1;
+                        input.focus();
+                        autoResize();
+                        updateTagAutocomplete();
+                    });
+                });
+                
+                autocompleteContainer.style.display = '';
+            } catch (e) { }
+        };
+        
+        input.addEventListener('input', updateTagAutocomplete);
+        
+        // Add group autocomplete UI for @all, @today, @tomorrow, #category
+        const groupAutocompleteContainer = inputContainer.createDiv();
+        groupAutocompleteContainer.addClass('card-group-autocomplete');
+        groupAutocompleteContainer.style.display = 'none';
+        groupAutocompleteContainer.style.position = 'absolute';
+        groupAutocompleteContainer.style.bottom = 'calc(100% + 4px)';
+        groupAutocompleteContainer.style.left = '8px';
+        groupAutocompleteContainer.style.right = '8px';
+        groupAutocompleteContainer.style.maxHeight = '150px';
+        groupAutocompleteContainer.style.overflowY = 'auto';
+        groupAutocompleteContainer.style.border = '1px solid var(--background-modifier-border)';
+        groupAutocompleteContainer.style.borderRadius = '4px';
+        groupAutocompleteContainer.style.background = 'var(--background-primary)';
+        groupAutocompleteContainer.style.zIndex = '999';
+        
+        let groupAutocompleteSelectedIndex = -1;
+        const updateGroupAutocomplete = () => {
+            try {
+                const cursorPos = input.selectionStart;
+                const textBeforeCursor = input.value.substring(0, cursorPos);
+                
+                const lines = textBeforeCursor.split('\n');
+                const currentLine = lines[lines.length - 1];
+                const atIdx = currentLine.lastIndexOf('@');
+
+                if (atIdx === -1) {
+                    groupAutocompleteContainer.style.display = 'none';
+                    return;
+                }
+                
+                const currentWord = currentLine.substring(atIdx + 1).toLowerCase();
+                const groups = ['all', 'today', 'tomorrow'];
+                const customCats = Array.isArray(this.plugin.settings.customCategories) ? this.plugin.settings.customCategories : [];
+                
+                // All suggestions use @ prefix (builtin and custom categories)
+                const allSuggestions = [
+                    ...groups.map(g => ({ text: '@' + g, label: g })),
+                    ...customCats.map(c => ({ text: '@' + (c.id || c.label), label: c.label || c.id }))
+                ];
+                
+                // Filter suggestions: if currentWord is empty, show all; otherwise filter by match
+                const suggestions = currentWord.length === 0 
+                    ? allSuggestions
+                    : allSuggestions.filter(s => s.text.substring(1).startsWith(currentWord)).slice(0, 8);
+                
+                if (suggestions.length === 0) {
+                    groupAutocompleteContainer.style.display = 'none';
+                    return;
+                }
+                
+                groupAutocompleteContainer.empty();
+                groupAutocompleteSelectedIndex = -1;
+                suggestions.forEach(({ text, label }, idx) => {
+                    const item = groupAutocompleteContainer.createDiv();
+                    item.style.padding = '4px 8px';
+                    item.style.cursor = 'pointer';
+                    item.style.borderBottom = '1px solid var(--background-modifier-border)';
+                    item.style.fontSize = '12px';
+                    item.textContent = label;
+                    item.dataset.index = String(idx);
+                    
+                    item.addEventListener('mouseenter', () => {
+                        item.style.background = 'var(--background-modifier-hover)';
+                        groupAutocompleteSelectedIndex = idx;
+                    });
+                    item.addEventListener('mouseleave', () => {
+                        item.style.background = '';
+                    });
+                    
+                    item.addEventListener('click', () => {
+                        const lineStart = textBeforeCursor.lastIndexOf('\n') + 1;
+                        const atAbs = lineStart + atIdx;
+                        const before = input.value.substring(0, atAbs);
+                        const after = input.value.substring(cursorPos);
+                        input.value = before + text + ' ' + after;
+                        input.selectionStart = input.selectionEnd = before.length + text.length + 1;
+                        input.focus();
+                        autoResize();
+                        updateGroupAutocomplete();
+                    });
+                });
+                
+                groupAutocompleteContainer.style.display = '';
+            } catch (e) { }
+        };
+        
+        input.addEventListener('input', updateGroupAutocomplete);
         input.addEventListener('keydown', (e) => {
+            if ((e.key === 'ArrowUp' || e.key === 'ArrowDown') && groupAutocompleteContainer.style.display !== 'none') {
+                e.preventDefault();
+                const items = groupAutocompleteContainer.querySelectorAll('div');
+                if (items.length === 0) return;
+                if (e.key === 'ArrowDown') {
+                    groupAutocompleteSelectedIndex = (groupAutocompleteSelectedIndex + 1) % items.length;
+                } else {
+                    groupAutocompleteSelectedIndex = (groupAutocompleteSelectedIndex - 1 + items.length) % items.length;
+                }
+                items.forEach((item, idx) => {
+                    item.style.background = idx === groupAutocompleteSelectedIndex ? 'var(--background-modifier-hover)' : '';
+                });
+                return;
+            }
+
+            if (e.key === 'Enter' && groupAutocompleteContainer.style.display !== 'none' && groupAutocompleteSelectedIndex >= 0) {
+                e.preventDefault();
+                const items = groupAutocompleteContainer.querySelectorAll('div');
+                const selectedItem = items[groupAutocompleteSelectedIndex];
+                if (selectedItem) selectedItem.click();
+                return;
+            }
+            // Handle up/down arrow keys for tag suggestions
+            if ((e.key === 'ArrowUp' || e.key === 'ArrowDown') && autocompleteContainer.style.display !== 'none') {
+                e.preventDefault();
+                const items = autocompleteContainer.querySelectorAll('div');
+                if (items.length === 0) return;
+                
+                if (e.key === 'ArrowDown') {
+                    tagAutocompleteSelectedIndex = (tagAutocompleteSelectedIndex + 1) % items.length;
+                } else {
+                    tagAutocompleteSelectedIndex = (tagAutocompleteSelectedIndex - 1 + items.length) % items.length;
+                }
+                
+                items.forEach((item, idx) => {
+                    if (idx === tagAutocompleteSelectedIndex) {
+                        item.style.background = 'var(--background-modifier-hover)';
+                    } else {
+                        item.style.background = '';
+                    }
+                });
+                
+                return;
+            }
+            
+            // Handle Enter to select highlighted tag
+            if (e.key === 'Enter' && autocompleteContainer.style.display !== 'none' && tagAutocompleteSelectedIndex >= 0) {
+                e.preventDefault();
+                const items = autocompleteContainer.querySelectorAll('div');
+                const selectedItem = items[tagAutocompleteSelectedIndex];
+                if (selectedItem) {
+                    selectedItem.click();
+                }
+                return;
+            }
+            
             let pressed = '';
             if (e.ctrlKey) pressed += 'ctrl-';
             if (e.shiftKey) pressed += 'shift-';
@@ -1877,7 +2137,7 @@ class CardSidebarView extends ItemView {
             searchBtn.style.color = 'var(--text-normal)';
         });
         searchBtn.addEventListener('mouseleave', () => {
-            searchBtn.style.color = 'var(--text-muted)';
+            searchBtn.style.color = this._searchWrap && this._searchWrap.style.display !== 'none' ? 'var(--interactive-accent)' : 'var(--text-muted)';
         });
         searchBtn.addEventListener('click', () => {
             try {
@@ -1885,6 +2145,9 @@ class CardSidebarView extends ItemView {
                     this._searchWrap.style.display = (this._searchWrap.style.display === 'none') ? '' : 'none';
                     if (this._searchWrap.style.display !== 'none' && this._searchInput) {
                         try { this._searchInput.focus(); } catch (e) {}
+                        searchBtn.style.color = 'var(--text-normal)';
+                    } else {
+                        searchBtn.style.color = 'var(--text-muted)';
                     }
                     if (typeof this.updateSearchChips === 'function') this.updateSearchChips();
                 }
@@ -1915,7 +2178,7 @@ class CardSidebarView extends ItemView {
         reloadBtn.addEventListener('click', async () => {
             try {
                 this._justReloaded = Date.now();
-                const activeBtn = this.containerEl.querySelector('.card-filter-btn.active');
+                const activeBtn = this.containerEl.querySelector('.card-category-btn.active');
                 const activeText = activeBtn ? activeBtn.textContent.toLowerCase() : 'all';
                 const showArchived = activeText === 'archived';
 
@@ -2085,6 +2348,40 @@ class CardSidebarView extends ItemView {
             this.addCardFromInput(input);
         });
 
+        const addCategoryBtn = buttonContainer.createEl('button');
+        addCategoryBtn.addClass('card-add-category-btn');
+        addCategoryBtn.textContent = '+ Category';
+        addCategoryBtn.addEventListener('click', () => {
+            try {
+                if (!Array.isArray(this.plugin.settings.customCategories)) this.plugin.settings.customCategories = [];
+                const slug = 'new';
+                const existing = new Set(this.plugin.settings.customCategories.map(c => String(c.id || '').toLowerCase()));
+                let id = slug;
+                let i = 2;
+                while (existing.has(id)) { id = slug + '-' + i; i++; }
+                this.plugin.settings.customCategories.push({ id, label: 'New', showInMenu: true });
+                if (!Array.isArray(this.plugin.settings.allItemsOrder) || this.plugin.settings.allItemsOrder.length === 0) {
+                    const defaultCombined = ['filter-all', 'filter-today', 'filter-tomorrow']
+                        .concat(this.plugin.settings.customCategories.map(c => String(c.id || '')));
+                    this.plugin.settings.allItemsOrder = defaultCombined;
+                } else {
+                    const order = this.plugin.settings.allItemsOrder;
+                    if (!order.includes(id)) order.push(id);
+                }
+                this.plugin.saveSettings();
+                // Refresh sidebar header to show new category
+                try {
+                    const main = this.containerEl.querySelector('.card-sidebar-main');
+                    const old = main?.querySelector('.card-sidebar-header');
+                    if (old) old.remove();
+                    if (main) this.createHeader(main);
+                } catch (e) {}
+                new Notice('New category created. Edit it in settings.');
+            } catch (e) {
+                console.error('Error adding category:', e);
+            }
+        });
+
         const clearButton = buttonContainer.createEl('button');
         clearButton.addClass('card-clear-btn');
         clearButton.textContent = 'Clear';
@@ -2116,15 +2413,112 @@ class CardSidebarView extends ItemView {
     }
 
     async addCardFromInput(input, filterInfo = {}) {
-        const content = input.value.trim();
+        let content = input.value.trim();
         if (!content) return;
 
         // Extract filter type, value, color, and tags from the input
-        const filterType = filterInfo.filterType || '';
-        const filterValue = filterInfo.filterValue || '';
+        let filterType = filterInfo.filterType || '';
+        let filterValue = filterInfo.filterValue || '';
         const selectedColor = filterInfo.selectedColor || 'var(--card-color-1)';
-        const additionalTags = filterInfo.tags || [];
+        let additionalTags = filterInfo.tags || [];
         
+        // Parse group prefixes from content: @all, @today, @tomorrow, or @customcategory
+        // Also extract #tags from content
+        let actualContent = content;
+        let extractedTags = [];
+        
+        // Check for @ prefixes at the start - match as much as possible
+        const customCats = Array.isArray(this.plugin.settings.customCategories) ? this.plugin.settings.customCategories : [];
+        
+        // Try to match @category from start of content - check custom categories first (in case of multi-word labels)
+        let matched = false;
+        
+        // Sort custom categories by label length (longest first) to match multi-word labels properly
+        const sortedCustomCats = [...customCats].sort((a, b) => 
+            String(b.label || b.id || '').length - String(a.label || a.id || '').length
+        );
+        
+        for (const cat of sortedCustomCats) {
+            const catId = String(cat.id || '').toLowerCase();
+            const catLabel = String(cat.label || '').toLowerCase();
+            
+            // Check if content starts with @category or @id followed by space or end
+            if (content.toLowerCase().startsWith('@' + catLabel + ' ') || 
+                (content.toLowerCase().startsWith('@' + catLabel) && content.length === ('@' + catLabel).length)) {
+                filterType = 'category';
+                filterValue = cat.label || cat.id;
+                actualContent = content.substring(('@' + catLabel).length).trim();
+                matched = true;
+                break;
+            }
+            if (content.toLowerCase().startsWith('@' + catId + ' ') || 
+                (content.toLowerCase().startsWith('@' + catId) && content.length === ('@' + catId).length)) {
+                filterType = 'category';
+                filterValue = cat.label || cat.id;
+                actualContent = content.substring(('@' + catId).length).trim();
+                matched = true;
+                break;
+            }
+        }
+        
+        // If no custom category matched, check built-in categories
+        if (!matched) {
+            const groupMatch = content.match(/^@(all|today|tomorrow)(?:\s+(.*))?$/i);
+            if (groupMatch) {
+                const prefix = groupMatch[1].toLowerCase();
+                actualContent = groupMatch[2] ? groupMatch[2].trim() : '';
+                
+                if (prefix === 'all') {
+                    filterType = 'all';
+                    filterValue = '';
+                } else if (prefix === 'today') {
+                    filterType = 'today';
+                    filterValue = 'today';
+                } else if (prefix === 'tomorrow') {
+                    filterType = 'tomorrow';
+                    filterValue = 'tomorrow';
+                }
+                matched = true;
+            }
+        }
+
+        if (!matched) {
+            const anyMatch = content.match(/@([a-z0-9\-]+)/i);
+            if (anyMatch) {
+                const token = anyMatch[1].toLowerCase();
+                const builtin = ['all', 'today', 'tomorrow'];
+                if (builtin.includes(token)) {
+                    if (token === 'all') { filterType = 'all'; filterValue = ''; }
+                    else if (token === 'today') { filterType = 'today'; filterValue = 'today'; }
+                    else if (token === 'tomorrow') { filterType = 'tomorrow'; filterValue = 'tomorrow'; }
+                    actualContent = content.replace(new RegExp('@' + token + '(?![a-z0-9\-])', 'i'), '').trim();
+                    matched = true;
+                } else {
+                    const found = customCats.find(c => String(c.id || '').toLowerCase() === token || String(c.label || '').toLowerCase() === token);
+                    if (found) {
+                        filterType = 'category';
+                        filterValue = found.label || found.id;
+                        actualContent = content.replace(new RegExp('@' + token + '(?![a-z0-9\-])', 'i'), '').trim();
+                        matched = true;
+                    }
+                }
+            }
+        }
+        
+        // Extract #tags from content
+        const tagMatches = actualContent.match(/#[a-zA-Z0-9_-]+/g) || [];
+        if (tagMatches.length > 0) {
+            extractedTags = tagMatches.map(t => t.substring(1));
+            // Remove tags from content
+            actualContent = actualContent.replace(/#[a-zA-Z0-9_-]+/g, '').trim();
+        }
+        
+        // Combine extracted tags with additional tags, avoiding duplicates
+        const allTags = [...new Set([...additionalTags, ...extractedTags])];
+        additionalTags = allTags;
+        
+        content = actualContent;
+
         // Determine category and additional metadata
         let category = '';
         let archived = false;
@@ -2328,6 +2722,183 @@ class CardSidebarView extends ItemView {
             } catch (_) {}
         });
 
+        const editAutocompleteContainer = card.createDiv();
+        editAutocompleteContainer.style.display = 'none';
+        editAutocompleteContainer.style.position = 'absolute';
+        editAutocompleteContainer.style.top = '4px';
+        editAutocompleteContainer.style.left = '8px';
+        editAutocompleteContainer.style.maxHeight = '150px';
+        editAutocompleteContainer.style.overflowY = 'auto';
+        editAutocompleteContainer.style.border = '1px solid var(--background-modifier-border)';
+        editAutocompleteContainer.style.borderRadius = '4px';
+        editAutocompleteContainer.style.background = 'var(--background-primary)';
+        editAutocompleteContainer.style.zIndex = '1000';
+
+        const editGroupAutocompleteContainer = card.createDiv();
+        editGroupAutocompleteContainer.style.display = 'none';
+        editGroupAutocompleteContainer.style.position = 'absolute';
+        editGroupAutocompleteContainer.style.top = '4px';
+        editGroupAutocompleteContainer.style.right = '8px';
+        editGroupAutocompleteContainer.style.maxHeight = '150px';
+        editGroupAutocompleteContainer.style.overflowY = 'auto';
+        editGroupAutocompleteContainer.style.border = '1px solid var(--background-modifier-border)';
+        editGroupAutocompleteContainer.style.borderRadius = '4px';
+        editGroupAutocompleteContainer.style.background = 'var(--background-primary)';
+        editGroupAutocompleteContainer.style.zIndex = '999';
+
+        let editTagSelectedIndex = -1;
+        let editGroupSelectedIndex = -1;
+
+        const getEditableText = () => String(contentEl.innerText || contentEl.textContent || '');
+        const getTextBeforeCursor = () => {
+            try {
+                const sel = window.getSelection();
+                if (!sel || sel.rangeCount === 0) return '';
+                const range = sel.getRangeAt(0);
+                if (!contentEl.contains(range.startContainer)) return '';
+                const walker = document.createTreeWalker(contentEl, NodeFilter.SHOW_TEXT, null);
+                let text = '';
+                while (walker.nextNode()) {
+                    const node = walker.currentNode;
+                    if (node === range.startContainer) {
+                        text += node.textContent.substring(0, range.startOffset);
+                        break;
+                    } else {
+                        text += node.textContent;
+                    }
+                }
+                return text;
+            } catch (e) { return ''; }
+        };
+
+        const replaceAtWord = (prefixChar, replacement) => {
+            const full = getEditableText();
+            const before = getTextBeforeCursor();
+            const lineStart = before.lastIndexOf('\n') + 1;
+            const currentLine = before.substring(lineStart);
+            const idx = currentLine.lastIndexOf(prefixChar);
+            if (idx === -1) return;
+            const absStart = lineStart + idx;
+            const caret = before.length;
+            const after = full.substring(caret);
+            const newText = full.substring(0, absStart) + replacement + ' ' + after;
+            contentEl.textContent = newText;
+            try {
+                const sel = window.getSelection();
+                const r = document.createRange();
+                const walker = document.createTreeWalker(contentEl, NodeFilter.SHOW_TEXT, null);
+                let remaining = (absStart + replacement.length + 1);
+                let targetNode = null;
+                let offset = 0;
+                while (walker.nextNode()) {
+                    const node = walker.currentNode;
+                    const len = node.textContent.length;
+                    if (remaining <= len) { targetNode = node; offset = remaining; break; }
+                    remaining -= len;
+                }
+                if (targetNode) {
+                    r.setStart(targetNode, offset);
+                    r.collapse(true);
+                    sel.removeAllRanges();
+                    sel.addRange(r);
+                }
+            } catch (e) {}
+        };
+
+        const updateEditTagAutocomplete = () => {
+            if (contentEl.getAttribute('contenteditable') !== 'true') { editAutocompleteContainer.style.display = 'none'; return; }
+            const before = getTextBeforeCursor();
+            const lineStart = before.lastIndexOf('\n') + 1;
+            const currentLine = before.substring(lineStart);
+            const lastHashIdx = currentLine.lastIndexOf('#');
+            if (lastHashIdx === -1) { editAutocompleteContainer.style.display = 'none'; return; }
+            const currentWord = currentLine.substring(lastHashIdx + 1).toLowerCase();
+            const tags = Array.isArray(this.plugin.settings.availableTags) ? this.plugin.settings.availableTags : [];
+            const suggestions = currentWord.length === 0 ? tags.slice(0, 8) : tags.filter(t => String(t).toLowerCase().startsWith(currentWord)).slice(0, 8);
+            if (suggestions.length === 0) { editAutocompleteContainer.style.display = 'none'; return; }
+            editAutocompleteContainer.empty();
+            editTagSelectedIndex = -1;
+            suggestions.forEach((tag, idx) => {
+                const item = editAutocompleteContainer.createDiv();
+                item.style.padding = '4px 8px';
+                item.style.cursor = 'pointer';
+                item.style.borderBottom = '1px solid var(--background-modifier-border)';
+                item.textContent = '#' + tag;
+                item.dataset.index = String(idx);
+                item.addEventListener('mouseenter', () => { item.style.background = 'var(--background-modifier-hover)'; editTagSelectedIndex = idx; });
+                item.addEventListener('mouseleave', () => { item.style.background = ''; });
+                item.addEventListener('click', () => { replaceAtWord('#', '#' + tag); updateEditTagAutocomplete(); });
+            });
+            editAutocompleteContainer.style.display = '';
+        };
+
+        const updateEditGroupAutocomplete = () => {
+            if (contentEl.getAttribute('contenteditable') !== 'true') { editGroupAutocompleteContainer.style.display = 'none'; return; }
+            const before = getTextBeforeCursor();
+            const lineStart = before.lastIndexOf('\n') + 1;
+            const currentLine = before.substring(lineStart);
+            const atIdx = currentLine.lastIndexOf('@');
+            if (atIdx === -1) { editGroupAutocompleteContainer.style.display = 'none'; return; }
+            const currentWord = currentLine.substring(atIdx + 1).toLowerCase();
+            const groups = ['all', 'today', 'tomorrow'];
+            const customCats = Array.isArray(this.plugin.settings.customCategories) ? this.plugin.settings.customCategories : [];
+            const allSuggestions = [
+                ...groups.map(g => ({ text: '@' + g, label: g })),
+                ...customCats.map(c => ({ text: '@' + (c.id || c.label), label: c.label || c.id }))
+            ];
+            const suggestions = currentWord.length === 0 ? allSuggestions : allSuggestions.filter(s => s.text.substring(1).startsWith(currentWord)).slice(0, 8);
+            if (suggestions.length === 0) { editGroupAutocompleteContainer.style.display = 'none'; return; }
+            editGroupAutocompleteContainer.empty();
+            editGroupSelectedIndex = -1;
+            suggestions.forEach(({ text, label }, idx) => {
+                const item = editGroupAutocompleteContainer.createDiv();
+                item.style.padding = '4px 8px';
+                item.style.cursor = 'pointer';
+                item.style.borderBottom = '1px solid var(--background-modifier-border)';
+                item.style.fontSize = '12px';
+                item.textContent = label;
+                item.dataset.index = String(idx);
+                item.addEventListener('mouseenter', () => { item.style.background = 'var(--background-modifier-hover)'; editGroupSelectedIndex = idx; });
+                item.addEventListener('mouseleave', () => { item.style.background = ''; });
+                item.addEventListener('click', () => { replaceAtWord('@', text); updateEditGroupAutocomplete(); });
+            });
+            editGroupAutocompleteContainer.style.display = '';
+        };
+
+        contentEl.addEventListener('input', () => { updateEditTagAutocomplete(); updateEditGroupAutocomplete(); });
+        contentEl.addEventListener('keydown', (e) => {
+            if ((e.key === 'ArrowUp' || e.key === 'ArrowDown') && editGroupAutocompleteContainer.style.display !== 'none') {
+                e.preventDefault();
+                const items = editGroupAutocompleteContainer.querySelectorAll('div');
+                if (items.length === 0) return;
+                if (e.key === 'ArrowDown') { editGroupSelectedIndex = (editGroupSelectedIndex + 1) % items.length; } else { editGroupSelectedIndex = (editGroupSelectedIndex - 1 + items.length) % items.length; }
+                items.forEach((item, idx) => { item.style.background = idx === editGroupSelectedIndex ? 'var(--background-modifier-hover)' : ''; });
+                return;
+            }
+            if (e.key === 'Enter' && editGroupAutocompleteContainer.style.display !== 'none' && editGroupSelectedIndex >= 0) {
+                e.preventDefault();
+                const items = editGroupAutocompleteContainer.querySelectorAll('div');
+                const selectedItem = items[editGroupSelectedIndex];
+                if (selectedItem) selectedItem.click();
+                return;
+            }
+            if ((e.key === 'ArrowUp' || e.key === 'ArrowDown') && editAutocompleteContainer.style.display !== 'none') {
+                e.preventDefault();
+                const items = editAutocompleteContainer.querySelectorAll('div');
+                if (items.length === 0) return;
+                if (e.key === 'ArrowDown') { editTagSelectedIndex = (editTagSelectedIndex + 1) % items.length; } else { editTagSelectedIndex = (editTagSelectedIndex - 1 + items.length) % items.length; }
+                items.forEach((item, idx) => { item.style.background = idx === editTagSelectedIndex ? 'var(--background-modifier-hover)' : ''; });
+                return;
+            }
+            if (e.key === 'Enter' && editAutocompleteContainer.style.display !== 'none' && editTagSelectedIndex >= 0) {
+                e.preventDefault();
+                const items = editAutocompleteContainer.querySelectorAll('div');
+                const selectedItem = items[editTagSelectedIndex];
+                if (selectedItem) selectedItem.click();
+                return;
+            }
+        });
+
         contentEl.addEventListener('blur', () => {
             try {
                 const text = contentEl.innerText != null ? contentEl.innerText : contentEl.textContent;
@@ -2347,7 +2918,7 @@ class CardSidebarView extends ItemView {
                     const cd = this.cards.find(c => c.element === card);
                     contentEl.setAttribute('contenteditable', 'false');
                     contentEl.empty();
-                    MarkdownRenderer.render(this.app, String((cd && cd.content) || ''), contentEl, (cd && cd.notePath) || options.notePath || '');
+                    MarkdownRenderer.render(this.app, String((cd && cd.content) || ''), contentEl, this, (cd && cd.notePath) || options.notePath || '');
                     
                     // CRITICAL FIX: Always reapply the correct color after editing
                     // This ensures status color inheritance is maintained
@@ -2479,13 +3050,20 @@ class CardSidebarView extends ItemView {
                 if (this.plugin.settings.showTimestamps) {
                     createTimestampNode(leftSection);
                 }
+                // Only hide tags if groupTags is enabled (tags will be managed separately)
+                if (this.plugin.settings.groupTags) {
+                    tagsEl.style.display = 'none';
+                }
             } else {
                 if (this.plugin.settings.showTimestamps) {
                     createTimestampNode(leftSection);
                 }
                 if (options.tags && options.tags.length > 0) {
                     const tagsEl = createTagsNode(leftSection);
-                    if (!this.plugin.settings.groupTags) tagsEl.remove();
+                    // Hide tags if groupTags is enabled (they'll be shown via groupTags system)
+                    if (this.plugin.settings.groupTags) {
+                        tagsEl.style.display = 'none';
+                    }
                 }
             }
         }
@@ -2750,24 +3328,44 @@ class CardSidebarView extends ItemView {
         try { this.refreshMasonrySpans(); } catch (e) {}
 
         try {
-            if (this.plugin.settings.enableCopyCardContent && !options.detached) {
+            if (this.plugin.settings.enableCopyCardContent) {
                 const copyBtn = card.createDiv();
                 copyBtn.addClass('card-copy-btn');
-                try { copyBtn.classList.add('sidecards-copy-btn'); } catch (e) {}
                 copyBtn.style.position = 'absolute';
-                copyBtn.style.bottom = '2px';
-                copyBtn.style.right = '8px';
+                copyBtn.style.top = '4px';
+                copyBtn.style.right = '4px';
                 copyBtn.style.border = 'none';
-                copyBtn.style.background = 'none';
+                copyBtn.style.background = 'transparent';
                 copyBtn.style.cursor = 'pointer';
-                copyBtn.style.padding = '4px';
-                copyBtn.style.color = 'var(--text-muted)';
-                copyBtn.style.display = 'none';
-                try { setIcon(copyBtn, 'copy'); } catch (e) { copyBtn.textContent = '⎘'; }
-                card.addEventListener('mouseenter', () => { copyBtn.style.display = ''; copyBtn.style.color = 'var(--text-normal)'; });
-                card.addEventListener('mouseleave', () => { copyBtn.style.display = 'none'; copyBtn.style.color = 'var(--text-muted)'; });
+                copyBtn.style.padding = '6px';
+                copyBtn.style.display = 'flex';
+                copyBtn.style.alignItems = 'center';
+                copyBtn.style.justifyContent = 'center';
+                copyBtn.style.opacity = '0';
+                copyBtn.style.pointerEvents = 'none';
+                copyBtn.style.transition = 'opacity 0.15s ease-in-out';
+                copyBtn.style.zIndex = '10';
+                
+                try { setIcon(copyBtn, 'copy'); } catch (e) { copyBtn.textContent = '📋'; }
+                copyBtn.style.fontSize = '16px';
+                copyBtn.style.lineHeight = '1';
+                copyBtn.style.width = '28px';
+                copyBtn.style.height = '28px';
+                
+                // Hover handlers
+                const showButton = () => {
+                    try { copyBtn.style.opacity = '1'; copyBtn.style.pointerEvents = 'auto'; } catch (e) {}
+                };
+                const hideButton = () => {
+                    try { copyBtn.style.opacity = '0'; copyBtn.style.pointerEvents = 'none'; } catch (e) {}
+                };
+                
+                card.addEventListener('mouseenter', showButton);
+                card.addEventListener('mouseleave', hideButton);
+                
                 copyBtn.addEventListener('click', async (e) => {
-                    e.preventDefault(); e.stopPropagation();
+                    e.preventDefault(); 
+                    e.stopPropagation();
                     try {
                         let text = String(cardData.content || '');
                         if (cardData.notePath) {
@@ -2785,7 +3383,9 @@ class CardSidebarView extends ItemView {
                     } catch (err) {}
                 });
             }
-        } catch (e) {}
+        } catch (e) {
+            console.warn('Error setting up copy button:', e);
+        }
         // Defer non-essential UI setup until idle
         try {
             if (!this._deferredUiSetupQueue) this._deferredUiSetupQueue = [];
@@ -3426,7 +4026,29 @@ class CardSidebarView extends ItemView {
         if (!cardData) return;
 
         try {
-            cardData.content = newContent;
+            let body = String(newContent || '').trim();
+            let categoryFromBody = '';
+            const cats = Array.isArray(this.plugin.settings.customCategories) ? this.plugin.settings.customCategories : [];
+            const mAny = body.match(/@([a-z0-9\-]+)/i);
+            if (mAny) {
+                const token = mAny[1].toLowerCase();
+                if (token === 'today') { categoryFromBody = 'Today'; body = body.replace(new RegExp('@' + token + '(?![a-z0-9\-])', 'i'), '').trim(); }
+                else if (token === 'tomorrow') { categoryFromBody = 'Tomorrow'; body = body.replace(new RegExp('@' + token + '(?![a-z0-9\-])', 'i'), '').trim(); }
+                else if (token !== 'all') {
+                    const found = cats.find(c => String(c.id || '').toLowerCase() === token || String(c.label || '').toLowerCase() === token);
+                    if (found) { categoryFromBody = found.label || found.id; body = body.replace(new RegExp('@' + token + '(?![a-z0-9\-])', 'i'), '').trim(); }
+                }
+            }
+            const tagMatches = body.match(/#[a-zA-Z0-9_-]+/g) || [];
+            const extracted = tagMatches.map(t => t.substring(1));
+            if (tagMatches.length > 0) body = body.replace(/#[a-zA-Z0-9_-]+/g, '').trim();
+
+            cardData.content = body;
+            if (categoryFromBody) cardData.category = categoryFromBody;
+            if (extracted.length) {
+                const existing = Array.isArray(cardData.tags) ? cardData.tags : [];
+                cardData.tags = Array.from(new Set([...existing, ...extracted]));
+            }
 
             if (this.plugin.settings.groupTags) {
                 try { this.updateCardTagDisplay(cardData); } catch (e) {}
@@ -3443,9 +4065,33 @@ class CardSidebarView extends ItemView {
                             const fmMatch = text.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n/);
                             let newText;
                             if (fmMatch) {
-                                newText = fmMatch[0] + newContent;
+                                let fmBody = fmMatch[1];
+                                if (categoryFromBody) {
+                                    if (/^\s*Category\s*:\s*.*$/mi.test(fmBody)) {
+                                        fmBody = fmBody.replace(/^\s*Category\s*:\s*.*$/mi, `Category: ${String(categoryFromBody).replace(/\n/g,' ')}`);
+                                    } else {
+                                        fmBody = fmBody + `\nCategory: ${String(categoryFromBody).replace(/\n/g,' ')}`;
+                                    }
+                                }
+                                if (extracted.length) {
+                                    const tagsYaml = 'Tags:\n' + extracted.map(t => `  - ${t}`).join('\n');
+                                    if (/^\s*Tags\s*:\s*[\s\S]*?$/mi.test(fmBody)) {
+                                        fmBody = fmBody.replace(/^\s*Tags\s*:\s*[\s\S]*?$/mi, tagsYaml);
+                                    } else {
+                                        fmBody = tagsYaml + '\n' + fmBody;
+                                    }
+                                }
+                                const fm = '---\n' + fmBody + '\n---\n';
+                                const contentTrimmed = body.replace(/^\n+/, '');
+                                newText = fm + '\n' + contentTrimmed;
                             } else {
-                                newText = newContent;
+                                let fmLines = ['---'];
+                                const tagArray = extracted;
+                                const tagsYaml = tagArray.length > 0 ? ('Tags:\n' + tagArray.map(t => `  - ${t}`).join('\n')) : 'Tags: []';
+                                fmLines.push(tagsYaml);
+                                if (categoryFromBody) fmLines.push(`Category: ${String(categoryFromBody).replace(/\n/g,' ')}`);
+                                fmLines.push('---');
+                                newText = fmLines.join('\n') + '\n\n' + body;
                             }
                             this.plugin.debugLog('sidecards: modify (updateCardContent preserve frontmatter) ->', file.path);
                             await this.app.vault.modify(file, newText);
@@ -3564,6 +4210,74 @@ class CardSidebarView extends ItemView {
                 break;
             }
         } catch (e) {}
+    }
+
+    applyTextColoringToContentEl(contentEl, cardData) {
+        try {
+            if (!contentEl || !cardData) return;
+            const rules = Array.isArray(this.plugin.settings.autoColorRules) ? this.plugin.settings.autoColorRules : [];
+            if (!rules.length) return;
+            const body = String(cardData.content || '').toLowerCase();
+            const textRules = rules.filter(r => String(r.type || 'text') === 'text' && String(r.match || '').trim().length > 0);
+            if (textRules.length === 0) return;
+
+            const processTextNode = (node, lcMatch, colorVar) => {
+                try {
+                    const text = node.textContent;
+                    const lower = text.toLowerCase();
+                    let start = 0;
+                    let any = false;
+                    const frag = document.createDocumentFragment();
+                    while (true) {
+                        const idx = lower.indexOf(lcMatch, start);
+                        if (idx === -1) break;
+                        let left = idx;
+                        while (left > 0 && !/\s/.test(text[left - 1])) left--;
+                        let right = idx + lcMatch.length;
+                        while (right < text.length && !/\s/.test(text[right])) right++;
+                        const prefix = text.slice(start, left);
+                        if (prefix) frag.appendChild(document.createTextNode(prefix));
+                        const token = text.slice(left, right);
+                        const span = document.createElement('span');
+                        span.textContent = token;
+                        span.setAttribute('data-auto-color-text', 'true');
+                        span.style.color = colorVar;
+                        frag.appendChild(span);
+                        start = right;
+                        any = true;
+                    }
+                    if (!any) return false;
+                    const suffix = text.slice(start);
+                    if (suffix) frag.appendChild(document.createTextNode(suffix));
+                    node.parentNode.replaceChild(frag, node);
+                    return true;
+                } catch (_) { return false; }
+            };
+
+            const traverse = (el, lcMatch, colorVar) => {
+                try {
+                    const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT, null);
+                    const toProcess = [];
+                    while (walker.nextNode()) {
+                        const n = walker.currentNode;
+                        const p = n.parentElement;
+                        if (p && p.getAttribute && p.getAttribute('data-auto-color-text') === 'true') continue;
+                        if (!n.textContent || n.textContent.trim().length === 0) continue;
+                        if (n.textContent.toLowerCase().includes(lcMatch)) toProcess.push(n);
+                    }
+                    toProcess.forEach(n => processTextNode(n, lcMatch, colorVar));
+                } catch (_) {}
+            };
+
+            for (const rule of textRules) {
+                const lcMatch = String(rule.match || '').toLowerCase();
+                if (!lcMatch) continue;
+                if (!body.includes(lcMatch)) continue;
+                const idx = Number(rule.colorIndex || 1);
+                const colorVar = `var(--card-color-${Math.min(Math.max(idx, 1), 10)})`;
+                traverse(contentEl, lcMatch, colorVar);
+            }
+        } catch (_) {}
     }
 
     debugManualOrderMatching(newCardOrder, currentCards, manualOrder) {
@@ -3760,8 +4474,9 @@ class CardSidebarView extends ItemView {
                         }
                     }
 
+                    // Untagged Check
                     if (visible && untaggedOnly) {
-                        const hasTags = !!(c.tags && c.tags.length > 0);
+                        const hasTags = !!(c.tags && Array.isArray(c.tags) && c.tags.length > 0);
                         const hasCategory = !!(c.category && String(c.category).trim() !== '');
                         if (hasTags || hasCategory) {
                             filterChecks.untaggedCheck = false;
@@ -4490,7 +5205,7 @@ class CardSidebarView extends ItemView {
                 });
         });
 
-        if (!(this.plugin && this.plugin.settings && this.plugin.settings.hideTimeBasedAddButtonsInContextMenu)) {
+        if (!(this.plugin && this.plugin.settings && this.plugin.settings.disableTimeBasedFiltering)) {
             [
                 { label: 'Add to Today', value: 'today', icon: 'calendar-clock' },
                 { label: 'Add to Tomorrow', value: 'tomorrow', icon: 'calendar-days' }
@@ -4666,7 +5381,8 @@ class CardSidebarView extends ItemView {
         try {
             const enabled = !!(this.plugin && this.plugin.settings && this.plugin.settings.enableCustomCategories);
             if (enabled) {
-                const cats = Array.isArray(this.plugin.settings.customCategories) ? this.plugin.settings.customCategories : [];
+                const catsAll = Array.isArray(this.plugin.settings.customCategories) ? this.plugin.settings.customCategories : [];
+                const cats = catsAll.filter(c => c && c.showInMenu !== false);
                 if (cats.length > 0) {
                     menu.addSeparator();
                     cats.forEach(cat => {
@@ -5531,7 +6247,6 @@ class CardSidebarView extends ItemView {
 
     async loadCardsPrioritized(cardsToRender, showArchived = false) {
         const renderStartTime = performance.now();
-        console.log("[SIDECARDS] 🚀 IMMEDIATE visibility rendering with", cardsToRender.length, "total cards");
         
         try {
             // STEP 1: Batch append all cards to DOM (all at once, not in batches)
@@ -5557,8 +6272,6 @@ class CardSidebarView extends ItemView {
                     this.cardsContainer.appendChild(fragment);
                 }
             }
-            
-            console.log(`[SIDECARDS] ⚡ Batch appended ${cardsToRender.length} cards in ${(performance.now() - appendStartTime).toFixed(2)}ms`);
             
             // STEP 2: If grid mode, calculate masonry spans BEFORE making visible
             try {
@@ -5648,19 +6361,28 @@ class CardSidebarView extends ItemView {
                 try {
                     if (item.contentEl && item.contentEl.isConnected) {
                         const tmp = document.createElement('div');
-                        MarkdownRenderer.render(this.app, item.content, tmp, item.notePath);
+                        MarkdownRenderer.render(this.app, item.content, tmp, this, item.notePath);
                         const frag = document.createDocumentFragment();
                         while (tmp.firstChild) frag.appendChild(tmp.firstChild);
-                        if (window.requestAnimationFrame) {
-                            window.requestAnimationFrame(() => {
-                                if (!item.contentEl.isConnected || token !== this._markdownRenderToken) { setTimeout(next, 1); return; }
-                                item.contentEl.empty();
-                                item.contentEl.appendChild(frag);
-                                // Schedule a small delay to allow DOM to update card height
-                                setTimeout(() => {
-                                    try {
-                                        // Trigger a micro-update for this card's masonry span after content renders
-                                        const card = item.contentEl.closest('.card-sidebar-card');
+                if (window.requestAnimationFrame) {
+                    window.requestAnimationFrame(() => {
+                        if (!item.contentEl.isConnected || token !== this._markdownRenderToken) { setTimeout(next, 1); return; }
+                        item.contentEl.empty();
+                        item.contentEl.appendChild(frag);
+                        try {
+                            const card = item.contentEl.closest('.card-sidebar-card');
+                            if (card) {
+                                const cd = (this.cards || []).find(c => c.element === card);
+                                if (cd) {
+                                    this.applyTextColoringToContentEl(item.contentEl, cd);
+                                }
+                            }
+                        } catch (_) {}
+                        // Schedule a small delay to allow DOM to update card height
+                        setTimeout(() => {
+                            try {
+                                // Trigger a micro-update for this card's masonry span after content renders
+                                const card = item.contentEl.closest('.card-sidebar-card');
                                         if (card && this.plugin.settings.verticalCardMode) {
                                             const h = card.getBoundingClientRect().height;
                                             const span = Math.max(1, Math.ceil(h + 6));
@@ -5737,7 +6459,15 @@ class CardSidebarView extends ItemView {
                             const right = footer.createDiv();
                             right.addClass('card-footer-right');
                         }
+                        // If groupTags is enabled, update the grouped tag display
+                        if (this.plugin.settings.groupTags && cd.tags && cd.tags.length > 0) {
+                            try { this.updateCardTagDisplay(cd); } catch (e) {}
+                        }
                     }
+                    try {
+                        const contentEl = cd.element.querySelector('.card-content');
+                        if (contentEl) this.applyTextColoringToContentEl(contentEl, cd);
+                    } catch (_) {}
                 } catch (e) {}
             }
         };
@@ -5836,17 +6566,12 @@ class CardSidebarView extends ItemView {
 
     async loadCards(showArchived = false) {
         const loadStartTime = performance.now();
-        console.log("[SIDECARDS] 📥 loadCards called with showArchived:", showArchived);
-        console.log("[SIDECARDS] 📦 Total saved cards in settings:", (this.plugin.settings.cards || []).length);
         // Prevent multiple simultaneous loads; queue the latest request ONLY if it's different from current load
         if (this._loadInProgress) {
             // Only queue if the archived state is different from what's currently loading
             const currentLoadArchived = this._lastLoadArchived || false;
             if (!!showArchived !== currentLoadArchived) {
                 this._queuedLoad = !!showArchived;
-                console.log('[SIDECARDS] ⏭️ Different archived state queued: current=' + currentLoadArchived + ' queued=' + !!showArchived);
-            } else {
-                console.log('[SIDECARDS] ⏭️ Skipping loadCards - already loading same state (archived=' + currentLoadArchived + ')');
             }
             try { console.trace('[SIDECARDS] 🔍 loadCards called from:'); } catch (e) {}
             return;
@@ -5945,7 +6670,6 @@ class CardSidebarView extends ItemView {
                             } catch (e) {}
                         } catch (err) { console.error('Error loading cached card', err); }
                     }
-                    console.log(`[SIDECARDS] ⚡ Card creation (cached) took ${(performance.now() - cardCreationStart).toFixed(2)}ms for ${this.cards.length} cards`);
                 } else {
                     // First load or cache is empty - do a full import from folder
                     this.plugin.debugLog('📁 Initial import from storage folder:', folder);
@@ -6053,7 +6777,6 @@ class CardSidebarView extends ItemView {
                     } catch (e) {}
                 } catch (err) { console.error('Error loading saved card', err); }
             }
-            console.log(`[SIDECARDS] ⚡ Card creation (non-folder cached) took ${(performance.now() - cardCreationStart2).toFixed(2)}ms for ${this.cards.length} cards`);
         } else {
             this.plugin.debugLog("⚠️ No existing cards found - checking if sample cards should be created");
             const sampleCards = [
@@ -6231,7 +6954,7 @@ class CardSidebarView extends ItemView {
                             const eMatch = fm.match(/^\s*Expires-At\s*:\s*(.*)$/mi);
                             if (eMatch) {
                                 const v2 = String(eMatch[1]).trim().replace(/^"|"$/g, '');
-                                var parsedExpiresAt = v2;
+                                let parsedExpiresAt = v2;
                             }
                             const stMatch = fm.match(/^\s*Status\s*:\s*(.*)$/mi);
                             if (this.plugin.settings.enableCardStatus && stMatch) {
@@ -6241,9 +6964,9 @@ class CardSidebarView extends ItemView {
                                 const statusSettings = Array.isArray(this.plugin.settings.cardStatuses) ? this.plugin.settings.cardStatuses : [];
                                 const matchedStatus = statusSettings.find(st => String(st.name || '').toLowerCase() === String(sName).toLowerCase());
                                 if (matchedStatus) {
-                                    var parsedStatus = { name: sName, color: matchedStatus.color || '', textColor: matchedStatus.textColor || '' };
+                                    let parsedStatus = { name: sName, color: matchedStatus.color || '', textColor: matchedStatus.textColor || '' };
                                 } else {
-                                    var parsedStatus = { name: sName, color: '', textColor: '' };
+                                    let parsedStatus = { name: sName, color: '', textColor: '' };
                                 }
                             }
                         } catch (e) {}
@@ -6793,7 +7516,7 @@ class CardSidebarSettingTab extends PluginSettingTab {
                         } else {
                             el.setAttribute('contenteditable', 'false');
                             el.innerHTML = '';
-                            MarkdownRenderer.render(this.app, String(cd.content || ''), el, cd.notePath || '');
+                            MarkdownRenderer.render(this.app, String(cd.content || ''), el, this, cd.notePath || '');
                         }
                     });
                 }
@@ -6835,8 +7558,8 @@ class CardSidebarSettingTab extends PluginSettingTab {
             }));
             
     new Setting(containerEl)
-        .setName('Hide Filters Topbar')
-        .setDesc('When enabled, the topbar containing filter buttons are hidden.')
+        .setName('Hide Categories Topbar')
+        .setDesc('When enabled, the topbar containing category buttons are hidden.')
         .addToggle(toggle => toggle
             .setValue(this.plugin.settings.disableFilterButtons || false)
             .onChange(async (value) => {
@@ -7019,11 +7742,11 @@ class CardSidebarSettingTab extends PluginSettingTab {
 
 
     
-    containerEl.createEl('h3', { text: 'Filters' });
+    containerEl.createEl('h3', { text: 'Categories' });
 
     new Setting(containerEl)
-        .setName('Enable custom filters')
-        .setDesc('When enabled, custom filter buttons appear in the card right-click menu')
+        .setName('Enable Custom Categories')
+        .setDesc('When enabled, custom category buttons appear in the card right-click menu')
         .addToggle(toggle => toggle
             .setValue(this.plugin.settings.enableCustomCategories || false)
             .onChange(async (value) => {
@@ -7044,13 +7767,14 @@ class CardSidebarSettingTab extends PluginSettingTab {
             }));
 
     new Setting(containerEl)
-        .setName('Disable Time-based Filtering')
-        .setDesc('Hides the default Today / Tomorrow / This Week filters')
+        .setName('Disable Time-based Categories')
+        .setDesc('Hides the default Today / Tomorrow Categories')
         .addToggle(toggle => toggle
             .setValue(this.plugin.settings.disableTimeBasedFiltering || false)
             .onChange(async (value) => {
                 this.plugin.settings.disableTimeBasedFiltering = value;
                 await this.plugin.saveSettings();
+                try { renderCategories(); } catch (e) {}
                 const view = this.app.workspace.getLeavesOfType('card-sidebar')[0]?.view;
                 if (view) {
                     try {
@@ -7062,24 +7786,17 @@ class CardSidebarSettingTab extends PluginSettingTab {
                 }
             }));
 
-    new Setting(containerEl)
-        .setName('Hide time-based add buttons in right-click menu')
-        .setDesc('When enabled, the Today / Tomorrow / This Week items are hidden from the card context menu')
-        .addToggle(toggle => toggle
-            .setValue(this.plugin.settings.hideTimeBasedAddButtonsInContextMenu || false)
-            .onChange(async (value) => {
-                this.plugin.settings.hideTimeBasedAddButtonsInContextMenu = value;
-                await this.plugin.saveSettings();
-            }));
+    
 
     new Setting(containerEl)
-        .setName('Hide Archived filter button')
-        .setDesc('When enabled, the Archived filter button will be omitted from the header filters.')
+        .setName('Disable Archived category')
+        .setDesc('When enabled, Archived is omitted from header and the reorder panel.')
         .addToggle(toggle => toggle
             .setValue(this.plugin.settings.hideArchivedFilterButton || false)
             .onChange(async (value) => {
                 this.plugin.settings.hideArchivedFilterButton = value;
                 await this.plugin.saveSettings();
+                try { renderCategories(); } catch (e) {}
                 const view = this.app.workspace.getLeavesOfType('card-sidebar')[0]?.view;
                 if (view) {
                     try {
@@ -7120,7 +7837,9 @@ class CardSidebarSettingTab extends PluginSettingTab {
             'filter-archived': { id: 'archived', label: 'Archived', value: 'archived' }
         };
 
-        const defaultCombined = ['filter-all', 'filter-today', 'filter-tomorrow', 'filter-archived']
+        const defaultCombined = ['filter-all']
+            .concat(this.plugin.settings.disableTimeBasedFiltering ? [] : ['filter-today', 'filter-tomorrow'])
+            .concat(this.plugin.settings.hideArchivedFilterButton ? [] : ['filter-archived'])
             .concat(list.map(c => String(c.id || '')));
 
         const combinedOrder = Array.isArray(this.plugin.settings.allItemsOrder) && this.plugin.settings.allItemsOrder.length > 0
@@ -7213,7 +7932,7 @@ class CardSidebarSettingTab extends PluginSettingTab {
 
             const resetBtn = row.createEl('button');
             resetBtn.textContent = 'Reset';
-            resetBtn.title = 'Reset this filter button colors';
+            resetBtn.title = 'Reset colors';
             resetBtn.style.width = '50px';
             resetBtn.addEventListener('click', async () => {
                 if (!this.plugin.settings.filterColors) this.plugin.settings.filterColors = {};
@@ -7327,6 +8046,7 @@ class CardSidebarSettingTab extends PluginSettingTab {
         };
 
         const renderArchivedRow = () => {
+            if (this.plugin.settings.hideArchivedFilterButton) return;
             const row = catsContainer.createDiv();
             row.addClass('category-row');
             row.dataset.catId = 'filter-archived';
@@ -7499,12 +8219,63 @@ class CardSidebarSettingTab extends PluginSettingTab {
             });
 
             const txt = row.createEl('input'); txt.type = 'text'; txt.value = cat.label || ''; txt.style.flex = '1';
-            txt.addEventListener('change', async (e) => { const i = list.findIndex(x => String(x.id || '') === String(cat.id || '')); if (i >= 0) { this.plugin.settings.customCategories[i].label = e.target.value || ''; await this.plugin.saveSettings(); try { renderCategories(); } catch (ee) {} } });
+            txt.addEventListener('change', async (e) => {
+                const i = list.findIndex(x => String(x.id || '') === String(cat.id || ''));
+                if (i >= 0) {
+                    const newLabel = e.target.value || '';
+                    const slugBase = String(newLabel).toLowerCase().trim().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+                    const existingIds = new Set(list.map(c => String(c.id || '').toLowerCase()).filter(id => id !== String(cat.id || '').toLowerCase()));
+                    let newId = slugBase || 'category';
+                    let k = 2;
+                    while (existingIds.has(newId)) { newId = (slugBase || 'category') + '-' + k; k++; }
+                    const oldId = this.plugin.settings.customCategories[i].id;
+                    this.plugin.settings.customCategories[i].label = newLabel;
+                    this.plugin.settings.customCategories[i].id = newId;
+                    if (Array.isArray(this.plugin.settings.allItemsOrder)) {
+                        const idx = this.plugin.settings.allItemsOrder.findIndex(x => String(x) === String(oldId));
+                        if (idx >= 0) this.plugin.settings.allItemsOrder[idx] = newId;
+                    }
+                    await this.plugin.saveSettings();
+                    renderCategories();
+                    const view = this.app.workspace.getLeavesOfType('card-sidebar')[0]?.view;
+                    if (view) {
+                        const main = view.containerEl.querySelector('.card-sidebar-main');
+                        const old = main?.querySelector('.card-sidebar-header');
+                        if (old) old.remove();
+                        if (main) view.createHeader(main);
+                    }
+                }
+            });
+
+            const showToggle = row.createEl('button');
+            try { setIcon(showToggle, (cat.showInMenu !== false) ? 'eye' : 'eye-off'); } catch (e) { showToggle.textContent = (cat.showInMenu !== false) ? '👁' : '⊘'; }
+            showToggle.title = (cat.showInMenu !== false) ? 'Hide filter button' : 'Show filter button';
+            showToggle.style.width = '40px';
+            showToggle.addEventListener('click', async () => {
+                const i = list.findIndex(x => String(x.id || '') === String(cat.id || ''));
+                if (i >= 0) {
+                    this.plugin.settings.customCategories[i].showInMenu = !cat.showInMenu;
+                    await this.plugin.saveSettings();
+                    renderCategories();
+                    // Refresh sidebar to show/hide filter button
+                    try {
+                        const view = this.app.workspace.getLeavesOfType('card-sidebar')[0]?.view;
+                        if (view) {
+                            const main = view.containerEl.querySelector('.card-sidebar-main');
+                            const old = main?.querySelector('.card-sidebar-header');
+                            if (old) old.remove();
+                            if (main) view.createHeader(main);
+                        }
+                    } catch (e) {}
+                    try { setIcon(showToggle, (this.plugin.settings.customCategories[i].showInMenu !== false) ? 'eye' : 'eye-off'); } catch (e) {}
+                    showToggle.title = (this.plugin.settings.customCategories[i].showInMenu !== false) ? 'Hide filter button' : 'Show filter button';
+                }
+            });
 
             const del = row.createEl('button'); del.textContent = 'Remove'; del.addClass('mod-warning');
             del.addEventListener('click', async () => { const i = list.findIndex(x => String(x.id || '') === String(cat.id || '')); if (i >= 0) { this.plugin.settings.customCategories.splice(i, 1); await this.plugin.saveSettings(); renderCategories(); } });
 
-            row.appendChild(handle); row.appendChild(textColorPicker); row.appendChild(bgColorPicker); row.appendChild(resetBtn); row.appendChild(txt); row.appendChild(del);
+            row.appendChild(handle); row.appendChild(textColorPicker); row.appendChild(bgColorPicker); row.appendChild(resetBtn); row.appendChild(txt); row.appendChild(showToggle); row.appendChild(del);
         };
 
         combinedOrder.forEach(itemId => {
@@ -7554,12 +8325,28 @@ class CardSidebarSettingTab extends PluginSettingTab {
     addRow.style.display = 'flex';
         addRow.style.gap = '8px';
         addRow.style.marginTop = '8px';
+        addRow.style.justifyContent = 'flex-end';
 
         const addBtn = addRow.createEl('button');
-        addBtn.textContent = 'Add Filter';
+        addBtn.textContent = 'Add Category';
+        addBtn.style.marginTop = '4px';
+        addBtn.addClass('mod-cta');
         addBtn.addEventListener('click', async () => {
             if (!Array.isArray(this.plugin.settings.customCategories)) this.plugin.settings.customCategories = [];
-            this.plugin.settings.customCategories.push({ id: 'cat-' + Date.now(), label: 'New', showInMenu: true });
+            const slug = 'new';
+            const existing = new Set(this.plugin.settings.customCategories.map(c => String(c.id || '').toLowerCase()));
+            let id = slug;
+            let i = 2;
+            while (existing.has(id)) { id = slug + '-' + i; i++; }
+            this.plugin.settings.customCategories.push({ id, label: 'New', showInMenu: true });
+            if (!Array.isArray(this.plugin.settings.allItemsOrder) || this.plugin.settings.allItemsOrder.length === 0) {
+                const defaultCombined = ['filter-all', 'filter-today', 'filter-tomorrow']
+                    .concat(this.plugin.settings.customCategories.map(c => String(c.id || '')));
+                this.plugin.settings.allItemsOrder = defaultCombined;
+            } else {
+                const order = this.plugin.settings.allItemsOrder;
+                if (!order.includes(id)) order.push(id);
+            }
             await this.plugin.saveSettings();
             renderCategories();
         });
@@ -8477,7 +9264,7 @@ class CardSidebarPlugin extends Plugin {
             storageFolder: 'Cards',
             autoOpen: true,
             tutorialShown: false,
-            showTimestamps: true,
+            showTimestamps: false,
             datetimeFormat: 'YYYY-MM-DD HH:mm',
             
             animatedCards: true,
@@ -8773,6 +9560,16 @@ class CardSidebarPlugin extends Plugin {
                 document.head.appendChild(hideEl);
             }
             else {
+            }
+
+            const hoverId = 'card-hover-animated';
+            let hoverEl = document.getElementById(hoverId);
+            if (hoverEl) hoverEl.remove();
+            if (this.settings.animatedCards) {
+                hoverEl = document.createElement('style');
+                hoverEl.id = hoverId;
+                hoverEl.textContent = ` .card-sidebar-card:hover { transform: translateY(-2px); transition: transform 0.2s ease-out; } `;
+                document.head.appendChild(hoverEl);
             }
         } catch (e) {
             this.debugWarn('Error in applyGlobalStyles:', e);

@@ -27,8 +27,8 @@
   margin-bottom: 0;
 }
 
-.filter-group {
-   padding: 8px 12px !important;
+.category-group {
+   padding: 8px;
    margin: 0px !important;
 }
 
@@ -90,13 +90,13 @@
   color: var(--text-muted);
 }
 
-.card-sidebar-filters {
+.card-sidebar-categorys {
   display: flex;
   gap: 4px;
   flex-wrap: wrap;
 }
 
-.card-sidebar-filters button {
+.card-sidebar-categorys button {
   padding: 4px 8px;
   border: 1px solid var(--background-modifier-border);
   border-radius: 3px;
@@ -107,7 +107,7 @@
   transition: all 0.2s ease;
 }
 
-.card-sidebar-filters button:hover {
+.card-sidebar-categorys button:hover {
   background: var(--background-modifier-hover);
   color: var(--text-normal);
 }
@@ -414,7 +414,7 @@
     text-align: center;
   }
 
-  .card-sidebar-filters {
+  .card-sidebar-categorys {
     justify-content: center;
   }
 }
@@ -460,7 +460,7 @@
     box-shadow: 0 0 0 2px var(--background-modifier-border-hover);
 }
 
-.filter-dropdown {
+.category-dropdown {
     padding: 8px;
     border-radius: 4px;
     border: 1px solid var(--background-modifier-border);
@@ -468,7 +468,7 @@
     color: var(--text-normal);
 }
 
-.filter-dropdown:focus {
+.category-dropdown:focus {
     outline: none;
     border-color: var(--interactive-accent);
 }
@@ -542,4 +542,138 @@ padding-top: 12px !important;
 .card-content ul,
 .card-content ol {
   margin: 0;
+}
+
+.card-copy-btn:active {
+   color: var(--color-accent);
+   transform: scale(0.9);
+}
+
+/* Modal styling classes */
+.quick-card-modal-title {
+  margin-top: -8px;
+  margin-bottom: 12px;
+}
+
+.quick-card-section-heading {
+  margin-top: 8px;
+  margin-bottom: 6px;
+}
+
+.quick-card-textarea {
+  width: 100%;
+  height: 120px;
+  margin-bottom: 8px;
+}
+
+.color-container {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 18px;
+  flex-wrap: wrap;
+}
+
+.color-swatch {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  cursor: pointer;
+  transition: transform 0.15s ease, border 0.15s ease;
+}
+
+.color-swatch:hover {
+  transform: scale(1.25);
+}
+
+.color-swatch:not(:hover) {
+  transform: scale(1);
+}
+
+.tags-wrapper {
+  position: relative;
+  margin-bottom: 8px;
+}
+
+.tags-input {
+  width: 100%;
+  padding: 8px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 4px;
+  box-sizing: border-box;
+}
+
+.tags-autocomplete-container {
+  display: none;
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  max-height: 150px;
+  overflow-y: auto;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 4px;
+  background: var(--background-primary);
+  z-index: 1000;
+  margin-top: 4px;
+}
+
+.tags-autocomplete-item {
+  padding: 4px 8px;
+  cursor: pointer;
+  border-bottom: 1px solid var(--background-modifier-border);
+}
+
+.tags-autocomplete-item:hover {
+  background: var(--background-modifier-hover);
+}
+
+.filter-heading {
+  margin-top: 8px;
+  margin-bottom: 6px;
+}
+
+.filter-select {
+  width: 100%;
+  margin-bottom: 12px;
+}
+
+.button-container {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 8px;
+}
+
+.modal-section-buttons {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+/* Card element styling */
+.card-element-container {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+.cards-container {
+  flex: 1;
+  position: relative;
+  overflow: auto;
+  min-height: 200px;
+}
+
+/* Card color styling */
+.card-border-style-full {
+  border-left: 4px solid;
+  border-radius: 4px;
+}
+
+.card-border-style-outline {
+  border-radius: 4px;
+}
+
+.card-border-style-shadow {
+  border-radius: 4px;
 }

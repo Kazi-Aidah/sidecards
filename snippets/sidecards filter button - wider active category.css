@@ -1,0 +1,44 @@
+/* --- FILTER BUTTONS: Wider Active Filter */
+.card-sidebar-header {
+  border-bottom-left-radius: 13px !important;
+  border-bottom-right-radius: 13px !important;
+  box-shadow: 0px 6px 10px #00000070; /* adds a shadow under the categories topbar */
+  z-index: 1000;
+  padding: 10px; /* topbar space above and below the category buttons */
+}
+
+.category-group, .card-sidebar-category-group {
+  gap: 6px !important;
+  width: 100% !important;
+  display: flex; /* Ensures the container is a flex container */
+  justify-content: center; /* This is the new line to center the buttons */
+}
+
+.card-category-btn {
+  border-radius: 0px !important;
+  padding: 0px 15px !important;
+  filter: brightness(0.9) !important; /* DARKEN ALL OTHERS */
+  text-transform: uppercase; /* CAPITALIZE NAMES */
+  transition: all 0.2s ease;
+}
+
+.card-category-btn.active {
+  padding: 0px 25px !important;
+  border: 1.7px solid #ffffff30 !important;
+  transition: all 0.2s ease;
+  filter: brightness(1.7) !important;
+  /* box-shadow: 0px 0px 4px #ffffff !important; */ 
+  /* uncomment box-shadow if you want glow */
+  transform: scale(1.02) !important;
+  z-index: 2000 !important;
+}
+
+.card-category-btn:first-child {
+  border-top-left-radius: 10px !important;
+  border-bottom-left-radius: 10px !important;
+}
+
+.card-category-btn:last-child {
+  border-top-right-radius: 10px !important;
+  border-bottom-right-radius: 10px !important;
+}
