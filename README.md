@@ -1,3 +1,9 @@
+### Currently a mess, might mess up your vault.
+### Please do not try until this note has been removed.
+I am actively trying to fix all the issues. Thank you.
+
+---
+
 # SideCards
 
 Quickly create cards in your Obsidian Sidebar;
