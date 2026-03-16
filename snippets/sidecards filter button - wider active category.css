@@ -1,44 +1,63 @@
 /* --- FILTER BUTTONS: Wider Active Filter */
-.card-sidebar-header {
+
+/* topbar */
+.sc-sidebar-header {
   border-bottom-left-radius: 13px !important;
   border-bottom-right-radius: 13px !important;
-  box-shadow: 0px 6px 10px #00000070; /* adds a shadow under the categories topbar */
+  box-shadow: 0px 6px 10px #00000070; /* topbar shadow */
   z-index: 1000;
-  padding: 10px; /* topbar space above and below the category buttons */
+  padding: 10px;
 }
 
-.category-group, .card-sidebar-category-group {
+.sc-sidebar-category-group {
   gap: 6px !important;
   width: 100% !important;
-  display: flex; /* Ensures the container is a flex container */
-  justify-content: center; /* This is the new line to center the buttons */
+  display: flex;
+  justify-content: none;
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  -webkit-overflow-scrolling: touch;
+  padding: 0 14px;
+  scroll-padding-inline: 8px;
+  box-sizing: border-box;
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+  margin: 6px -10px !important;
 }
 
-.card-category-btn {
+.sc-sidebar-category-group::-webkit-scrollbar {
+  display: none;
+  width: 0;
+  height: 0;
+}
+
+/* Default Category Buttons */
+.sc-category-btn {
   border-radius: 0px !important;
   padding: 0px 15px !important;
-  filter: brightness(0.9) !important; /* DARKEN ALL OTHERS */
-  text-transform: uppercase; /* CAPITALIZE NAMES */
+  flex: 0 0 auto;
+  filter: brightness(0.9) !important;
+  text-transform: uppercase;
   transition: all 0.2s ease;
 }
 
-.card-category-btn.active {
+/* Active Button Widening, Brightening & Border */
+.sc-category-btn.active {
   padding: 0px 25px !important;
   border: 1.7px solid #ffffff30 !important;
   transition: all 0.2s ease;
   filter: brightness(1.7) !important;
-  /* box-shadow: 0px 0px 4px #ffffff !important; */ 
-  /* uncomment box-shadow if you want glow */
   transform: scale(1.02) !important;
   z-index: 2000 !important;
 }
 
-.card-category-btn:first-child {
+/* First & Last Category Button Border-Radius */
+.sc-category-btn:first-child {
   border-top-left-radius: 10px !important;
   border-bottom-left-radius: 10px !important;
 }
 
-.card-category-btn:last-child {
+.sc-category-btn:last-child {
   border-top-right-radius: 10px !important;
   border-bottom-right-radius: 10px !important;
 }
