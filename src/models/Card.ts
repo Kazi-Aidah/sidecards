@@ -56,6 +56,7 @@ export class Card {
       tags: this.tags,
       category: this.category,
       created: this.created,
+      modified: this.modified,
       archived: this.archived,
       pinned: this.pinned,
       notePath: this.notePath,

@@ -34,6 +34,42 @@ export class CardStore {
     });
   }
 
+  private parseColorIndex(value: string | number | null | undefined): number | null {
+    if (typeof value === 'number' && Number.isInteger(value) && value >= 1 && value <= 10) {
+      return value;
+    }
+    const raw = String(value ?? '').trim();
+    if (!raw) return null;
+    if (/^\d+$/.test(raw)) {
+      const parsed = Number(raw);
+      if (parsed >= 1 && parsed <= 10) return parsed;
+    }
+    const varMatch = raw.match(/var\(\s*--card-color-?(\d+)\s*\)/i);
+    if (varMatch) {
+      const parsed = Number(varMatch[1]);
+      if (parsed >= 1 && parsed <= 10) return parsed;
+    }
+    return null;
+  }
+
+  private normalizeCardColorValue(value: string | number | null | undefined, fallback: string): { color: string; frontmatterColor: number | null } {
+    const idx = this.parseColorIndex(value);
+    if (idx !== null) {
+      return { color: `var(--card-color-${idx})`, frontmatterColor: idx };
+    }
+    const raw = String(value ?? '').trim();
+    if (raw) {
+      return { color: raw, frontmatterColor: null };
+    }
+    return { color: fallback, frontmatterColor: this.parseColorIndex(fallback) };
+  }
+
+  private getFrontmatterColorValueForCard(color: string): string | number {
+    const idx = this.parseColorIndex(color);
+    if (idx !== null) return idx;
+    return color;
+  }
+
   getAll(): Card[] {
     return Array.from(this.cards.values());
   }
@@ -106,7 +142,7 @@ export class CardStore {
     const frontmatter = [
       '---',
       tagsYaml,
-      `card-color: ${card.color}`,
+      `card-color: ${this.getFrontmatterColorValueForCard(card.color)}`,
       `Created-Date: ${new Date(card.created).toISOString()}`,
       card.archived ? 'Archived: true' : '',
       card.pinned ? 'Pinned: true' : '',
@@ -217,6 +253,8 @@ export class CardStore {
       const expiresMatch = fm.match(/^\s*expires-at\s*:\s*(.+)$/im);
       const statusMatch = fm.match(/^\s*status\s*:\s*(.+)$/im);
       const colorMatch = fm.match(/^\s*card-color\s*:\s*(.+)$/im);
+      const colorRaw = colorMatch ? colorMatch[1].trim() : null;
+      const normalizedColor = this.normalizeCardColorValue(colorRaw, card.color);
       
       await this.update(card.id, { 
         tags, 
@@ -225,9 +263,15 @@ export class CardStore {
         category: categoryMatch ? categoryMatch[1].trim() : null,
         expiresAt: expiresMatch ? new Date(expiresMatch[1].trim()).getTime() : null,
         status: statusMatch ? { name: statusMatch[1].trim(), color: card.status?.color || '', textColor: card.status?.textColor || '#000' } : null,
-        color: colorMatch ? colorMatch[1].trim() : card.color,
+        color: normalizedColor.color,
         content: content.replace(fmMatch[0], '').trim() 
       });
+      if (colorRaw && normalizedColor.frontmatterColor !== null && colorRaw !== String(normalizedColor.frontmatterColor)) {
+        const normalizedText = updateFrontmatter(content, 'card-color', normalizedColor.frontmatterColor);
+        if (normalizedText !== content) {
+          await this.app.vault.modify(file, normalizedText);
+        }
+      }
     } else {
       await this.update(card.id, { content: content.trim() });
     }
@@ -337,11 +381,40 @@ export class CardStore {
       text = updateFrontmatter(text, 'Expires-At', updates.expiresAt ? new Date(updates.expiresAt).toISOString() : null);
     }
     if (typeof updates.color !== 'undefined') {
-      text = updateFrontmatter(text, 'card-color', updates.color || null);
+      const normalizedColor = this.normalizeCardColorValue(updates.color as any, card.color);
+      text = updateFrontmatter(text, 'card-color', normalizedColor.frontmatterColor ?? normalizedColor.color);
     }
     if (typeof updates.status !== 'undefined') {
       text = updateFrontmatter(text, 'Status', updates.status?.name || null);
     }
     await this.app.vault.modify(file, text);
+  }
+
+  async migrateCardColorFrontmatterFormat(): Promise<void> {
+    const seen = new Set<string>();
+    for (const card of this.getAll()) {
+      if (!card.notePath || seen.has(card.notePath)) continue;
+      seen.add(card.notePath);
+      const file = this.app.vault.getAbstractFileByPath(card.notePath);
+      if (!(file instanceof TFile)) continue;
+      let text = '';
+      try {
+        text = await this.app.vault.read(file);
+      } catch (e) {
+        continue;
+      }
+      const fmMatch = text.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n/);
+      if (!fmMatch) continue;
+      const colorMatch = fmMatch[1].match(/^\s*card-color\s*:\s*(.+)$/im);
+      if (!colorMatch) continue;
+      const raw = colorMatch[1].trim();
+      const idx = this.parseColorIndex(raw);
+      if (idx === null) continue;
+      if (raw === String(idx)) continue;
+      const updated = updateFrontmatter(text, 'card-color', idx);
+      if (updated !== text) {
+        await this.app.vault.modify(file, updated);
+      }
+    }
   }
 }

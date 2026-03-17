@@ -1,3 +1,5 @@
+
+
 .card-sidebar-container {
   padding: 0;
   background: var(--background-secondary);
@@ -561,7 +563,6 @@
   color: var(--text-muted) !important;
   margin-right: 0 !important;
 }
-/* 
 .card-sidebar-cards-container {
   gap: 8px;
 }
@@ -588,7 +589,7 @@
 .vertical-card-mode .card-sidebar-card.has-pills, .card-sidebar-card:has(.card-tags) {
 padding-bottom: 12px !important;
 padding-top: 12px !important;
-} */
+}
 .card-content p {
   margin: 0;
 }
@@ -733,13 +734,14 @@ padding-top: 12px !important;
 }
 
 .sidecards-home-main {
-  margin: 90px 40px;
+  margin: 40px 40px;
 }
 
 .sidecards-home-color-dot {
-  border-radius: 50% !important;
+  border-radius: 10px !important;
 }
 
 .sidecards-home-toolbar {
   border-bottom: 1px solid var(--background-modifier-border);
 }
+

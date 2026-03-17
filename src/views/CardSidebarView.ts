@@ -1,5 +1,5 @@
 
-import { ItemView, WorkspaceLeaf, App, Notice, Menu, Modal, MarkdownView, TFile, setIcon } from "obsidian";
+import { ItemView, WorkspaceLeaf, App, Notice, Menu, Modal, MarkdownView, TFile, setIcon, Scope, Editor } from "obsidian";
 import { CardStore } from "../services/CardStore";
 import { FilterService, FilterOptions } from "../services/FilterService";
 import { SortService, SortMode } from "../services/SortService";
@@ -19,6 +19,9 @@ export class CardSidebarView extends ItemView {
   private activeFilters: FilterOptions = { query: '', tags: [] };
   private currentSortMode: SortMode = 'manual';
   private sortAscending: boolean = true;
+  private editorScope: Scope;
+  private editor!: Editor;
+  private owner!: any;
 
   constructor(
     leaf: WorkspaceLeaf,
@@ -29,6 +32,66 @@ export class CardSidebarView extends ItemView {
     private sortService: SortService
   ) {
     super(leaf);
+    this.editorScope = new Scope(this.app.scope);
+    // Block native formatting keys so Obsidian's global commands take over
+    this.editorScope.register(["Mod"], "b", () => true);
+    this.editorScope.register(["Mod"], "i", () => true);
+    this.editorScope.register(["Mod"], "u", () => true);
+    this.setupMockEditor();
+  }
+
+  private setupMockEditor() {
+    this.editor = {
+      getSelection: () => {
+        const sel = window.getSelection();
+        return sel ? sel.toString() : "";
+      },
+      replaceSelection: (text: string) => {
+        const sel = window.getSelection();
+        if (!sel || !sel.rangeCount) return;
+        const range = sel.getRangeAt(0);
+        range.deleteContents();
+        const node = document.createTextNode(text);
+        range.insertNode(node);
+        range.setStartAfter(node);
+        range.collapse(true);
+        sel.removeAllRanges();
+        sel.addRange(range);
+      },
+      toggleBold: () => this.toggleMarkdownWrapper("**"),
+      toggleItalic: () => this.toggleMarkdownWrapper("*"),
+    } as any;
+
+    this.owner = {
+      editor: this.editor,
+      editMode: true,
+    };
+  }
+
+  private toggleMarkdownWrapper(wrapper: "**" | "*" | "~~" | "==") {
+    const sel = window.getSelection();
+    if (!sel || !sel.rangeCount) return;
+    
+    const range = sel.getRangeAt(0);
+    const selectedText = sel.toString();
+    
+    if (selectedText.length === 0) {
+      // Empty selection: insert **** and place cursor in middle
+      const text = wrapper + wrapper;
+      const node = document.createTextNode(text);
+      range.insertNode(node);
+      range.setStart(node, wrapper.length);
+      range.collapse(true);
+      sel.removeAllRanges();
+      sel.addRange(range);
+    } else {
+      const alreadyWrapped = selectedText.startsWith(wrapper) && selectedText.endsWith(wrapper);
+      const newText = alreadyWrapped
+        ? selectedText.slice(wrapper.length, -wrapper.length)
+        : wrapper + selectedText + wrapper;
+      
+      this.editor.replaceSelection(newText);
+    }
   }
 
   getViewType(): string {
@@ -53,9 +116,13 @@ export class CardSidebarView extends ItemView {
   async onOpen(): Promise<void> {
     const container = this.containerEl;
     container.empty();
-    container.addClass('card-sidebar-container');
+    container.addClass('sc-sidebar-container');
+    this.currentSortMode = ((this.plugin as any).settings.sortMode || 'manual') as SortMode;
+    this.sortAscending = typeof (this.plugin as any).settings.sortAscending === 'boolean'
+      ? !!(this.plugin as any).settings.sortAscending
+      : true;
     
-    const mainContainer = container.createDiv('card-sidebar-main');
+    const mainContainer = container.createDiv('sc-sidebar-main');
     mainContainer.style.display = 'flex';
     mainContainer.style.flexDirection = 'column';
     mainContainer.style.height = '100%';
@@ -63,7 +130,7 @@ export class CardSidebarView extends ItemView {
     this.createHeader(mainContainer);
     this.createSearchBar(mainContainer);
 
-    this.cardsContainer = mainContainer.createDiv('card-sidebar-cards-container');
+    this.cardsContainer = mainContainer.createDiv('sc-sidebar-cards-container');
     this.cardsContainer.style.flex = '1';
     this.cardsContainer.style.overflow = 'auto';
     this.cardsContainer.style.position = 'relative';
@@ -79,21 +146,24 @@ export class CardSidebarView extends ItemView {
     this.registerVaultEvents();
 
     this.showLoadingOverlay();
-    await this.renderCards();
-    this.hideLoadingOverlay(300);
+    try {
+      await this.renderCards();
+    } finally {
+      this.hideLoadingOverlay(300);
+    }
   }
 
   private showLoadingOverlay(maxMs = 2000) {
     const parent = this.cardsContainer || this.containerEl;
     if (!parent || this._loadingEl) return;
 
-    this._loadingEl = parent.createDiv('card-sidebar-loading');
+    this._loadingEl = parent.createDiv('sc-sidebar-loading');
     this._loadingEl.style.position = 'absolute';
     this._loadingEl.style.inset = '0';
     this._loadingEl.style.display = 'flex';
     this._loadingEl.style.alignItems = 'center';
     this._loadingEl.style.justifyContent = 'center';
-    this._loadingEl.style.background = 'var(--background-modifier-card, rgba(0,0,0,0.02))';
+    this._loadingEl.style.background = 'var(--background-primary)';
     this._loadingEl.style.zIndex = '9999';
 
     const box = this._loadingEl.createDiv();
@@ -102,7 +172,7 @@ export class CardSidebarView extends ItemView {
     box.style.alignItems = 'center';
     box.style.gap = '8px';
 
-    const spinner = box.createDiv('card-sidebar-spinner');
+    const spinner = box.createDiv('sc-sidebar-spinner');
     spinner.style.width = '36px';
     spinner.style.height = '36px';
     spinner.style.border = '4px solid var(--background-modifier-border)';
@@ -111,7 +181,7 @@ export class CardSidebarView extends ItemView {
     // Inline animation if not in CSS
     spinner.animate([{ transform: 'rotate(0deg)' }, { transform: 'rotate(360deg)' }], { duration: 800, iterations: Infinity });
 
-    box.createDiv({ text: 'Loading cards...', cls: 'card-sidebar-loading-text' });
+    box.createDiv({ text: 'Loading cards...', cls: 'sc-sidebar-loading-text' });
 
     this._loadingTimeout = setTimeout(() => this.hideLoadingOverlay(), maxMs);
   }
@@ -178,42 +248,88 @@ export class CardSidebarView extends ItemView {
   }
 
   private createHeader(container: HTMLElement): void {
-    const header = container.createDiv('card-sidebar-header');
-    const filterGroup = header.createDiv('category-group');
-    filterGroup.addClass('card-sidebar-category-group');
+    if (this.plugin.settings.disableFilterButtons) return;
+
+    const header = container.createDiv('sc-sidebar-header');
+    const filterGroup = header.createDiv('sc-category-group');
     filterGroup.style.display = 'flex';
     filterGroup.style.gap = '8px';
     filterGroup.style.overflowX = 'auto';
     filterGroup.style.flexWrap = 'nowrap';
     filterGroup.style.whiteSpace = 'nowrap';
 
-    const showTimeBasedChips = !this.plugin.settings.disableTimeBasedFiltering;
+    const settings = this.plugin.settings;
     const cats: Array<{ id: string; label: string; showInMenu?: boolean }> =
-      Array.isArray(this.plugin.settings?.customCategories) ? this.plugin.settings.customCategories : [];
+      Array.isArray(settings.customCategories) ? settings.customCategories : [];
 
-    const chips: Array<{ type: string, label: string, value: string }> = [];
-    chips.push({ type: 'all', label: 'All', value: 'all' });
-    if (showTimeBasedChips) {
-      chips.push({ type: 'category', label: 'Today', value: 'today' });
-      chips.push({ type: 'category', label: 'Tomorrow', value: 'tomorrow' });
-    }
-    if (this.plugin.settings?.enableCustomCategories) {
-      cats.forEach((c) => {
-        if (!c || c.showInMenu === false) return;
-        chips.push({ type: 'category', label: c.label || '', value: c.id || c.label || '' });
-      });
-    }
-    if (!(this.plugin as any).settings?.hideArchivedFilterButton) {
-      chips.push({ type: 'archived', label: 'Archived', value: 'archived' });
+    // Build ordered chip list using allItemsOrder if available
+    const defaultOrder = ['filter-all']
+      .concat(!settings.disableTimeBasedFiltering ? ['filter-today', 'filter-tomorrow'] : [])
+      .concat(!settings.hideArchivedFilterButton ? ['filter-archived'] : [])
+      .concat(cats.map(c => String(c.id || '')));
+
+    const combinedOrder = Array.isArray(settings.allItemsOrder) && settings.allItemsOrder.length > 0
+      ? settings.allItemsOrder
+      : defaultOrder;
+
+    const chips: Array<{ type: string; label: string; value: string }> = [];
+
+    combinedOrder.forEach(itemId => {
+      if (!itemId) return;
+      if (itemId === 'filter-all') {
+        chips.push({ type: 'all', label: 'All', value: 'all' });
+        return;
+      }
+      if (itemId === 'filter-today') {
+        if (!settings.disableTimeBasedFiltering) chips.push({ type: 'category', label: 'Today', value: 'today' });
+        return;
+      }
+      if (itemId === 'filter-tomorrow') {
+        if (!settings.disableTimeBasedFiltering) chips.push({ type: 'category', label: 'Tomorrow', value: 'tomorrow' });
+        return;
+      }
+      if (itemId === 'filter-archived') {
+        if (!settings.hideArchivedFilterButton) chips.push({ type: 'archived', label: 'Archived', value: 'archived' });
+        return;
+      }
+      const cat = cats.find(c => String(c.id) === String(itemId));
+      if (cat && cat.showInMenu !== false) {
+        chips.push({ type: 'category', label: cat.label || '', value: cat.id || cat.label || '' });
+      }
+    });
+
+    // Ensure 'All' is always present
+    if (!chips.find(c => c.value === 'all')) {
+      chips.unshift({ type: 'all', label: 'All', value: 'all' });
     }
 
     chips.forEach(chip => {
       const btn = filterGroup.createEl('button', { text: chip.label });
-      btn.addClass('card-category-btn');
+      btn.addClass('sc-category-btn');
       btn.dataset.filterType = chip.type;
       btn.dataset.filterValue = chip.value;
+
+      // Apply custom colors from filterColors settings
+      const colorKey = chip.value === 'all' ? 'all'
+        : chip.value === 'today' ? 'today'
+        : chip.value === 'tomorrow' ? 'tomorrow'
+        : chip.value === 'archived' ? 'archived'
+        : chip.value;
+
+      const customColors = settings.filterColors?.[colorKey];
+      if (customColors?.bgColor) btn.style.setProperty('background-color', customColors.bgColor, 'important');
+      if (customColors?.textColor) btn.style.setProperty('color', customColors.textColor, 'important');
+
       btn.addEventListener('click', async () => {
-        filterGroup.querySelectorAll('.card-category-btn').forEach(b => b.removeClass('active'));
+        filterGroup.querySelectorAll('.sc-category-btn').forEach(b => {
+          (b as HTMLElement).removeClass('active');
+          const bVal = (b as HTMLElement).dataset.filterValue || '';
+          const bColors = settings.filterColors?.[bVal];
+          if (bColors?.bgColor) (b as HTMLElement).style.setProperty('background-color', bColors.bgColor, 'important');
+          else (b as HTMLElement).style.removeProperty('background-color');
+          if (bColors?.textColor) (b as HTMLElement).style.setProperty('color', bColors.textColor, 'important');
+          else (b as HTMLElement).style.removeProperty('color');
+        });
         btn.addClass('active');
         if (chip.type === 'archived') {
           this.activeFilters.archivedOnly = true;
@@ -230,15 +346,32 @@ export class CardSidebarView extends ItemView {
     });
   }
 
-  private createSearchBar(container: HTMLElement): void {
-    const wrapper = container.createDiv('card-search-wrap');
-    const row = wrapper.createDiv('card-search-row');
+  private applyScrollbarSetting(): void {
+    if (!this.cardsContainer) return;
+    if (this.plugin.settings.hideScrollbar) {
+      this.cardsContainer.addClass('hide-scrollbar');
+      // Also apply to parent if needed
+      this.containerEl.querySelector('.view-content')?.addClass('hide-scrollbar');
+    } else {
+      this.cardsContainer.removeClass('hide-scrollbar');
+      this.containerEl.querySelector('.view-content')?.removeClass('hide-scrollbar');
+    }
+  }
 
-    const iconSpan = row.createSpan({ cls: 'card-search-input-icon' });
+  private createSearchBar(container: HTMLElement): void {
+    const wrapper = container.createDiv('sc-search-wrap');
+    if (this.plugin.settings.searchBarVisible) {
+      wrapper.style.display = '';
+    } else {
+      wrapper.style.display = 'none';
+    }
+    const row = wrapper.createDiv('sc-search-row');
+
+    const iconSpan = row.createSpan({ cls: 'sc-search-input-icon' });
     try { setIcon(iconSpan as any, 'search'); } catch {}
 
-    const input = row.createEl('input', { type: 'search', placeholder: 'Search cards…', cls: 'card-search-input' });
-    const clearBtn = row.createEl('button', { text: '✕', cls: 'card-search-clear-btn' });
+    const input = row.createEl('input', { type: 'search', placeholder: 'Search cards…', cls: 'sc-search-input' });
+    const clearBtn = row.createEl('button', { text: '✕', cls: 'sc-search-clear-btn' });
     clearBtn.style.display = 'none';
     clearBtn.title = 'Clear search';
     clearBtn.addEventListener('click', () => {
@@ -246,6 +379,7 @@ export class CardSidebarView extends ItemView {
       this.activeFilters.query = '';
       this.renderCardsDebounced();
       clearBtn.style.display = 'none';
+      input.focus();
     });
 
     input.addEventListener('input', () => {
@@ -256,58 +390,95 @@ export class CardSidebarView extends ItemView {
   }
 
   private createInputBox(container: HTMLElement): void {
-    const inputContainer = container.createDiv('card-sidebar-input-container');
+    const inputContainer = container.createDiv('sc-sidebar-input-container');
     inputContainer.style.padding = '8px';
     inputContainer.style.borderTop = '1px solid var(--background-modifier-border)';
     inputContainer.style.background = 'var(--background-primary)';
     inputContainer.style.position = 'sticky';
     inputContainer.style.bottom = '0';
 
-    const textarea = inputContainer.createEl('textarea');
-    textarea.addClass('card-sidebar-input');
-    textarea.placeholder = 'Type your idea here... (Use @category and #tag)';
-    textarea.rows = 1;
-    textarea.style.width = '100%';
-    textarea.style.minHeight = '36px';
-    textarea.style.maxHeight = '200px';
-    textarea.style.padding = '8px';
-    textarea.style.border = '1px solid var(--background-modifier-border)';
-    textarea.style.borderRadius = '4px';
-    textarea.style.resize = 'vertical';
-    textarea.style.overflowY = 'hidden';
+    const editorEl = inputContainer.createDiv({
+      cls: 'sc-sidebar-input',
+    });
+    editorEl.setAttribute('contenteditable', 'true');
+    editorEl.dataset.placeholder = 'Type here... (@category, #tag)';
+    editorEl.style.width = '100%';
+    editorEl.style.minHeight = '36px';
+    editorEl.style.maxHeight = '200px';
+    editorEl.style.padding = '8px';
+    editorEl.style.border = '1px solid var(--background-modifier-border)';
+    editorEl.style.overflowY = 'auto';
+    editorEl.style.whiteSpace = 'pre-wrap';
+    editorEl.style.position = 'relative';
+
+    // Simple placeholder logic for contenteditable
+    const updatePlaceholder = () => {
+      if (!editorEl.textContent?.trim()) {
+        editorEl.addClass('is-empty');
+      } else {
+        editorEl.removeClass('is-empty');
+      }
+    };
+    updatePlaceholder();
+    editorEl.addEventListener('input', updatePlaceholder);
 
     const autoResize = () => {
-      textarea.style.height = 'auto';
-      textarea.style.height = `${textarea.scrollHeight}px`;
+      // For contenteditable, it auto-resizes by default, but we might want to enforce max-height
     };
-    textarea.addEventListener('input', autoResize);
-    setTimeout(autoResize, 0);
-    const tagAutocomplete = new TagAutocomplete(textarea, this.store);
-    tagAutocomplete.attach();
+    
+    editorEl.addEventListener('focusin', () => {
+      // @ts-ignore
+      this.app.keymap.pushScope(this.editorScope);
+      // @ts-ignore
+      this.app.workspace.activeEditor = this.owner;
+    });
 
-    const buttonContainer = inputContainer.createDiv('card-sidebar-button-container');
+    editorEl.addEventListener('blur', () => {
+      // @ts-ignore
+      this.app.keymap.popScope(this.editorScope);
+      // @ts-ignore
+      if (this.app.workspace.activeEditor === this.owner) {
+        // @ts-ignore
+        this.app.workspace.activeEditor = null;
+      }
+    });
+
+    // Tag autocomplete logic for contenteditable (simplified version for now)
+    editorEl.addEventListener('input', () => {
+      // Simplified autocomplete trigger or use the TagAutocomplete class if compatible
+    });
+
+    const buttonContainer = inputContainer.createDiv('sc-sidebar-button-container');
     buttonContainer.style.display = 'flex';
     buttonContainer.style.gap = '8px';
     buttonContainer.style.justifyContent = 'flex-end';
     buttonContainer.style.marginTop = '8px';
 
     const searchBtn = buttonContainer.createEl('button');
+    searchBtn.addClass('sc-icon-btn');
     try { setIcon(searchBtn, 'search'); } catch { searchBtn.textContent = 'Search'; }
     searchBtn.title = 'Toggle search';
     searchBtn.addEventListener('click', () => {
-      const wrap = this.containerEl.querySelector('.card-search-wrap') as HTMLElement;
-      if (wrap) wrap.style.display = wrap.style.display === 'none' ? '' : 'none';
+      const wrap = this.containerEl.querySelector('.sc-search-wrap') as HTMLElement;
+      if (wrap) {
+        const isVisible = wrap.style.display !== 'none';
+        wrap.style.display = isVisible ? 'none' : '';
+        this.plugin.settings.searchBarVisible = !isVisible;
+        this.plugin.saveSettings();
+      }
     });
 
     const reloadBtn = buttonContainer.createEl('button');
+    reloadBtn.addClass('sc-icon-btn');
     reloadBtn.title = 'Reload cards';
     try { setIcon(reloadBtn, 'refresh-cw'); } catch { reloadBtn.textContent = 'Reload'; }
     reloadBtn.addEventListener('click', async () => {
-      await this.renderCards();
+      await this.renderCards(true);
       new Notice('Cards reloaded');
     });
 
     const sortBtn = buttonContainer.createEl('button');
+    sortBtn.addClass('sc-icon-btn');
     sortBtn.title = 'Sort';
     try { setIcon(sortBtn, 'sort-desc'); } catch { sortBtn.textContent = 'Sort'; }
     sortBtn.addEventListener('click', async (e) => {
@@ -345,6 +516,7 @@ export class CardSidebarView extends ItemView {
     });
 
     const pinToggleBtn = buttonContainer.createEl('button');
+    pinToggleBtn.addClass('sc-icon-btn');
     try { setIcon(pinToggleBtn, 'pin'); } catch { pinToggleBtn.textContent = 'Pin'; }
     pinToggleBtn.title = 'Show pinned only';
     pinToggleBtn.addEventListener('click', async () => {
@@ -353,6 +525,7 @@ export class CardSidebarView extends ItemView {
     });
 
     const gridToggleBtn = buttonContainer.createEl('button');
+    gridToggleBtn.addClass('sc-icon-btn');
     try { setIcon(gridToggleBtn, 'layout-grid'); } catch { gridToggleBtn.textContent = 'Grid'; }
     gridToggleBtn.title = 'Toggle grid layout';
     gridToggleBtn.addEventListener('click', async () => {
@@ -365,25 +538,36 @@ export class CardSidebarView extends ItemView {
     });
 
     const addButton = buttonContainer.createEl('button');
-    addButton.addClass('card-add-btn');
+    addButton.addClass('sc-add-btn');
     addButton.textContent = 'Add Card';
     addButton.addEventListener('click', async () => {
-      const content = textarea.value.trim();
+      const content = editorEl.textContent?.trim();
       if (!content) return;
-      const card = new Card({ content, category: this.activeFilters.category || undefined });
-      await this.store.add(card);
-      textarea.value = '';
-      await this.renderCards();
-    });
 
-    const clearButton = buttonContainer.createEl('button');
-    clearButton.addClass('card-clear-btn');
-    clearButton.textContent = 'Clear';
-    clearButton.style.display = ((this.plugin as any).settings?.hideClearButton ? 'none' : '');
-    clearButton.addEventListener('click', () => {
-      textarea.value = '';
-      textarea.focus();
-      autoResize();
+      // Extract tags (#tag) and categories (@category)
+      const tags: string[] = [];
+      const tagRegex = /#([^\s#@,.]+)/g;
+      let match;
+      while ((match = tagRegex.exec(content)) !== null) {
+        tags.push(match[1]);
+      }
+
+      const catRegex = /@([^\s#@,.]+)/g;
+      const catMatch = catRegex.exec(content);
+      const category = catMatch ? catMatch[1] : (this.activeFilters.category || undefined);
+
+      // Clean content (optional: user might want to keep them)
+      // For now, keep them in content but also add to metadata
+      
+      const card = new Card({ 
+        content, 
+        tags,
+        category: category === 'all' ? undefined : category 
+      });
+      await this.store.add(card);
+      editorEl.textContent = '';
+      updatePlaceholder();
+      await this.renderCards();
     });
   }
 
@@ -422,7 +606,18 @@ export class CardSidebarView extends ItemView {
     this.renderTimeout = setTimeout(() => this.renderCards(), 300);
   }
 
-  private async renderCards(): Promise<void> {
+  private async renderCards(isManualReload = false): Promise<void> {
+    const settings = { ...this.store.settings };
+    if (isManualReload) {
+      // If manually reloading, we might want to skip animation or use a faster one
+      // But user said "reload cards makes the cards come in with the fade in" as if it's an issue
+      // Let's make reload NOT fade in if they prefer instant
+      settings.animatedCards = false;
+      settings.disableCardFadeIn = true;
+    }
+    
+    const scrollTop = this.cardsContainer?.scrollTop || 0;
+
     await flipAnimateAsync(this.cardsContainer, async () => {
       // Clear existing components
       this.cardComponents.forEach(comp => comp.destroy());
@@ -439,9 +634,15 @@ export class CardSidebarView extends ItemView {
         const comp = new CardComponent(this.cardsContainer, card, this.store, this.app, this.plugin);
         this.cardComponents.set(card.id, comp);
       }
-    }, {}, this.store.settings);
 
-    this.applyLayoutMode();
+      // Apply layout mode (Masonry) BEFORE measurements are taken by flipAnimateAsync
+      this.applyLayoutMode();
+
+      // Restore scroll position BEFORE measurements are taken
+      if (this.cardsContainer) {
+        this.cardsContainer.scrollTop = scrollTop;
+      }
+    }, {}, settings);
   }
 
   async onClose(): Promise<void> {
@@ -462,7 +663,8 @@ export class CardSidebarView extends ItemView {
   }
 
   private applyLayoutMode(): void {
-    const grid = !!(this.plugin as any).settings?.verticalCardMode;
+    if (!this.cardsContainer) return;
+    const grid = !!this.plugin.settings.verticalCardMode;
     if (grid) {
       this.cardsContainer.addClass('grid-mode');
       this.cardsContainer.addClass('vertical-card-mode');
@@ -479,7 +681,7 @@ export class CardSidebarView extends ItemView {
         this._masonryMutationObserver.disconnect();
         this._masonryMutationObserver = null;
       }
-      this.cardsContainer.querySelectorAll('.card-sidebar-card').forEach((el) => {
+      this.cardsContainer.querySelectorAll('.sc-card').forEach((el) => {
         (el as HTMLElement).style.gridRowEnd = '';
       });
     }
@@ -497,15 +699,15 @@ export class CardSidebarView extends ItemView {
       this._masonryTimeout = setTimeout(() => this.refreshMasonrySpans(), 50);
     });
     this._masonryObserver.observe(this.cardsContainer);
-    this.cardsContainer.querySelectorAll('.card-sidebar-card').forEach(el => {
+    this.cardsContainer.querySelectorAll('.sc-card').forEach(el => {
       this._masonryObserver?.observe(el);
     });
     this.setupMasonryMutationObserver();
   }
 
   private refreshMasonrySpans(): void {
-    if (!(this.plugin as any).settings?.verticalCardMode || !this.cardsContainer) return;
-    const cards = this.cardsContainer.querySelectorAll('.card-sidebar-card:not(.drag-spacer)');
+    if (!this.plugin.settings.verticalCardMode || !this.cardsContainer) return;
+    const cards = this.cardsContainer.querySelectorAll('.sc-card:not(.drag-spacer)');
     cards.forEach((el) => {
       const card = el as HTMLElement;
       card.style.gridRowEnd = 'auto';
@@ -541,4 +743,8 @@ export class CardSidebarView extends ItemView {
       childList: true,
       subtree: true,
       characterData: true,
-  
+      attributes: true,
+      attributeFilter: ['class']
+    });
+  }
+}

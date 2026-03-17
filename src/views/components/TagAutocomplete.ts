@@ -10,7 +10,7 @@ export class TagAutocomplete {
     private store: CardStore
   ) {
     const parent = this.input.parentElement || document.body;
-    this.container = parent.createDiv('card-tag-autocomplete');
+    this.container = parent.createDiv('sc-tag-autocomplete');
     this.container.style.display = 'none';
     this.container.style.position = 'absolute';
     this.container.style.bottom = 'calc(100% + 4px)';
@@ -52,7 +52,7 @@ export class TagAutocomplete {
     this.container.empty();
     this.selectedIndex = -1;
     this.suggestions.forEach((tag, idx) => {
-      const item = this.container.createDiv('card-autocomplete-item');
+      const item = this.container.createDiv('sc-autocomplete-item');
       item.textContent = '#' + tag;
       item.addEventListener('mouseenter', () => {
         item.style.background = 'var(--background-modifier-hover)';
@@ -73,7 +73,7 @@ export class TagAutocomplete {
 
   private onKeyDown(e: KeyboardEvent): void {
     if (this.container.style.display === 'none') return;
-    const items = this.container.querySelectorAll('.card-autocomplete-item');
+    const items = this.container.querySelectorAll('.sc-autocomplete-item');
     if ((e.key === 'ArrowUp' || e.key === 'ArrowDown') && items.length > 0) {
       e.preventDefault();
       if (e.key === 'ArrowDown') this.selectedIndex = (this.selectedIndex + 1) % items.length;

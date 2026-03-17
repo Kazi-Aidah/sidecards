@@ -26,7 +26,7 @@ export async function flipAnimateAsync(
   const stagger = opts.stagger ?? 20;
   const entranceOffset = opts.offset ?? 28;
 
-  const oldEls = Array.from(container.querySelectorAll('.card-sidebar-card')) as HTMLElement[];
+  const oldEls = Array.from(container.querySelectorAll('.sc-card')) as HTMLElement[];
   const oldMap = new Map<string, DOMRect>();
   oldEls.forEach(el => {
     const id = el.dataset.id;
@@ -35,7 +35,7 @@ export async function flipAnimateAsync(
 
   await asyncDomChange();
 
-  const newEls = Array.from(container.querySelectorAll('.card-sidebar-card')) as HTMLElement[];
+  const newEls = Array.from(container.querySelectorAll('.sc-card')) as HTMLElement[];
   const newMap = new Map<string, DOMRect>();
   const elById = new Map<string, HTMLElement>();
   newEls.forEach(el => {
@@ -63,7 +63,9 @@ export async function flipAnimateAsync(
       el.style.transition = 'none';
       el.style.transform = `translateY(${entranceOffset}px)`;
       el.style.willChange = 'transform';
-      el.style.opacity = '0';
+      if (!settings.disableCardFadeIn) {
+        el.style.opacity = '0';
+      }
     }
   });
 
@@ -77,7 +79,9 @@ export async function flipAnimateAsync(
     setTimeout(() => {
       el.style.transition = `transform ${duration}ms ease-out, opacity ${duration}ms ease-out`;
       el.style.transform = '';
-      el.style.opacity = '1';
+      if (!settings.disableCardFadeIn) {
+        el.style.opacity = '1';
+      }
     }, delay);
   });
 
@@ -86,8 +90,6 @@ export async function flipAnimateAsync(
       const el = elById.get(id);
       if (el) {
         el.style.transition = '';
-        el.style.willChange = '';
-        el.style.transform = '';
       }
     });
   }, duration + (ids.length * stagger) + 50);
@@ -101,7 +103,7 @@ export function animateCardsEntrance(
   if (!settings.animatedCards) return;
   if (window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
 
-  const els = Array.from(container.querySelectorAll('.card-sidebar-card'))
+  const els = Array.from(container.querySelectorAll('.sc-card'))
     .filter(el => (el as HTMLElement).style.display !== 'none') as HTMLElement[];
   if (els.length === 0) return;
 

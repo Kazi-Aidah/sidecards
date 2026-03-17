@@ -42,15 +42,38 @@ export function updateFrontmatter(content: string, key: string, value: any): str
 }
 
 export function parseTagsFromFrontmatter(fm: string): string[] {
-  const match = fm.match(/tags:\s*\[(.*?)\]/i) || fm.match(/tags:\s*(.*)/i);
-  if (!match) return [];
-  const raw = match[1];
-  if (raw.startsWith('[')) {
+  const lines = fm.split(/\r?\n/);
+  const tagsLine = lines.find(l => /^\s*tags\s*:/i.test(l));
+  if (!tagsLine) return [];
+
+  const content = tagsLine.replace(/^\s*tags\s*:/i, '').trim();
+  const sanitize = (t: string) => t.trim().replace(/^[-#\s]+/, '').replace(/^- /g, '').trim();
+
+  if (!content) {
+    // Check if it's a list format below
+    const tagsIdx = lines.findIndex(l => /^\s*tags\s*:/i.test(l));
+    const listTags: string[] = [];
+    for (let i = tagsIdx + 1; i < lines.length; i++) {
+      const line = lines[i];
+      const match = line.match(/^\s*-\s+(.*)$/);
+      if (match) {
+        listTags.push(sanitize(match[1]));
+      } else if (line.trim() && !line.startsWith(' ')) {
+        break;
+      }
+    }
+    return listTags;
+  }
+
+  if (content.startsWith('[')) {
     try {
-      return JSON.parse(raw.replace(/'/g, '"'));
+      const parsed = JSON.parse(content.replace(/'/g, '"'));
+      return Array.isArray(parsed) ? parsed.map(sanitize) : [sanitize(String(parsed))];
     } catch (e) {
-      return raw.replace(/[\[\]"']/g, '').split(',').map(t => t.trim()).filter(Boolean);
+      return content.replace(/[\[\]"']/g, '').split(',').map(sanitize).filter(Boolean);
     }
   }
-  return raw.split(',').map(t => t.trim()).filter(Boolean);
+  
+  // Single tag or comma-separated
+  return content.split(',').map(sanitize).filter(Boolean);
 }

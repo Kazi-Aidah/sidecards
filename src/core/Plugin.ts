@@ -1,11 +1,11 @@
 
-import { Plugin, PluginSettingTab, App, Setting, WorkspaceLeaf, setIcon, Notice } from "obsidian";
+import { Plugin, PluginSettingTab, App, Setting, WorkspaceLeaf, setIcon, Notice, TFile } from "obsidian";
 import { CardSidebarView } from "../views/CardSidebarView";
 import { CardStore } from "../services/CardStore";
 import { FilterService } from "../services/FilterService";
 import { SortService } from "../services/SortService";
 import { EventBus } from "./EventBus";
-import { SideCardsSettings, DEFAULT_SETTINGS } from "./Settings";
+import { SideCardsSettings, DEFAULT_SETTINGS, CustomCategory } from "./Settings";
 
 import { QuickCardWithFilterModal } from "../views/modals/QuickCardWithFilterModal";
 import { SearchModal } from "../views/modals/SearchModal";
@@ -31,11 +31,13 @@ export default class SideCardsPlugin extends Plugin {
     root.style.setProperty('--card-color-8', this.settings.color8 || '#e832c1');
     root.style.setProperty('--card-color-9', this.settings.color9 || '#e83289');
     root.style.setProperty('--card-color-10', this.settings.color10 || '#965b3b');
+    root.style.setProperty('--card-border-radius', `${this.settings.borderRadius ?? 6}px`);
 
     this.eventBus = new EventBus();
     this.filterService = new FilterService();
     this.sortService = new SortService(this.settings);
     this.store = new CardStore(this.app, this, this.eventBus, this.settings);
+    await this.store.migrateCardColorFrontmatterFormat();
 
     this.registerView(
       'card-sidebar',
@@ -53,7 +55,8 @@ export default class SideCardsPlugin extends Plugin {
       (leaf) => new SideCardsHomeView(
         leaf,
         this as any,
-        this.store
+        this.store,
+        this.sortService
       )
     );
 
@@ -81,6 +84,39 @@ export default class SideCardsPlugin extends Plugin {
     });
 
     this.addSettingTab(new SideCardsSettingTab(this.app, this));
+
+    this.registerEvent(
+      this.app.workspace.on("file-menu", (menu, file) => {
+        if (file instanceof TFile) {
+          menu.addItem((item) => {
+            const isPinned = this.settings.pinnedNotes?.includes(file.path);
+            item
+              .setTitle(isPinned ? "Unpin from Sidecards Homepage" : "Pin to Sidecards Homepage")
+              .setIcon("pin")
+              .onClick(async () => {
+                if (!this.settings.pinnedNotes) this.settings.pinnedNotes = [];
+                if (isPinned) {
+                  this.settings.pinnedNotes = this.settings.pinnedNotes.filter(p => p !== file.path);
+                } else {
+                  this.settings.pinnedNotes.push(file.path);
+                }
+                await this.saveSettings();
+                
+                // Refresh homepage if open
+                const leaves = this.app.workspace.getLeavesOfType('sidecards-home');
+                leaves.forEach((leaf) => {
+                  if (leaf.view && typeof (leaf.view as any).refreshPinnedNotes === 'function') {
+                    (leaf.view as any).refreshPinnedNotes();
+                  }
+                });
+              });
+          });
+        }
+      })
+    );
+  }
+
+  onunload() {
   }
 
   async activateView() {
@@ -150,18 +186,11 @@ class SideCardsSettingTab extends PluginSettingTab {
   display(): void {
     const { containerEl } = this;
     containerEl.empty();
-    containerEl.addClass('card-sidebar-settings');
-    const updateCardRadius = (radius: number) => {
-      const styleEl = document.createElement('style');
-      styleEl.id = 'card-border-radius';
-      styleEl.textContent = `.card-sidebar-card { border-radius: ${radius}px !important; }`;
-      document.getElementById('card-border-radius')?.remove();
-      document.head.appendChild(styleEl);
-    };
+    
     const updateButtonPadding = (paddingPx: number) => {
       const styleEl = document.createElement('style');
       styleEl.id = 'card-button-padding';
-      styleEl.textContent = `.card-sidebar-button-container { padding-bottom: ${paddingPx}px !important; }`;
+      styleEl.textContent = `.sc-sidebar-button-container { padding-bottom: ${paddingPx}px !important; }`;
       document.getElementById('card-button-padding')?.remove();
       document.head.appendChild(styleEl);
     };
@@ -169,18 +198,29 @@ class SideCardsSettingTab extends PluginSettingTab {
       try {
         const view: any = this.app.workspace.getLeavesOfType('card-sidebar')[0]?.view;
         if (!view) return;
-        const main = view.containerEl.querySelector('.card-sidebar-main');
-        const old = main?.querySelector('.card-sidebar-header');
+        const main = view.containerEl.querySelector('.sc-sidebar-main');
+        const old = main?.querySelector('.sc-sidebar-header');
         if (old) old.remove();
-        if (main && typeof view.createHeader === 'function') view.createHeader(main);
+        if (main && typeof view.createHeader === 'function') {
+          view.createHeader(main);
+          const header = main.querySelector('.sc-sidebar-header');
+          if (header) main.prepend(header);
+        }
         try { if (typeof view.applyFilters === 'function') view.applyFilters(); } catch {}
       } catch {}
     };
+    const refreshSidebarCards = () => {
+      try {
+        const view: any = this.app.workspace.getLeavesOfType('card-sidebar')[0]?.view;
+        if (view && typeof view.renderCards === 'function') {
+          view.renderCards();
+        }
+      } catch {}
+    };
 
-    new Setting(containerEl).setName('Storage Folder').setHeading();
     new Setting(containerEl)
       .setName('Storage folder')
-      .setDesc('Choose where to save notes created from cards')
+      .setDesc('Choose where to save notes created from cards.')
       .addSearch(cb => {
         cb.setPlaceholder('Choose a folder')
           .setValue(this.plugin.settings.storageFolder || '')
@@ -194,16 +234,15 @@ class SideCardsSettingTab extends PluginSettingTab {
         new FolderSuggest(this.app, cb.inputEl, folders);
       });
 
-    new Setting(containerEl).setName('Colors').setDesc('Customize card colors used for tagging.').setHeading();
+    new Setting(containerEl).setName('Colors').setDesc('Card colors used for tagging. Names are written to notes.').setHeading();
     new Setting(containerEl)
-      .setName('Two-row color swatches in menu')
-      .setDesc('Display colors in menu as 5 per row.')
+      .setName('Two row color swatches in menu')
+      .setDesc('Show colors in 2 rows of 5 in the card menu.')
       .addToggle(toggle => toggle
         .setValue(!!this.plugin.settings.twoRowSwatches)
         .onChange(async (value) => {
           this.plugin.settings.twoRowSwatches = value;
           await this.plugin.saveSettings();
-          this.display();
         }));
     
     const colorVars: Array<{ name: string; key: keyof SideCardsSettings; default: string }> = [
@@ -214,492 +253,509 @@ class SideCardsSettingTab extends PluginSettingTab {
       { name: 'Color 9', key: 'color9', default: '#e83289' }, { name: 'Color 10', key: 'color10', default: '#965b3b' }
     ];
     
-    if (this.plugin.settings.twoRowSwatches) {
-      // Display in 2 rows (5 colors per row)
-      const rows = [colorVars.slice(0, 5), colorVars.slice(5, 10)];
-      rows.forEach((rowColors, rowIdx) => {
-        const rowContainer = containerEl.createDiv({ cls: 'color-row-container' });
-        rowContainer.style.display = 'flex';
-        rowContainer.style.gap = '12px';
-        rowContainer.style.marginBottom = '12px';
-        rowContainer.style.flexWrap = 'wrap';
-        rowContainer.style.alignItems = 'flex-end';
-        
-        rowColors.forEach((color, colIdx) => {
-          const idx = rowIdx * 5 + colIdx;
-          const itemContainer = rowContainer.createDiv({ cls: 'color-item' });
-          itemContainer.style.display = 'flex';
-          itemContainer.style.flexDirection = 'column';
-          itemContainer.style.gap = '4px';
-          itemContainer.style.flex = '1';
-          itemContainer.style.minWidth = '80px';
-          
-          const nameLabel = itemContainer.createEl('label', { text: color.name });
-          nameLabel.style.fontSize = '12px';
-          nameLabel.style.fontWeight = 'bold';
-          
-          const inputContainer = itemContainer.createDiv();
-          inputContainer.style.display = 'flex';
-          inputContainer.style.gap = '4px';
-          
-          const txtInput = inputContainer.createEl('input');
-          txtInput.type = 'text';
-          txtInput.placeholder = 'e.g. red';
-          txtInput.value = (this.plugin.settings.colorNames && this.plugin.settings.colorNames[idx]) || '';
-          txtInput.style.flex = '1';
-          txtInput.style.fontSize = '12px';
-          txtInput.addEventListener('change', async (v: any) => {
-            if (!this.plugin.settings.colorNames) this.plugin.settings.colorNames = [];
-            this.plugin.settings.colorNames[idx] = v.target.value || '';
-            await this.plugin.saveSettings();
-          });
-          
-          const colorPicker = inputContainer.createEl('input');
-          colorPicker.type = 'color';
-          colorPicker.value = (this.plugin.settings[color.key] as string) || color.default;
-          colorPicker.style.cursor = 'pointer';
-          colorPicker.style.width = '40px';
-          colorPicker.style.height = '32px';
-          colorPicker.style.border = 'none';
-          colorPicker.style.borderRadius = '4px';
-          colorPicker.addEventListener('change', async (e: any) => {
-            (this.plugin.settings as any)[color.key] = e.target.value;
-            await this.plugin.saveSettings();
-            this.updateCSSVariables();
-          });
-        });
-      });
-    } else {
-      // Display as individual settings (original style)
-      colorVars.forEach((color, i) => {
-        const row = new Setting(containerEl).setName(color.name);
-        row.addText(txt => txt
-          .setPlaceholder('e.g. red')
-          .setValue((this.plugin.settings.colorNames && this.plugin.settings.colorNames[i]) || '')
-          .onChange(async (v) => {
-            if (!this.plugin.settings.colorNames) this.plugin.settings.colorNames = [];
-            this.plugin.settings.colorNames[i] = v || '';
-            await this.plugin.saveSettings();
-          }));
-        row.addColorPicker(cp => cp
-          .setValue((this.plugin.settings[color.key] as string) || color.default)
-          .onChange(async (value) => {
-            (this.plugin.settings as any)[color.key] = value;
-            await this.plugin.saveSettings();
-            this.updateCSSVariables();
-          }));
-      });
-    }
+    // Always display as individual settings in the settings tab
+    colorVars.forEach((color, i) => {
+      const row = new Setting(containerEl).setName(color.name);
+      row.addText(txt => txt
+        .setPlaceholder('e.g. red')
+        .setValue((this.plugin.settings.colorNames && this.plugin.settings.colorNames[i]) || '')
+        .onChange(async (v) => {
+          if (!this.plugin.settings.colorNames) this.plugin.settings.colorNames = [];
+          this.plugin.settings.colorNames[i] = v || '';
+          await this.plugin.saveSettings();
+        }));
+      row.addColorPicker(cp => cp
+        .setValue((this.plugin.settings[color.key] as string) || color.default)
+        .onChange(async (value) => {
+          (this.plugin.settings as any)[color.key] = value;
+          await this.plugin.saveSettings();
+          this.updateCSSVariables();
+          if (color.key === 'color1') updatePreview();
+          refreshSidebarCards();
+        }));
+    });
 
     new Setting(containerEl).setName('Appearance').setDesc('Customize how cards and the sidebar look.').setHeading();
     
     // Card preview
-    const previewContainer = containerEl.createDiv({ cls: 'card-preview' });
-    previewContainer.style.marginBottom = '16px';
-    previewContainer.style.padding = '12px';
-    previewContainer.style.borderRadius = '6px';
+    const previewContainer = containerEl.createDiv({ cls: 'sc-preview-wrapper' });
+    previewContainer.style.marginBottom = '24px';
+    previewContainer.style.padding = '20px';
+    previewContainer.style.borderRadius = '8px';
     previewContainer.style.backgroundColor = 'var(--background-secondary)';
     previewContainer.style.border = '1px solid var(--background-modifier-border)';
-    previewContainer.style.fontSize = '13px';
-    previewContainer.innerHTML = `
-      <div style="font-weight: bold; margin-bottom: 8px; color: var(--text-normal);">Card Preview</div>
-      <div class="card-sidebar-card" style="padding: 12px; margin: 0; opacity: 0.9;">
-        <div style="color: var(--text-normal); margin-bottom: 4px;">Sample card content here</div>
-        <div style="font-size: 12px; color: var(--text-muted);">Tag1 Tag2</div>
-      </div>
-    `;
+    previewContainer.style.display = 'flex';
+    previewContainer.style.flexDirection = 'column';
+    previewContainer.style.alignItems = 'center';
+
+    // const previewLabel = previewContainer.createEl('div', { text: 'Card Preview' });
+    // previewLabel.style.fontWeight = 'bold';
+    // previewLabel.style.marginBottom = '12px';
+    // previewLabel.style.fontSize = '12px';
+    // previewLabel.style.color = 'var(--text-muted)';
+    // previewLabel.style.width = '100%';
+
+    const previewCard = previewContainer.createDiv({ cls: 'sc-card' });
+    previewCard.style.width = '100%';
+    previewCard.style.maxWidth = '300px';
+    previewCard.style.margin = '0';
+    previewCard.style.pointerEvents = 'none';
     
-    new Setting(containerEl).setName('Card Styling').setHeading();
-    const styleSetting = new Setting(containerEl)
-      .setName('Card Style')
-      .setDesc('Choose the visual style applied to cards')
-      .addDropdown(drop => {
-        drop.addOption('1', 'Style 1 (Full border)').addOption('2', 'Style 2 (Full border + Shadow)').addOption('3', 'Style 3 (left accent)');
-        drop.setValue(String(this.plugin.settings.cardStyle || 2));
-        drop.onChange(async (val) => {
-          this.plugin.settings.cardStyle = Number(val);
-          await this.plugin.saveSettings();
-          this.updateCSSVariables();
-        });
+    const updatePreview = () => {
+      const settings = this.plugin.settings;
+      previewCard.className = 'sc-card';
+      previewCard.addClass(`sc-style-${settings.cardStyle || 2}`);
+      
+      // Apply color 1 to preview
+      const color1 = settings.color1 || '#8392a4';
+      const root = document.documentElement;
+      root.style.setProperty('--card-color-1', color1);
+      
+      previewCard.style.setProperty('border-radius', `${settings.borderRadius || 0}px`, 'important');
+      previewCard.style.setProperty('border-width', `${settings.borderThickness ?? 2}px`, 'important');
+      
+      // Use helper to apply color (simulating color 1)
+      import("../utils/dom").then(({ applyCardColorToElement }) => {
+        applyCardColorToElement(previewCard, 'var(--card-color-1)', settings);
       });
-    const opacityContainer = containerEl.createDiv();
-    opacityContainer.style.display = '';
-    new Setting(opacityContainer)
-      .setName('Card background opacity')
-      .setDesc('Tint opacity for Style 1/3 (0 = transparent)')
-      .addSlider(slider => slider.setLimits(0, 1, 0.01).setValue(this.plugin.settings.cardBgOpacity ?? 0.08).setDynamicTooltip().onChange(async (value) => {
-        this.plugin.settings.cardBgOpacity = Number(value);
-        await this.plugin.saveSettings();
-      }));
-    const borderThicknessContainer = containerEl.createDiv();
-    new Setting(borderThicknessContainer)
-      .setName('Card border thickness')
-      .setDesc('Border width in pixels for Style 1 & 2')
-      .addSlider(slider => slider.setLimits(0, 8, 1).setValue(this.plugin.settings.borderThickness ?? 2).setDynamicTooltip().onChange(async (value) => {
-        this.plugin.settings.borderThickness = Number(value);
-        await this.plugin.saveSettings();
-      }));
-    new Setting(containerEl)
-      .setName('Card Border Radius')
-      .setDesc('Roundness of card corners in pixels')
-      .addSlider(slider => slider.setLimits(0, 16, 1).setValue(this.plugin.settings.borderRadius || 6).setDynamicTooltip().onChange(async (value) => {
-        this.plugin.settings.borderRadius = value;
-        await this.plugin.saveSettings();
-        updateCardRadius(value);
-      }));
+      
+      // Clear and re-render preview content
+      previewCard.empty();
+      previewCard.createDiv({ text: 'This is how yours cards will look!', cls: 'sc-content' });
+      
+      const tagsEl = previewCard.createDiv({ cls: 'sc-tags' });
+      ['ideas', 'project'].forEach(t => {
+        const tag = tagsEl.createSpan({ cls: 'sc-tag', text: settings.omitTagHash ? t : `#${t}` });
+      });
+      
+      if (settings.showTimestamps) {
+        const ts = previewCard.createDiv({ cls: 'sc-timestamp', text: (window as any).moment ? (window as any).moment().format(settings.datetimeFormat || 'ddd D') : 'Today 12:00' });
+        if (settings.groupTags && settings.timestampBelowTags) {
+          ts.style.display = 'block';
+          ts.style.marginTop = '4px';
+        }
+      }
+    };
+    updatePreview();
+    
+    new Setting(containerEl).setName('Card Style').setDesc('Choose card design style').addDropdown(dropdown => dropdown.addOption('1', 'Style 1 (Flat)').addOption('2', 'Style 2 (Shadow)').addOption('3', 'Style 3 (Left Accent)').setValue(String(this.plugin.settings.cardStyle || 2)).onChange(async (value) => {
+      this.plugin.settings.cardStyle = Number(value);
+      await this.plugin.saveSettings();
+      updatePreview();
+      refreshSidebarCards();
+    }));
+    new Setting(containerEl).setName('Card background opacity').setDesc('Set the transparency of the card background').addSlider(slider => slider.setLimits(0.01, 1, 0.01).setValue(this.plugin.settings.cardBgOpacity || 0.08).setDynamicTooltip().onChange(async (value) => {
+      this.plugin.settings.cardBgOpacity = value;
+      await this.plugin.saveSettings();
+      updatePreview();
+      refreshSidebarCards();
+    }));
+    new Setting(containerEl).setName('Card border thickness').setDesc('Set the thickness of the card border').addSlider(slider => slider.setLimits(1, 20, 1).setValue(this.plugin.settings.borderThickness || 2).setDynamicTooltip().onChange(async (value) => {
+      this.plugin.settings.borderThickness = value;
+      await this.plugin.saveSettings();
+      updatePreview();
+      refreshSidebarCards();
+    }));
+    new Setting(containerEl).setName('Card border radius').setDesc('Set the corner rounding of the card').addSlider(slider => slider.setLimits(0, 30, 1).setValue(this.plugin.settings.borderRadius || 0).setDynamicTooltip().onChange(async (value) => {
+      this.plugin.settings.borderRadius = value;
+      await this.plugin.saveSettings();
+      document.documentElement.style.setProperty('--card-border-radius', `${value}px`);
+      updatePreview();
+      refreshSidebarCards();
+    }));
 
     new Setting(containerEl).setName('Animation').setHeading();
-    new Setting(containerEl).setName('Animated Cards').setDesc('Cards will slide and fade when switching categories.').addToggle(toggle => toggle.setValue(!!this.plugin.settings.animatedCards).onChange(async (value) => {
+    new Setting(containerEl).setName('Animated Cards').setDesc('Cards slide and fade.').addToggle(toggle => toggle.setValue(!!this.plugin.settings.animatedCards).onChange(async (value) => {
       this.plugin.settings.animatedCards = value;
       await this.plugin.saveSettings();
     }));
-    new Setting(containerEl).setName('Disable card fade in').setDesc('Turn off opacity fade animation on load or category switch.').addToggle(toggle => toggle.setValue(this.plugin.settings.disableCardFadeIn ?? false).onChange(async (value) => {
+    new Setting(containerEl).setName('Disable card fade in').setDesc('Cards appear without fading.').addToggle(toggle => toggle.setValue(this.plugin.settings.disableCardFadeIn ?? false).onChange(async (value) => {
       this.plugin.settings.disableCardFadeIn = value;
       await this.plugin.saveSettings();
     }));
     new Setting(containerEl).setName('Visibility').setHeading();
-    new Setting(containerEl).setName('Disable card markdown rendering').setDesc('Show raw text without formatting.').addToggle(toggle => toggle.setValue(!!this.plugin.settings.disableCardRendering).onChange(async (value) => {
+    new Setting(containerEl).setName('Disable Card Markdown rendering').setDesc('Show raw text only.').addToggle(toggle => toggle.setValue(!!this.plugin.settings.disableCardRendering).onChange(async (value) => {
       this.plugin.settings.disableCardRendering = value;
       await this.plugin.saveSettings();
     }));
-    new Setting(containerEl).setName('Enable copy card content').setDesc('Show copy icon on hover.').addToggle(toggle => toggle.setValue(!!this.plugin.settings.enableCopyCardContent).onChange(async (value) => {
+    new Setting(containerEl).setName('Enable copy card content').setDesc('Show a copy icon on hover.').addToggle(toggle => toggle.setValue(!!this.plugin.settings.enableCopyCardContent).onChange(async (value) => {
       this.plugin.settings.enableCopyCardContent = value;
       await this.plugin.saveSettings();
     }));
-    new Setting(containerEl).setName('Hide card container scrollbar').setDesc('Hide scrollbar (scrolling still works).').addToggle(toggle => toggle.setValue(!!this.plugin.settings.hideScrollbar).onChange(async (value) => {
+    new Setting(containerEl).setName('Hide card container scrollbar').setDesc('Hides the scrollbar visually.').addToggle(toggle => toggle.setValue(!!this.plugin.settings.hideScrollbar).onChange(async (value) => {
       this.plugin.settings.hideScrollbar = value;
       await this.plugin.saveSettings();
+      // Apply immediately to open sidebar
+      try {
+        const view: any = this.app.workspace.getLeavesOfType('card-sidebar')[0]?.view;
+        if (view && typeof view.applyScrollbarSetting === 'function') view.applyScrollbarSetting();
+      } catch {}
     }));
-    new Setting(containerEl).setName('Hide Categories Topbar').setDesc('Hide the category button bar.').addToggle(toggle => toggle.setValue(!!this.plugin.settings.disableFilterButtons).onChange(async (value) => {
+    new Setting(containerEl).setName('Hide categories topbar').setDesc('Hide the category filter button bar.').addToggle(toggle => toggle.setValue(!!this.plugin.settings.disableFilterButtons).onChange(async (value) => {
       this.plugin.settings.disableFilterButtons = value;
       await this.plugin.saveSettings();
       refreshSidebarHeader();
     }));
     this.updateCSSVariables();
-    updateCardRadius(this.plugin.settings.borderRadius || 6);
     updateButtonPadding(this.plugin.settings.buttonPaddingBottom || 26);
+    // Apply max card height on load
+    const styleId = 'card-max-height-style';
+    document.getElementById(styleId)?.remove();
+    if (this.plugin.settings.maxCardHeight && this.plugin.settings.maxCardHeight > 0) {
+      const s = document.createElement('style');
+      s.id = styleId;
+      s.textContent = `.sc-card { max-height: ${this.plugin.settings.maxCardHeight}px !important; overflow: hidden !important; }`;
+      document.head.appendChild(s);
+    }
 
     new Setting(containerEl).setName('Layout').setHeading();
-    new Setting(containerEl).setName('Maximum Card Height').setDesc('Limit height in pixels (0 = no limit)').addSlider(slider => slider.setLimits(0, 800, 10).setValue(this.plugin.settings.maxCardHeight || 0).setDynamicTooltip().onChange(async (value) => {
+    new Setting(containerEl).setName('Maximum Card Height').setDesc('Limit card height in pixels (0 = no limit)').addSlider(slider => slider.setLimits(0, 800, 10).setValue(this.plugin.settings.maxCardHeight || 0).setDynamicTooltip().onChange(async (value) => {
       this.plugin.settings.maxCardHeight = Number(value) || 0;
       await this.plugin.saveSettings();
+      // Apply immediately via CSS variable
+      const styleId = 'card-max-height-style';
+      document.getElementById(styleId)?.remove();
+      if (this.plugin.settings.maxCardHeight && this.plugin.settings.maxCardHeight > 0) {
+        const s = document.createElement('style');
+        s.id = styleId;
+        s.textContent = `.sc-card { max-height: ${this.plugin.settings.maxCardHeight}px !important; overflow: hidden !important; }`;
+        document.head.appendChild(s);
+      }
     }));
     new Setting(containerEl).setName('Bottom Space under Input/Button Row').setDesc('Padding to accommodate the status bar').addSlider(slider => slider.setLimits(0, 100, 1).setValue(this.plugin.settings.buttonPaddingBottom || 26).onChange(async (value) => {
       this.plugin.settings.buttonPaddingBottom = Number(value) || 0;
       await this.plugin.saveSettings();
       updateButtonPadding(this.plugin.settings.buttonPaddingBottom || 0);
     }));
-    new Setting(containerEl).setName('Group tags under content').setDesc('Place tags below card content').addToggle(toggle => toggle.setValue(!!this.plugin.settings.groupTags).onChange(async (value) => {
+    new Setting(containerEl).setName('Group tags under content').setDesc('Show tags grouped below card content.').addToggle(toggle => toggle.setValue(!!this.plugin.settings.groupTags).onChange(async (value) => {
       this.plugin.settings.groupTags = value;
       await this.plugin.saveSettings();
+      updatePreview();
     }));
     new Setting(containerEl).setName('Omit # prefix for tags').setDesc('Display tags without the leading #').addToggle(toggle => toggle.setValue(this.plugin.settings.omitTagHash ?? true).onChange(async (value) => {
       this.plugin.settings.omitTagHash = value;
       await this.plugin.saveSettings();
+      updatePreview();
     }));
-    new Setting(containerEl).setName('Show Timestamps').setDesc('Show creation timestamps on cards').addToggle(toggle => toggle.setValue(!!this.plugin.settings.showTimestamps).onChange(async (value) => {
+    new Setting(containerEl).setName('Show timestamps').setDesc('Show creation timestamps on cards').addToggle(toggle => toggle.setValue(!!this.plugin.settings.showTimestamps).onChange(async (value) => {
       this.plugin.settings.showTimestamps = value;
       await this.plugin.saveSettings();
+      updatePreview();
     }));
     
     const timestampSetting = new Setting(containerEl)
       .setName('Timestamp date & time format')
-      .addText(text => text.setPlaceholder('YYYY-MM-DD HH:mm').setValue(this.plugin.settings.datetimeFormat || 'YYYY-MM-DD HH:mm').onChange(async (value) => {
+      .addText(text => text.setPlaceholder('YYYY-MM-DD hh:mma').setValue(this.plugin.settings.datetimeFormat || 'YYYY-MM-DD hh:mma').onChange(async (value) => {
         this.plugin.settings.datetimeFormat = value;
         await this.plugin.saveSettings();
         updateTimestampPreview(value);
+        updatePreview();
       }));
     
-    const updateTimestampPreview = (format: string) => {
+    const updateTimestampPreview = (val: string) => {
       timestampSetting.descEl.empty();
-      timestampSetting.descEl.createSpan({ text: 'Preview: ' });
-      try {
-        const moment = require('moment');
-        const preview = moment().format(format || 'YYYY-MM-DD HH:mm');
-        const span = timestampSetting.descEl.createSpan({ text: preview });
-        span.style.fontWeight = 'bold';
-        span.style.color = 'var(--color-accent)';
-      } catch (e) {
-        timestampSetting.descEl.createSpan({ text: '(requires moment.js)' });
-      }
+      timestampSetting.descEl.createSpan({ text: 'Your current format: ' });
+      const m = (window as any).moment;
+      const span = timestampSetting.descEl.createSpan({ text: m ? m().format(val || 'ddd D') : new Date().toLocaleString() });
+      span.setCssStyles({
+        fontWeight: 'bold',
+        color: 'var(--color-accent)'
+      });
     };
-    updateTimestampPreview(this.plugin.settings.datetimeFormat || 'YYYY-MM-DD HH:mm');
+    updateTimestampPreview(this.plugin.settings.datetimeFormat || 'YYYY-MM-DD hh:mma');
     
-    new Setting(containerEl).setName('Bring Timestamp below tags').setDesc('Render timestamp below grouped tags').addToggle(toggle => toggle.setValue(!!this.plugin.settings.timestampBelowTags).onChange(async (value) => {
+    new Setting(containerEl).setName('Bring timestamp below tags').setDesc('Render timestamp below grouped tags.').addToggle(toggle => toggle.setValue(!!this.plugin.settings.timestampBelowTags).onChange(async (value) => {
       this.plugin.settings.timestampBelowTags = value;
       await this.plugin.saveSettings();
+      updatePreview();
     }));
 
     new Setting(containerEl).setName('Categories').setDesc('Configure category display and reordering.').setHeading();
-    new Setting(containerEl).setName('Enable Custom Categories').setDesc('Allow custom categories in right-click menu').addToggle(toggle => toggle.setValue(!!this.plugin.settings.enableCustomCategories).onChange(async (value) => {
+    new Setting(containerEl).setName('Enable Custom Categories').setDesc('Allow custom categories in the right-click menu.').addToggle(toggle => toggle.setValue(!!this.plugin.settings.enableCustomCategories).onChange(async (value) => {
       this.plugin.settings.enableCustomCategories = value;
       await this.plugin.saveSettings();
       this.display();
       refreshSidebarHeader();
     }));
-    new Setting(containerEl).setName('Disable Time-based Categories').setDesc('Hide Today/Tomorrow/This Week').addToggle(toggle => toggle.setValue(!!this.plugin.settings.disableTimeBasedFiltering).onChange(async (value) => {
+    new Setting(containerEl).setName('Disable time-based categories').setDesc('Hide Today/Tomorrow from the topbar.').addToggle(toggle => toggle.setValue(!!this.plugin.settings.disableTimeBasedFiltering).onChange(async (value) => {
       this.plugin.settings.disableTimeBasedFiltering = value;
       await this.plugin.saveSettings();
       this.display();
       refreshSidebarHeader();
     }));
-    new Setting(containerEl).setName('Disable Archived Category').setDesc('Hide Archived from buttons').addToggle(toggle => toggle.setValue(!!this.plugin.settings.hideArchivedFilterButton).onChange(async (value) => {
+    new Setting(containerEl).setName('Disable archived category').setDesc('Hide Archived from the topbar.').addToggle(toggle => toggle.setValue(!!this.plugin.settings.hideArchivedFilterButton).onChange(async (value) => {
       this.plugin.settings.hideArchivedFilterButton = value;
       await this.plugin.saveSettings();
       this.display();
       refreshSidebarHeader();
     }));
     
-    new Setting(containerEl).setName('Category Order').setDesc('Drag to reorder. Text color | Background color | [Reset] [Name] [Eye icon] [Remove]').setHeading();
+    new Setting(containerEl).setName('Category order').setDesc('Drag to reorder. Colors apply to topbar buttons.').setHeading();
     
-    const catsContainer = containerEl.createDiv();
+    const catsContainer = containerEl.createDiv({ cls: 'categories-list' });
     catsContainer.style.marginTop = '8px';
-    
-    let draggedIdx: number | null = null;
-    
+
     const renderCategories = () => {
       catsContainer.empty();
-      const list = Array.isArray(this.plugin.settings.customCategories) ? this.plugin.settings.customCategories : [];
-      
-      // Add built-in categories at the top
-      const builtinCategories: Array<{ id: string; label: string; type: 'builtin' }> = [];
-      builtinCategories.push({ id: 'all', label: 'All', type: 'builtin' });
-      if (!this.plugin.settings.disableTimeBasedFiltering) {
-        builtinCategories.push({ id: 'today', label: 'Today', type: 'builtin' });
-        builtinCategories.push({ id: 'tomorrow', label: 'Tomorrow', type: 'builtin' });
-        builtinCategories.push({ id: 'this-week', label: 'This Week', type: 'builtin' });
+      const customList = Array.isArray(this.plugin.settings.customCategories) ? this.plugin.settings.customCategories : [];
+
+      // Build the full list of all possible items
+      interface CategoryItem {
+        id: string;
+        label: string;
+        canHide: boolean;
+        canRemove: boolean;
+        settingKey?: 'disableTimeBasedFiltering' | 'hideArchivedFilterButton';
+        isCustom?: boolean;
+        data?: CustomCategory;
       }
-      if (!this.plugin.settings.hideArchivedFilterButton) {
-        builtinCategories.push({ id: 'archived', label: 'Archived', type: 'builtin' });
-      }
+
+      const builtinItems: CategoryItem[] = [
+        { id: 'filter-all', label: 'All', canHide: false, canRemove: false },
+        { id: 'filter-today', label: 'Today', canHide: true, canRemove: false, settingKey: 'disableTimeBasedFiltering' },
+        { id: 'filter-tomorrow', label: 'Tomorrow', canHide: true, canRemove: false, settingKey: 'disableTimeBasedFiltering' },
+        { id: 'filter-archived', label: 'Archived', canHide: true, canRemove: false, settingKey: 'hideArchivedFilterButton' }
+      ];
+
+      const customItems: CategoryItem[] = customList.map(c => ({
+        id: c.id,
+        label: c.label,
+        canHide: true,
+        canRemove: true,
+        isCustom: true,
+        data: c
+      }));
+
+      const allItems: CategoryItem[] = [...builtinItems, ...customItems];
+      const validIds = new Set(allItems.map(item => item.id));
+
+      // Get current order
+      let orderedIds = (this.plugin.settings.allItemsOrder || [])
+        .filter(id => validIds.has(id));
       
-      // Render built-in categories
-      builtinCategories.forEach((cat, idx) => {
-        const row = catsContainer.createDiv({ cls: 'category-row builtin' });
-        row.style.display = 'flex';
-        row.style.gap = '8px';
-        row.style.alignItems = 'center';
-        row.style.padding = '8px';
-        row.style.marginBottom = '6px';
-        row.style.backgroundColor = 'var(--background-secondary)';
-        row.style.borderRadius = '4px';
-        row.style.borderLeft = '3px solid var(--color-accent)';
-        
-        const handle = row.createEl('span', { text: '≡' });
-        handle.style.cursor = 'grab';
-        handle.style.color = 'var(--text-muted)';
-        handle.style.fontSize = '14px';
-        handle.style.width = '20px';
-        
-        const textColorPicker = row.createEl('input');
-        textColorPicker.type = 'color';
-        textColorPicker.value = (this.plugin.settings.filterColors?.[cat.id]?.textColor) || '#ffffff';
-        textColorPicker.title = 'Text color';
-        textColorPicker.style.width = '40px';
-        textColorPicker.style.height = '32px';
-        textColorPicker.style.cursor = 'pointer';
-        textColorPicker.addEventListener('change', async (e: any) => {
-          if (!this.plugin.settings.filterColors) this.plugin.settings.filterColors = {};
-          if (!this.plugin.settings.filterColors[cat.id]) this.plugin.settings.filterColors[cat.id] = {};
-          this.plugin.settings.filterColors[cat.id].textColor = e.target.value;
-          await this.plugin.saveSettings();
-          refreshSidebarHeader();
-        });
-        
-        const bgColorPicker = row.createEl('input');
-        bgColorPicker.type = 'color';
-        bgColorPicker.value = (this.plugin.settings.filterColors?.[cat.id]?.bgColor) || '#4a5568';
-        bgColorPicker.title = 'Background color';
-        bgColorPicker.style.width = '40px';
-        bgColorPicker.style.height = '32px';
-        bgColorPicker.style.cursor = 'pointer';
-        bgColorPicker.addEventListener('change', async (e: any) => {
-          if (!this.plugin.settings.filterColors) this.plugin.settings.filterColors = {};
-          if (!this.plugin.settings.filterColors[cat.id]) this.plugin.settings.filterColors[cat.id] = {};
-          this.plugin.settings.filterColors[cat.id].bgColor = e.target.value;
-          await this.plugin.saveSettings();
-          refreshSidebarHeader();
-        });
-        
-        const resetBtn = row.createEl('button', { text: '[Reset]' });
-        resetBtn.style.padding = '4px 8px';
-        resetBtn.style.fontSize = '12px';
-        resetBtn.addEventListener('click', async () => {
-          if (this.plugin.settings.filterColors) {
-            delete this.plugin.settings.filterColors[cat.id];
-          }
-          await this.plugin.saveSettings();
-          renderCategories();
-          refreshSidebarHeader();
-        });
-        
-        const labelSpan = row.createEl('span', { text: cat.label });
-        labelSpan.style.flex = '1';
-        labelSpan.style.fontWeight = 'bold';
-        labelSpan.style.color = 'var(--text-normal)';
+      // Add missing items to the end
+      allItems.forEach(item => {
+        if (!orderedIds.includes(item.id)) orderedIds.push(item.id);
       });
-      
-      // Render custom categories
-      list.forEach((cat, idx) => {
-        const row = catsContainer.createDiv({ cls: 'category-row custom' });
+
+      const saveOrder = async () => {
+        const ids = Array.from(catsContainer.querySelectorAll('.category-row[data-cat-id]'))
+          .map(r => (r as HTMLElement).dataset.catId)
+          .filter(Boolean) as string[];
+        this.plugin.settings.allItemsOrder = ids;
+        await this.plugin.saveSettings();
+        refreshSidebarHeader();
+      };
+
+      let dragSrcId: string | null = null;
+
+      const renderRow = (itemId: string) => {
+        const itemInfo = allItems.find(i => i.id === itemId);
+        if (!itemInfo) return;
+
+        const isBuiltin = itemId.startsWith('filter-');
+        const colorKey = isBuiltin ? itemId.replace('filter-', '') : itemId;
+        
+        let isVisible = true;
+        if (isBuiltin) {
+          const sKey = itemInfo.settingKey;
+          if (sKey === 'disableTimeBasedFiltering') {
+            isVisible = !this.plugin.settings.disableTimeBasedFiltering;
+          } else if (sKey === 'hideArchivedFilterButton') {
+            isVisible = !this.plugin.settings.hideArchivedFilterButton;
+          }
+        } else {
+          isVisible = itemInfo.data?.showInMenu !== false;
+        }
+
+        const row = catsContainer.createDiv({ cls: 'category-row' });
+        row.dataset.catId = itemId;
         row.style.display = 'flex';
         row.style.gap = '8px';
         row.style.alignItems = 'center';
         row.style.padding = '8px';
         row.style.marginBottom = '6px';
         row.style.backgroundColor = 'var(--background-secondary)';
-        row.style.borderRadius = '4px';
+        row.style.borderRadius = '6px';
+        row.style.border = '1px solid var(--background-modifier-border)';
         row.draggable = true;
-        row.dataset.idx = String(idx);
-        
-        // Drag handle
-        const handle = row.createEl('span', { text: '≡' });
-        handle.style.cursor = 'grab';
-        handle.style.color = 'var(--text-muted)';
-        handle.style.fontSize = '14px';
-        handle.style.width = '20px';
-        
+
+        // Drag events
         row.addEventListener('dragstart', (e) => {
-          draggedIdx = idx;
-          (row as any).style.opacity = '0.5';
+          dragSrcId = itemId;
+          row.style.opacity = '0.5';
+          e.dataTransfer?.setData('text/plain', itemId);
         });
-        
-        row.addEventListener('dragend', (e) => {
-          (row as any).style.opacity = '1';
-          draggedIdx = null;
+        row.addEventListener('dragend', () => {
+          row.style.opacity = '1';
+          dragSrcId = null;
+          saveOrder();
         });
-        
         row.addEventListener('dragover', (e) => {
           e.preventDefault();
-          if (draggedIdx !== null && draggedIdx !== idx) {
-            const arr = [...list];
-            const temp = arr[draggedIdx];
-            arr[draggedIdx] = arr[idx];
-            arr[idx] = temp;
-            this.plugin.settings.customCategories = arr;
-            draggedIdx = idx;
-            renderCategories();
+          if (dragSrcId && dragSrcId !== itemId) {
+            const rows = Array.from(catsContainer.querySelectorAll('.category-row[data-cat-id]'));
+            const srcRow = rows.find(r => (r as HTMLElement).dataset.catId === dragSrcId);
+            if (srcRow) {
+              const rect = row.getBoundingClientRect();
+              const midpoint = rect.top + rect.height / 2;
+              if (e.clientY < midpoint) {
+                catsContainer.insertBefore(srcRow, row);
+              } else {
+                catsContainer.insertBefore(srcRow, row.nextSibling);
+              }
+            }
           }
         });
-        
+
+        // Drag handle
+        const handle = row.createEl('div', { cls: 'drag-handle' });
+        try { setIcon(handle as any, 'grip-vertical'); } catch { handle.textContent = '⋮⋮'; }
+        handle.style.cursor = 'grab';
+        handle.style.color = 'var(--text-muted)';
+
         // Text color picker
         const textColorPicker = row.createEl('input');
         textColorPicker.type = 'color';
-        textColorPicker.value = cat.textColor || '#ffffff';
+        textColorPicker.value = this.plugin.settings.filterColors?.[colorKey]?.textColor || '#c0c3c7';
         textColorPicker.title = 'Text color';
-        textColorPicker.style.width = '40px';
-        textColorPicker.style.height = '32px';
+        textColorPicker.style.width = '24px';
+        textColorPicker.style.height = '24px';
+        textColorPicker.style.padding = '0';
+        textColorPicker.style.border = 'none';
+        textColorPicker.style.background = 'none';
         textColorPicker.style.cursor = 'pointer';
         textColorPicker.addEventListener('change', async (e: any) => {
-          this.plugin.settings.customCategories[idx].textColor = e.target.value;
           if (!this.plugin.settings.filterColors) this.plugin.settings.filterColors = {};
-          if (!this.plugin.settings.filterColors[cat.id]) this.plugin.settings.filterColors[cat.id] = {};
-          this.plugin.settings.filterColors[cat.id].textColor = e.target.value;
+          if (!this.plugin.settings.filterColors[colorKey]) this.plugin.settings.filterColors[colorKey] = {};
+          this.plugin.settings.filterColors[colorKey].textColor = e.target.value;
           await this.plugin.saveSettings();
           refreshSidebarHeader();
         });
-        
-        // Background color picker
+
+        // BG color picker
         const bgColorPicker = row.createEl('input');
         bgColorPicker.type = 'color';
-        bgColorPicker.value = cat.bgColor || '#4a5568';
+        bgColorPicker.value = this.plugin.settings.filterColors?.[colorKey]?.bgColor || '#1a1a1a';
         bgColorPicker.title = 'Background color';
-        bgColorPicker.style.width = '40px';
-        bgColorPicker.style.height = '32px';
+        bgColorPicker.style.width = '24px';
+        bgColorPicker.style.height = '24px';
+        bgColorPicker.style.padding = '0';
+        bgColorPicker.style.border = 'none';
+        bgColorPicker.style.background = 'none';
         bgColorPicker.style.cursor = 'pointer';
         bgColorPicker.addEventListener('change', async (e: any) => {
-          this.plugin.settings.customCategories[idx].bgColor = e.target.value;
           if (!this.plugin.settings.filterColors) this.plugin.settings.filterColors = {};
-          if (!this.plugin.settings.filterColors[cat.id]) this.plugin.settings.filterColors[cat.id] = {};
-          this.plugin.settings.filterColors[cat.id].bgColor = e.target.value;
+          if (!this.plugin.settings.filterColors[colorKey]) this.plugin.settings.filterColors[colorKey] = {};
+          this.plugin.settings.filterColors[colorKey].bgColor = e.target.value;
           await this.plugin.saveSettings();
           refreshSidebarHeader();
         });
-        
+
         // Reset button
-        const resetBtn = row.createEl('button', { text: '[Reset]' });
-        resetBtn.style.padding = '4px 8px';
-        resetBtn.style.fontSize = '12px';
+        const resetBtn = row.createEl('button', { text: 'Reset' });
+        resetBtn.style.padding = '2px 8px';
+        resetBtn.style.fontSize = '11px';
         resetBtn.addEventListener('click', async () => {
-          if (!this.plugin.settings.filterColors) this.plugin.settings.filterColors = {};
-          delete this.plugin.settings.filterColors[cat.id];
-          await this.plugin.saveSettings();
-          renderCategories();
-          refreshSidebarHeader();
-        });
-        
-        // Name input
-        const txt = row.createEl('input');
-        txt.type = 'text';
-        txt.value = cat.label || '';
-        txt.placeholder = 'Category name';
-        txt.style.flex = '1';
-        txt.style.padding = '4px 8px';
-        txt.addEventListener('change', async (e: any) => {
-          const newLabel = e.target.value || '';
-          const slugBase = String(newLabel).toLowerCase().trim().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
-          const existingIds = new Set(list.map(c => String(c.id || '').toLowerCase()).filter(id => id !== String(cat.id || '').toLowerCase()));
-          let newId = slugBase || 'category';
-          let k = 2;
-          while (existingIds.has(newId)) { newId = (slugBase || 'category') + '-' + k; k++; }
-          const oldId = this.plugin.settings.customCategories[idx].id;
-          this.plugin.settings.customCategories[idx].label = newLabel;
-          this.plugin.settings.customCategories[idx].id = newId;
-          if (Array.isArray(this.plugin.settings.allItemsOrder)) {
-            const i = this.plugin.settings.allItemsOrder.findIndex(x => String(x) === String(oldId));
-            if (i >= 0) this.plugin.settings.allItemsOrder[i] = newId;
+          if (this.plugin.settings.filterColors?.[colorKey]) {
+            delete this.plugin.settings.filterColors[colorKey];
+            await this.plugin.saveSettings();
+            renderCategories();
+            refreshSidebarHeader();
           }
-          await this.plugin.saveSettings();
-          renderCategories();
-          refreshSidebarHeader();
         });
-        
-        // Visibility toggle
-        const showToggle = row.createEl('button');
-        const isVisible = cat.showInMenu !== false;
-        try { 
-          setIcon(showToggle, isVisible ? 'eye' : 'eye-off'); 
-        } catch { 
-          showToggle.textContent = isVisible ? '👁' : '👁‍🗨'; 
+
+        // Label / Input
+        if (isBuiltin) {
+          const label = row.createEl('span', { text: itemInfo.label });
+          label.style.flex = '1';
+          label.style.fontWeight = '500';
+        } else {
+          const input = row.createEl('input', { type: 'text' });
+          input.value = itemInfo.label;
+          input.style.flex = '1';
+          input.style.background = 'transparent';
+          input.style.border = 'none';
+          input.style.borderBottom = '1px solid var(--background-modifier-border)';
+          input.addEventListener('change', async (e: any) => {
+            const idx = customList.findIndex(c => c.id === itemId);
+            if (idx >= 0) {
+              this.plugin.settings.customCategories[idx].label = e.target.value;
+              await this.plugin.saveSettings();
+              refreshSidebarHeader();
+            }
+          });
         }
-        showToggle.style.width = '40px';
-        showToggle.style.padding = '4px';
-        showToggle.title = isVisible ? 'Visible' : 'Hidden';
-        showToggle.addEventListener('click', async () => {
-          this.plugin.settings.customCategories[idx].showInMenu = !cat.showInMenu;
-          await this.plugin.saveSettings();
-          renderCategories();
-          refreshSidebarHeader();
-        });
-        
+
+        // Eye icon
+        if (itemInfo.canHide) {
+          const eyeBtn = row.createEl('button', { cls: 'clickable-icon' });
+          eyeBtn.style.padding = '4px';
+          const updateEye = () => {
+            eyeBtn.empty();
+            try { setIcon(eyeBtn as any, isVisible ? 'eye' : 'eye-off'); } catch { eyeBtn.textContent = isVisible ? '👁' : '🚫'; }
+            eyeBtn.title = isVisible ? 'Visible' : 'Hidden';
+          };
+          updateEye();
+          eyeBtn.addEventListener('click', async () => {
+            isVisible = !isVisible;
+            if (isBuiltin) {
+              const sKey = itemInfo.settingKey;
+              if (sKey === 'disableTimeBasedFiltering') {
+                this.plugin.settings.disableTimeBasedFiltering = !isVisible;
+              } else if (sKey === 'hideArchivedFilterButton') {
+                this.plugin.settings.hideArchivedFilterButton = !isVisible;
+              }
+            } else {
+              const idx = customList.findIndex(c => c.id === itemId);
+              if (idx >= 0) this.plugin.settings.customCategories[idx].showInMenu = isVisible;
+            }
+            await this.plugin.saveSettings();
+            updateEye();
+            refreshSidebarHeader();
+          });
+        } else {
+          // Spacer for consistency
+          const spacer = row.createEl('div');
+          spacer.style.width = '32px';
+        }
+
         // Remove button
-        const del = row.createEl('button', { text: '[Remove]' });
-        del.style.padding = '4px 8px';
-        del.style.fontSize = '12px';
-        del.classList.add('mod-warning');
-        del.addEventListener('click', async () => {
-          this.plugin.settings.customCategories.splice(idx, 1);
-          await this.plugin.saveSettings();
-          renderCategories();
-          refreshSidebarHeader();
-        });
-      });
-      
+        if (itemInfo.canRemove) {
+          const removeBtn = row.createEl('button', { cls: 'clickable-icon mod-warning' });
+          removeBtn.style.padding = '4px';
+          try { setIcon(removeBtn as any, 'trash'); } catch { removeBtn.textContent = '×'; }
+          removeBtn.addEventListener('click', async () => {
+            const idx = customList.findIndex(c => c.id === itemId);
+            if (idx >= 0) {
+              this.plugin.settings.customCategories.splice(idx, 1);
+              this.plugin.settings.allItemsOrder = (this.plugin.settings.allItemsOrder || []).filter(id => id !== itemId);
+              await this.plugin.saveSettings();
+              renderCategories();
+              refreshSidebarHeader();
+            }
+          });
+        } else {
+          // Spacer
+          const spacer = row.createEl('div');
+          spacer.style.width = '32px';
+        }
+      };
+
+      orderedIds.forEach(id => renderRow(id));
+
       // Add category button
-      const addRow = catsContainer.createDiv({ cls: 'categories-add-row' });
+      const addRow = catsContainer.createDiv();
       addRow.style.display = 'flex';
       addRow.style.justifyContent = 'flex-end';
       addRow.style.marginTop = '12px';
-      const addBtn = addRow.createEl('button', { text: '+ Add Custom Category' });
-      addBtn.classList.add('mod-cta');
+      const addBtn = addRow.createEl('button', { text: '+ Add Custom Category', cls: 'mod-cta' });
       addBtn.addEventListener('click', async () => {
         if (!Array.isArray(this.plugin.settings.customCategories)) this.plugin.settings.customCategories = [];
-        const slug = 'new';
-        const existing = new Set(this.plugin.settings.customCategories.map(c => String(c.id || '').toLowerCase()));
-        let id = slug;
-        let i = 2;
-        while (existing.has(id)) { id = slug + '-' + i; i++; }
+        const id = 'cat-' + Date.now();
         this.plugin.settings.customCategories.push({ id, label: 'New Category', showInMenu: true });
+        if (!Array.isArray(this.plugin.settings.allItemsOrder)) this.plugin.settings.allItemsOrder = [];
+        this.plugin.settings.allItemsOrder.push(id);
         await this.plugin.saveSettings();
         renderCategories();
         refreshSidebarHeader();
@@ -709,11 +765,11 @@ class SideCardsSettingTab extends PluginSettingTab {
     
     new Setting(containerEl)
       .setName('Open category on load')
-      .setDesc('Which category opens when sidebar is loaded')
+      .setDesc('Which category opens when the sidebar loads.')
       .addDropdown(dropdown => {
         const opts: Array<{ value: string; label: string }> = [{ value: 'all', label: 'All' }];
         if (!this.plugin.settings.disableTimeBasedFiltering) {
-          opts.push({ value: 'today', label: 'Today' }, { value: 'tomorrow', label: 'Tomorrow' }, { value: 'this-week', label: 'This Week' });
+          opts.push({ value: 'today', label: 'Today' }, { value: 'tomorrow', label: 'Tomorrow' });
         }
         if (!this.plugin.settings.hideArchivedFilterButton) {
           opts.push({ value: 'archived', label: 'Archived' });

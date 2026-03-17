@@ -14,17 +14,25 @@ export class SortService {
       case 'manual':
         return this.sortManual(sorted, ascending);
       case 'created':
-        return sorted.sort((a, b) => 
-          ascending 
-            ? a.created - b.created
-            : b.created - a.created
-        );
+        return sorted.sort((a, b) => {
+          const primary = ascending ? a.created - b.created : b.created - a.created;
+          if (primary !== 0) return primary;
+          const am = typeof a.modified === 'number' ? a.modified : a.created;
+          const bm = typeof b.modified === 'number' ? b.modified : b.created;
+          const secondary = ascending ? am - bm : bm - am;
+          if (secondary !== 0) return secondary;
+          return ascending ? a.content.localeCompare(b.content) : b.content.localeCompare(a.content);
+        });
       case 'modified':
-        return sorted.sort((a, b) =>
-          ascending
-            ? (a as any).modified - (b as any).modified
-            : (b as any).modified - (a as any).modified
-        );
+        return sorted.sort((a, b) => {
+          const am = typeof a.modified === 'number' ? a.modified : a.created;
+          const bm = typeof b.modified === 'number' ? b.modified : b.created;
+          const primary = ascending ? am - bm : bm - am;
+          if (primary !== 0) return primary;
+          const secondary = ascending ? a.created - b.created : b.created - a.created;
+          if (secondary !== 0) return secondary;
+          return ascending ? a.content.localeCompare(b.content) : b.content.localeCompare(a.content);
+        });
       case 'alpha':
         return sorted.sort((a, b) => 
           ascending 

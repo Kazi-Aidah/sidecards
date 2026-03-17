@@ -45,8 +45,7 @@ export interface SideCardsSettings {
   filterColors?: Record<string, { bgColor?: string; textColor?: string }>;
   saveKey?: string;
   nextLineKey?: string;
-  hideClearButton?: boolean;
-  sortMode?: 'manual' | 'created' | 'alpha';
+  sortMode?: 'manual' | 'created' | 'modified' | 'alpha' | 'status';
   sortAscending?: boolean;
   showPinnedOnly?: boolean;
   enableCardStatus?: boolean;
@@ -67,11 +66,8 @@ export interface SideCardsSettings {
   inheritStatusColor?: boolean;
   statusPillOpacity?: number;
   replaceHomepageWithSidecards?: boolean;
-  
-  // From act.js or similar
-  enableRegexSupport: boolean;
-  caseSensitive: boolean;
-  partialMatch: boolean;
+  searchBarVisible?: boolean;
+  pinnedNotes?: string[];
 }
 
 export const DEFAULT_SETTINGS: SideCardsSettings = {
@@ -110,7 +106,6 @@ export const DEFAULT_SETTINGS: SideCardsSettings = {
   filterColors: {},
   saveKey: 'enter',
   nextLineKey: 'shift-enter',
-  hideClearButton: false,
   sortMode: 'manual',
   sortAscending: true,
   showPinnedOnly: false,
@@ -132,7 +127,6 @@ export const DEFAULT_SETTINGS: SideCardsSettings = {
   inheritStatusColor: false,
   statusPillOpacity: 1,
   replaceHomepageWithSidecards: false,
-  enableRegexSupport: false,
-  caseSensitive: false,
-  partialMatch: true
+  searchBarVisible: false,
+  pinnedNotes: [],
 };

@@ -22,14 +22,14 @@ export class SearchModal extends Modal {
     contentEl.empty();
     this.titleEl.setText('Search Cards');
 
-    const searchWrapper = contentEl.createDiv('card-search-wrapper');
+    const searchWrapper = contentEl.createDiv('sc-search-wrapper');
     this.searchInput = searchWrapper.createEl('input', {
       type: 'text',
       placeholder: 'Search cards...',
-      cls: 'card-search-input'
+      cls: 'sc-search-input'
     });
 
-    this.resultsContainer = contentEl.createDiv('card-search-results');
+    this.resultsContainer = contentEl.createDiv('sc-search-results');
     this.resultsContainer.style.maxHeight = '400px';
     this.resultsContainer.style.overflow = 'auto';
 
@@ -47,7 +47,7 @@ export class SearchModal extends Modal {
     this.selectedIndex = -1;
 
     this.searchResults.forEach((card, idx) => {
-      const result = this.resultsContainer.createDiv('card-search-result');
+      const result = this.resultsContainer.createDiv('sc-search-result');
       result.textContent = card.content.substring(0, 100) + (card.content.length > 100 ? '...' : '');
       result.style.padding = '8px';
       result.style.cursor = 'pointer';
@@ -63,7 +63,7 @@ export class SearchModal extends Modal {
   }
 
   private updateSelection() {
-    const els = Array.from(this.resultsContainer.querySelectorAll('.card-search-result')) as HTMLElement[];
+    const els = Array.from(this.resultsContainer.querySelectorAll('.sc-search-result')) as HTMLElement[];
     els.forEach((el, idx) => {
       if (idx === this.selectedIndex) {
         el.addClass('selected');
