@@ -33,10 +33,6 @@ export class CardSidebarView extends ItemView {
   ) {
     super(leaf);
     this.editorScope = new Scope(this.app.scope);
-    // Block native formatting keys so Obsidian's global commands take over
-    this.editorScope.register(["Mod"], "b", () => true);
-    this.editorScope.register(["Mod"], "i", () => true);
-    this.editorScope.register(["Mod"], "u", () => true);
     this.setupMockEditor();
   }
 
@@ -44,12 +40,19 @@ export class CardSidebarView extends ItemView {
     this.editor = {
       getSelection: () => {
         const sel = window.getSelection();
-        return sel ? sel.toString() : "";
+        if (!sel || !sel.rangeCount) return "";
+        const selectedText = sel.toString();
+        if (selectedText.length > 0) return selectedText;
+        const wordRange = this.getWordRangeAtCaret(sel);
+        return wordRange ? wordRange.toString() : "";
       },
       replaceSelection: (text: string) => {
         const sel = window.getSelection();
         if (!sel || !sel.rangeCount) return;
-        const range = sel.getRangeAt(0);
+        const currentRange = sel.getRangeAt(0);
+        const range = currentRange.collapsed
+          ? (this.getWordRangeAtCaret(sel) || currentRange)
+          : currentRange;
         range.deleteContents();
         const node = document.createTextNode(text);
         range.insertNode(node);
@@ -60,6 +63,8 @@ export class CardSidebarView extends ItemView {
       },
       toggleBold: () => this.toggleMarkdownWrapper("**"),
       toggleItalic: () => this.toggleMarkdownWrapper("*"),
+      toggleHighlight: () => this.toggleMarkdownWrapper("=="),
+      toggleComment: () => this.toggleMarkdownWrapper("%%", "%%", true),
     } as any;
 
     this.owner = {
@@ -68,30 +73,158 @@ export class CardSidebarView extends ItemView {
     };
   }
 
-  private toggleMarkdownWrapper(wrapper: "**" | "*" | "~~" | "==") {
+  private isWordChar(char: string): boolean {
+    return /[A-Za-z0-9_]/.test(char);
+  }
+
+  private getWordRangeAtCaret(selection: Selection): Range | null {
+    if (!selection.rangeCount) return null;
+    const baseRange = selection.getRangeAt(0);
+    if (!baseRange.collapsed) return baseRange;
+    const node = baseRange.startContainer;
+    if (!(node instanceof Text)) return null;
+    const text = node.data;
+    if (!text) return null;
+    const offset = baseRange.startOffset;
+    const leftChar = offset > 0 ? text[offset - 1] : "";
+    const rightChar = offset < text.length ? text[offset] : "";
+    if (!this.isWordChar(leftChar) && !this.isWordChar(rightChar)) return null;
+    let start = offset;
+    let end = offset;
+    while (start > 0 && this.isWordChar(text[start - 1])) start--;
+    while (end < text.length && this.isWordChar(text[end])) end++;
+    const wordRange = document.createRange();
+    wordRange.setStart(node, start);
+    wordRange.setEnd(node, end);
+    return wordRange;
+  }
+
+  private toggleMarkdownWrapper(wrapper: "**" | "*" | "~~" | "==" | "%%", closeWrapper?: string, includeInnerPadding = false) {
     const sel = window.getSelection();
     if (!sel || !sel.rangeCount) return;
-    
-    const range = sel.getRangeAt(0);
-    const selectedText = sel.toString();
-    
+    const currentRange = sel.getRangeAt(0);
+    const range = currentRange.collapsed
+      ? (this.getWordRangeAtCaret(sel) || currentRange)
+      : currentRange;
+    const selectedText = range.toString();
+    const endWrapper = closeWrapper ?? wrapper;
     if (selectedText.length === 0) {
-      // Empty selection: insert **** and place cursor in middle
-      const text = wrapper + wrapper;
+      const text = wrapper + endWrapper;
       const node = document.createTextNode(text);
       range.insertNode(node);
-      range.setStart(node, wrapper.length);
+      const cursorOffset = wrapper.length;
+      range.setStart(node, cursorOffset);
       range.collapse(true);
       sel.removeAllRanges();
       sel.addRange(range);
-    } else {
-      const alreadyWrapped = selectedText.startsWith(wrapper) && selectedText.endsWith(wrapper);
-      const newText = alreadyWrapped
-        ? selectedText.slice(wrapper.length, -wrapper.length)
-        : wrapper + selectedText + wrapper;
-      
-      this.editor.replaceSelection(newText);
+      return;
     }
+    const alreadyWrapped = selectedText.startsWith(wrapper) && selectedText.endsWith(endWrapper);
+    const newText = alreadyWrapped
+      ? selectedText.slice(wrapper.length, selectedText.length - endWrapper.length)
+      : includeInnerPadding
+        ? `${wrapper} ${selectedText} ${endWrapper}`
+        : `${wrapper}${selectedText}${endWrapper}`;
+    sel.removeAllRanges();
+    sel.addRange(range);
+    this.editor.replaceSelection(newText);
+  }
+
+  private applySelectionWrapShortcut(event: KeyboardEvent, root: HTMLElement): boolean {
+    if (event.ctrlKey || event.metaKey || event.altKey) return false;
+    const wrapMap: Record<string, [string, string]> = {
+      "[": ["[", "]"],
+      "(": ["(", ")"],
+      "{": ["{", "}"],
+      "`": ["`", "`"],
+    };
+    const pair = wrapMap[event.key];
+    if (!pair) return false;
+    const sel = window.getSelection();
+    if (!sel || !sel.rangeCount || sel.isCollapsed) return false;
+    const range = sel.getRangeAt(0);
+    const selectedText = sel.toString();
+    if (!selectedText || !root.contains(range.commonAncestorContainer)) return false;
+    event.preventDefault();
+    const [open, close] = pair;
+    const newText = `${open}${selectedText}${close}`;
+    this.editor.replaceSelection(newText);
+    return true;
+  }
+
+  private getEffectiveHotkeys(commandId: string): Array<{ modifiers?: string[]; key?: string }> {
+    const appAny = this.app as any;
+    const fromManager = appAny.hotkeyManager?.getHotkeys?.(commandId);
+    if (Array.isArray(fromManager) && fromManager.length > 0) return fromManager;
+    const custom = appAny.hotkeyManager?.customKeys?.[commandId];
+    if (Array.isArray(custom) && custom.length > 0) return custom;
+    const defaults = appAny.commands?.commands?.[commandId]?.hotkeys;
+    if (Array.isArray(defaults) && defaults.length > 0) return defaults;
+    return [];
+  }
+
+  private getFormattingCommandIds(kind: "bold" | "italic" | "highlight" | "comment"): string[] {
+    const defaults: Record<"bold" | "italic" | "highlight" | "comment", string[]> = {
+      bold: ["editor:toggle-bold"],
+      italic: ["editor:toggle-italic", "editor:toggle-emphasis"],
+      highlight: ["editor:toggle-highlight"],
+      comment: ["editor:toggle-comment"],
+    };
+    const appAny = this.app as any;
+    const commands = appAny.commands?.commands || {};
+    const matcher: Record<"bold" | "italic" | "highlight" | "comment", RegExp> = {
+      bold: /bold/i,
+      italic: /italic|emphasis/i,
+      highlight: /highlight/i,
+      comment: /comment/i,
+    };
+    const discovered = Object.values(commands)
+      .filter((cmd: any) => typeof cmd?.id === "string" && cmd.id.startsWith("editor:"))
+      .filter((cmd: any) => matcher[kind].test(String(cmd?.name || "")))
+      .map((cmd: any) => String(cmd.id));
+    return Array.from(new Set([...defaults[kind], ...discovered]));
+  }
+
+  private eventMatchesHotkey(event: KeyboardEvent, hotkey: { modifiers?: string[]; key?: string }): boolean {
+    const key = String(hotkey?.key || "").toLowerCase();
+    if (!key) return false;
+    const eventKey = String(event.key || "").toLowerCase();
+    if (eventKey !== key) return false;
+    const modifierSet = new Set((hotkey.modifiers || []).map(m => String(m).toLowerCase()));
+    const hasMod = modifierSet.has("mod");
+    const expectsCtrl = hasMod || modifierSet.has("ctrl");
+    const expectsMeta = hasMod || modifierSet.has("meta");
+    const expectsAlt = modifierSet.has("alt");
+    const expectsShift = modifierSet.has("shift");
+    if (expectsCtrl !== event.ctrlKey) return false;
+    if (expectsMeta !== event.metaKey) return false;
+    if (expectsAlt !== event.altKey) return false;
+    if (expectsShift !== event.shiftKey) return false;
+    return true;
+  }
+
+  private applyFormattingHotkey(event: KeyboardEvent, root: HTMLElement): boolean {
+    const sel = window.getSelection();
+    if (!sel || !sel.rangeCount) return false;
+    const range = sel.getRangeAt(0);
+    if (!root.contains(range.commonAncestorContainer)) return false;
+    const targets: Array<{ kind: "bold" | "italic" | "highlight" | "comment"; run: () => void }> = [
+      { kind: "bold", run: () => this.toggleMarkdownWrapper("**") },
+      { kind: "italic", run: () => this.toggleMarkdownWrapper("*") },
+      { kind: "highlight", run: () => this.toggleMarkdownWrapper("==") },
+      { kind: "comment", run: () => this.toggleMarkdownWrapper("%%", "%%", true) },
+    ];
+    for (const target of targets) {
+      const commandIds = this.getFormattingCommandIds(target.kind);
+      const hotkeys = commandIds.flatMap(id => this.getEffectiveHotkeys(id));
+      if (!hotkeys.length) continue;
+      if (!hotkeys.some(h => this.eventMatchesHotkey(event, h))) continue;
+      event.preventDefault();
+      event.stopPropagation();
+      target.run();
+      return true;
+    }
+    return false;
   }
 
   getViewType(): string {
@@ -446,6 +579,10 @@ export class CardSidebarView extends ItemView {
     // Tag autocomplete logic for contenteditable (simplified version for now)
     editorEl.addEventListener('input', () => {
       // Simplified autocomplete trigger or use the TagAutocomplete class if compatible
+    });
+    editorEl.addEventListener('keydown', (e) => {
+      if (this.applyFormattingHotkey(e, editorEl)) return;
+      this.applySelectionWrapShortcut(e, editorEl);
     });
 
     const buttonContainer = inputContainer.createDiv('sc-sidebar-button-container');

@@ -4,6 +4,7 @@ import { CardStore } from "../../services/CardStore";
 import { applyCardColorToElement } from "../../utils/dom";
 import { App, MarkdownRenderer, Plugin, Menu, Notice, TFile, setIcon, Scope, Editor } from "obsidian";
 import { DateTimeModal } from "../modals/DateTimeModal";
+import { getWordRangeAtCaret, handleKeyWrap, isWordChar } from "../../utils/editor-utils";
 
 export class CardComponent {
   public el: HTMLElement;
@@ -14,12 +15,15 @@ export class CardComponent {
     const active = CardComponent.activeEditor;
     if (!active || !active.isEditing) return;
     const target = event.target as Node | null;
-    if (target && active.el.contains(target)) return;
+    const editableEl = active.el.querySelector('.sc-content[contenteditable="true"]');
+    if (target && editableEl && editableEl.contains(target)) return;
+    active.ignoreNextClick = true;
     active.blurAndSave();
   };
   private card: Card;
   private unsubscribe: (() => void)[] = [];
   private isEditing: boolean = false;
+  private ignoreNextClick: boolean = false;
   private renderCount: number = 0;
   private scope: Scope;
   private editor!: Editor;
@@ -36,10 +40,6 @@ export class CardComponent {
     this.card = card;
     this.el = container.createDiv('sc-card');
     this.scope = new Scope(this.app.scope);
-    // Block native formatting keys so Obsidian's global commands take over
-    this.scope.register(["Mod"], "b", () => true);
-    this.scope.register(["Mod"], "i", () => true);
-    this.scope.register(["Mod"], "u", () => true);
     this.setupMockEditor();
     this.ensureGlobalMouseDownHandler();
     this.render();
@@ -56,22 +56,40 @@ export class CardComponent {
     this.editor = {
       getSelection: () => {
         const sel = window.getSelection();
-        return sel ? sel.toString() : "";
+        if (!sel || !sel.rangeCount) return "";
+        const selectedText = sel.toString();
+        if (selectedText.length > 0) return selectedText;
+        const wordRange = getWordRangeAtCaret(sel);
+        return wordRange ? wordRange.toString() : "";
       },
-      replaceSelection: (text: string) => {
+      replaceSelection: (text: string, keepSelection: boolean = false) => {
         const sel = window.getSelection();
         if (!sel || !sel.rangeCount) return;
-        const range = sel.getRangeAt(0);
+        const currentRange = sel.getRangeAt(0);
+        const isCollapsed = currentRange.collapsed;
+        const range = isCollapsed
+          ? (getWordRangeAtCaret(sel) || currentRange)
+          : currentRange;
         range.deleteContents();
         const node = document.createTextNode(text);
         range.insertNode(node);
-        range.setStartAfter(node);
-        range.collapse(true);
-        sel.removeAllRanges();
-        sel.addRange(range);
+        
+        if (keepSelection || !isCollapsed) {
+          const newRange = document.createRange();
+          newRange.selectNode(node);
+          sel.removeAllRanges();
+          sel.addRange(newRange);
+        } else {
+          range.setStartAfter(node);
+          range.collapse(true);
+          sel.removeAllRanges();
+          sel.addRange(range);
+        }
       },
       toggleBold: () => this.toggleMarkdownWrapper("**"),
       toggleItalic: () => this.toggleMarkdownWrapper("*"),
+      toggleHighlight: () => this.toggleMarkdownWrapper("=="),
+      toggleComment: () => this.toggleMarkdownWrapper("%%", "%%", true),
     } as any;
 
     this.owner = {
@@ -80,30 +98,119 @@ export class CardComponent {
     };
   }
 
-  private toggleMarkdownWrapper(wrapper: "**" | "*" | "~~" | "==") {
+
+
+  private toggleMarkdownWrapper(wrapper: "**" | "*" | "~~" | "==" | "%%", closeWrapper?: string, includeInnerPadding = false) {
     const sel = window.getSelection();
     if (!sel || !sel.rangeCount) return;
-    
-    const range = sel.getRangeAt(0);
-    const selectedText = sel.toString();
-    
+    const currentRange = sel.getRangeAt(0);
+    const range = currentRange.collapsed
+      ? (getWordRangeAtCaret(sel) || currentRange)
+      : currentRange;
+    const selectedText = range.toString();
+    const endWrapper = closeWrapper ?? wrapper;
     if (selectedText.length === 0) {
-      // Empty selection: insert **** and place cursor in middle
-      const text = wrapper + wrapper;
+      const text = wrapper + endWrapper;
       const node = document.createTextNode(text);
       range.insertNode(node);
-      range.setStart(node, wrapper.length);
+      const cursorOffset = wrapper.length;
+      range.setStart(node, cursorOffset);
       range.collapse(true);
       sel.removeAllRanges();
       sel.addRange(range);
-    } else {
-      const alreadyWrapped = selectedText.startsWith(wrapper) && selectedText.endsWith(wrapper);
-      const newText = alreadyWrapped
-        ? selectedText.slice(wrapper.length, -wrapper.length)
-        : wrapper + selectedText + wrapper;
-      
-      this.editor.replaceSelection(newText);
+      return;
     }
+    const alreadyWrapped = selectedText.startsWith(wrapper) && selectedText.endsWith(endWrapper);
+    const newText = alreadyWrapped
+      ? selectedText.slice(wrapper.length, selectedText.length - endWrapper.length)
+      : includeInnerPadding
+        ? `${wrapper} ${selectedText} ${endWrapper}`
+        : `${wrapper}${selectedText}${endWrapper}`;
+    sel.removeAllRanges();
+    sel.addRange(range);
+    this.editor.replaceSelection(newText);
+  }
+
+
+
+  private getEffectiveHotkeys(commandId: string): Array<{ modifiers?: string[]; key?: string }> {
+    const appAny = this.app as any;
+    const fromManager = appAny.hotkeyManager?.getHotkeys?.(commandId);
+    if (Array.isArray(fromManager) && fromManager.length > 0) return fromManager;
+    const custom = appAny.hotkeyManager?.customKeys?.[commandId];
+    if (Array.isArray(custom) && custom.length > 0) return custom;
+    const defaults = appAny.commands?.commands?.[commandId]?.hotkeys;
+    if (Array.isArray(defaults) && defaults.length > 0) return defaults;
+    return [];
+  }
+
+  private getFormattingCommandIds(kind: "bold" | "italic" | "highlight" | "comment"): string[] {
+    const defaults: Record<"bold" | "italic" | "highlight" | "comment", string[]> = {
+      bold: ["editor:toggle-bold", "custom-wrap-bold"],
+      italic: ["editor:toggle-italic", "editor:toggle-emphasis", "custom-wrap-italic"],
+      highlight: ["editor:toggle-highlight", "custom-wrap-highlight"],
+      comment: ["editor:toggle-comment", "custom-wrap-comment"],
+    };
+    const appAny = this.app as any;
+    const commands = appAny.commands?.commands || {};
+    const matcher: Record<"bold" | "italic" | "highlight" | "comment", RegExp> = {
+      bold: /bold/i,
+      italic: /italic|emphasis/i,
+      highlight: /highlight/i,
+      comment: /comment/i,
+    };
+    const discovered = Object.values(commands)
+      .filter((cmd: any) => typeof cmd?.id === "string" && cmd.id.startsWith("editor:"))
+      .filter((cmd: any) => matcher[kind].test(String(cmd?.name || "")))
+      .map((cmd: any) => String(cmd.id));
+    return Array.from(new Set([...defaults[kind], ...discovered]));
+  }
+
+  private eventMatchesHotkey(event: KeyboardEvent, hotkey: { modifiers?: string[]; key?: string }): boolean {
+    const key = String(hotkey?.key || "").toLowerCase();
+    if (!key) return false;
+    const eventKey = String(event.key || "").toLowerCase();
+    if (eventKey !== key) return false;
+    const modifierSet = new Set((hotkey.modifiers || []).map(m => String(m).toLowerCase()));
+    
+    // In Obsidian, 'Mod' is Ctrl on Windows/Linux and Cmd on Mac
+    const hasMod = modifierSet.has("mod");
+    const isMac = navigator.platform.toUpperCase().indexOf('MAC') >= 0;
+    
+    const expectsCtrl = modifierSet.has("ctrl") || (hasMod && !isMac);
+    const expectsMeta = modifierSet.has("meta") || (hasMod && isMac);
+    const expectsAlt = modifierSet.has("alt");
+    const expectsShift = modifierSet.has("shift");
+    
+    if (expectsCtrl !== event.ctrlKey) return false;
+    if (expectsMeta !== event.metaKey) return false;
+    if (expectsAlt !== event.altKey) return false;
+    if (expectsShift !== event.shiftKey) return false;
+    return true;
+  }
+
+  private applyFormattingHotkey(event: KeyboardEvent, root: HTMLElement): boolean {
+    const sel = window.getSelection();
+    if (!sel || !sel.rangeCount) return false;
+    const range = sel.getRangeAt(0);
+    if (!root.contains(range.commonAncestorContainer)) return false;
+    const targets: Array<{ kind: "bold" | "italic" | "highlight" | "comment"; run: () => void }> = [
+      { kind: "bold", run: () => this.toggleMarkdownWrapper("**") },
+      { kind: "italic", run: () => this.toggleMarkdownWrapper("*") },
+      { kind: "highlight", run: () => this.toggleMarkdownWrapper("==") },
+      { kind: "comment", run: () => this.toggleMarkdownWrapper("%%", "%%", true) },
+    ];
+    for (const target of targets) {
+      const commandIds = this.getFormattingCommandIds(target.kind);
+      const hotkeys = commandIds.flatMap(id => this.getEffectiveHotkeys(id));
+      if (!hotkeys.length) continue;
+      if (!hotkeys.some(h => this.eventMatchesHotkey(event, h))) continue;
+      event.preventDefault();
+      event.stopPropagation();
+      target.run();
+      return true;
+    }
+    return false;
   }
 
   private async render(): Promise<void> {
@@ -253,12 +360,19 @@ export class CardComponent {
           if (CardComponent.activeEditor === this) {
             CardComponent.activeEditor = null;
           }
-          // Removed redundant this.render() - CardSidebarView will re-render everything on card:updated
+          this.render();
         }
       });
 
       // Handle Enter and Shift+Enter according to settings
       container.addEventListener('keydown', async (e) => {
+        if (handleKeyWrap(e, container, this.editor)) {
+          e.preventDefault();
+          e.stopPropagation();
+          return;
+        }
+
+        if (this.applyFormattingHotkey(e, container)) return;
         const settings = this.store.settings;
         const normalizeKey = (v: string) => String(v || '').toLowerCase().replace(/[\s\+_]+/g, '-').replace(/[^a-z0-9\-]/g, '').replace(/-+/g, '-').replace(/^-|-$/g, '');
         const saveKey = normalizeKey(settings.saveKey || 'enter');
@@ -334,6 +448,11 @@ export class CardComponent {
   private setupListeners(): void {
     // Enter edit mode on click
     this.el.addEventListener('click', (e) => {
+      if (this.ignoreNextClick) {
+        this.ignoreNextClick = false;
+        return;
+      }
+
       // If another card is already being edited, blur it first.
       if (CardComponent.activeEditor && CardComponent.activeEditor !== this) {
         CardComponent.activeEditor.blurAndSave();

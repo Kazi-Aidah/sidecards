@@ -74,13 +74,73 @@ export default class SideCardsPlugin extends Plugin {
     this.addCommand({
       id: 'quick-card-add',
       name: 'Quick Card Add',
-      callback: () => new QuickCardWithFilterModal(this.app, this, this.store).open()
+      callback: () => new QuickCardWithFilterModal(this.app, this, this.store).open(),
     });
 
     this.addCommand({
       id: 'search-cards',
       name: 'Search Cards',
       callback: () => new SearchModal(this.app, this, this.store).open()
+    });
+
+    this.addCommand({
+      id: 'custom-wrap-comment',
+      name: 'Wrap with comment %% (any focused editable)',
+      checkCallback: (checking: boolean) => {
+        const activeEl = document.activeElement;
+        if (activeEl instanceof HTMLElement && activeEl.isContentEditable) {
+          if (!checking) {
+            this.wrapWith('%%', '%%');
+          }
+          return true;
+        }
+        return false;
+      },
+    });
+
+    this.addCommand({
+      id: 'custom-wrap-bold',
+      name: 'Wrap with **bold**',
+      checkCallback: (checking: boolean) => {
+        const activeEl = document.activeElement;
+        if (activeEl instanceof HTMLElement && activeEl.isContentEditable) {
+          if (!checking) {
+            this.wrapWith('**', '**');
+          }
+          return true;
+        }
+        return false;
+      },
+    });
+
+    this.addCommand({
+      id: 'custom-wrap-italic',
+      name: 'Wrap with *italic*',
+      checkCallback: (checking: boolean) => {
+        const activeEl = document.activeElement;
+        if (activeEl instanceof HTMLElement && activeEl.isContentEditable) {
+          if (!checking) {
+            this.wrapWith('*', '*');
+          }
+          return true;
+        }
+        return false;
+      },
+    });
+
+    this.addCommand({
+      id: 'custom-wrap-highlight',
+      name: 'Wrap with ==highlight==',
+      checkCallback: (checking: boolean) => {
+        const activeEl = document.activeElement;
+        if (activeEl instanceof HTMLElement && activeEl.isContentEditable) {
+          if (!checking) {
+            this.wrapWith('==', '==');
+          }
+          return true;
+        }
+        return false;
+      },
     });
 
     this.addSettingTab(new SideCardsSettingTab(this.app, this));
@@ -137,6 +197,67 @@ export default class SideCardsPlugin extends Plugin {
     if (leaf) {
       workspace.revealLeaf(leaf);
     }
+  }
+
+  private wrapWith(start: string, end: string) {
+    const activeEl = document.activeElement;
+    if (!(activeEl instanceof HTMLElement) || activeEl.isContentEditable !== true) {
+      new Notice('No editable field focused');
+      return;
+    }
+
+    const sel = window.getSelection();
+    if (!sel || sel.rangeCount === 0) return;
+
+    const range = sel.getRangeAt(0);
+    if (range.collapsed) {
+      const wordRange = this.getWordRangeAtCaret(sel);
+      if (wordRange) {
+        sel.removeAllRanges();
+        sel.addRange(wordRange);
+      }
+    }
+
+    // Simple wrap: insert start + text + end
+    // (Better: use document.execCommand or Range.surroundContents for cleaner DOM)
+    const text = range.toString();
+    const wrapped = start + text + end;
+
+    range.deleteContents();
+    range.insertNode(document.createTextNode(wrapped));
+
+    // Optional: place caret inside the wrapped text
+    const newRange = document.createRange();
+    newRange.setStart(range.startContainer, range.startOffset + start.length);
+    newRange.collapse(true);
+    sel.removeAllRanges();
+    sel.addRange(newRange);
+  }
+
+  private isWordChar(char: string): boolean {
+    return /[A-Za-z0-9_]/.test(char);
+  }
+
+  private getWordRangeAtCaret(selection: Selection): Range | null {
+    if (!selection.rangeCount) return null;
+    const baseRange = selection.getRangeAt(0);
+    if (!baseRange.collapsed) return baseRange;
+    const node = baseRange.startContainer;
+    if (!(node instanceof Text)) return null;
+    const text = node.data;
+    if (!text) return null;
+    const offset = baseRange.startOffset;
+    const leftChar = offset > 0 ? text[offset - 1] : "";
+    const rightChar = offset < text.length ? text[offset] : "";
+    if (!this.isWordChar(leftChar) && !this.isWordChar(rightChar)) return null;
+    let start = offset;
+    let end = offset;
+    while (start > 0 && this.isWordChar(text[start - 1])) start--;
+    while (end < text.length && this.isWordChar(text[end])) end++;
+    const wordRange = document.createRange();
+    wordRange.setStart(node, start);
+    wordRange.setEnd(node, end);
+    return wordRange;
   }
 
   async loadSettings() {
