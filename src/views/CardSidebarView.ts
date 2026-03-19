@@ -1,18 +1,14 @@
 
-import { ItemView, WorkspaceLeaf, App, Notice, Menu, Modal, MarkdownView, TFile, setIcon, Scope, Editor } from "obsidian";
+import { ItemView, WorkspaceLeaf, Notice, Menu, TFile, setIcon, Scope, Editor } from "obsidian";
 import { CardStore } from "../services/CardStore";
 import { FilterService, FilterOptions } from "../services/FilterService";
 import { SortService, SortMode } from "../services/SortService";
 import { EventBus } from "../core/EventBus";
 import { CardComponent } from "./components/Card";
-import { TagAutocomplete } from "./components/TagAutocomplete";
-import { flipAnimateAsync, animateCardsEntrance } from "../utils/animations";
+import { flipAnimateAsync } from "../utils/animations";
 import { Card } from "../models/Card";
 import SideCardsPlugin from "../core/Plugin";
 import { resolveAutoColor } from "../utils/dom";
-
-import { SearchModal } from "./modals/SearchModal";
-import { QuickCardWithFilterModal } from "./modals/QuickCardWithFilterModal";
 
 export class CardSidebarView extends ItemView {
   private cardsContainer!: HTMLElement;
@@ -233,7 +229,7 @@ export class CardSidebarView extends ItemView {
   }
 
   getDisplayText(): string {
-    return 'Card Sidebar';
+    return 'Card sidebar';
   }
 
   getIcon(): string {
@@ -242,32 +238,26 @@ export class CardSidebarView extends ItemView {
 
   private _loadInProgress = false;
   private _loadingEl: HTMLElement | null = null;
-  private _loadingTimeout: any;
+  private _loadingTimeout: ReturnType<typeof setTimeout> | null = null;
   private _masonryObserver: ResizeObserver | null = null;
   private _masonryMutationObserver: MutationObserver | null = null;
-  private _masonryTimeout: any = null;
+  private _masonryTimeout: ReturnType<typeof setTimeout> | null = null;
 
   async onOpen(): Promise<void> {
     const container = this.containerEl;
     container.empty();
     container.addClass('sc-sidebar-container');
-    this.currentSortMode = ((this.plugin as any).settings.sortMode || 'manual') as SortMode;
-    this.sortAscending = typeof (this.plugin as any).settings.sortAscending === 'boolean'
-      ? !!(this.plugin as any).settings.sortAscending
+    this.currentSortMode = (this.plugin.settings.sortMode || 'manual') as SortMode;
+    this.sortAscending = typeof this.plugin.settings.sortAscending === 'boolean'
+      ? !!this.plugin.settings.sortAscending
       : true;
     
     const mainContainer = container.createDiv('sc-sidebar-main');
-    mainContainer.style.display = 'flex';
-    mainContainer.style.flexDirection = 'column';
-    mainContainer.style.height = '100%';
 
     this.createHeader(mainContainer);
     this.createSearchBar(mainContainer);
 
     this.cardsContainer = mainContainer.createDiv('sc-sidebar-cards-container');
-    this.cardsContainer.style.flex = '1';
-    this.cardsContainer.style.overflow = 'auto';
-    this.cardsContainer.style.position = 'relative';
 
     // Apply scrollbar visibility
     this.applyScrollbarSetting();
@@ -281,8 +271,8 @@ export class CardSidebarView extends ItemView {
 
     // Apply openCategoryOnLoad
     const openOn = this.plugin.settings.openCategoryOnLoad || 'all';
-    const btn = mainContainer.querySelector(`.sc-category-btn[data-filter-value="${openOn}"]`) as HTMLElement | null;
-    if (btn) btn.click();
+    const btn = mainContainer.querySelector(`.sc-category-btn[data-filter-value="${openOn}"]`);
+    if (btn instanceof HTMLElement) btn.click();
 
     this.showLoadingOverlay();
     try {
@@ -297,27 +287,11 @@ export class CardSidebarView extends ItemView {
     if (!parent || this._loadingEl) return;
 
     this._loadingEl = parent.createDiv('sc-sidebar-loading');
-    this._loadingEl.style.position = 'absolute';
-    this._loadingEl.style.inset = '0';
-    this._loadingEl.style.display = 'flex';
-    this._loadingEl.style.alignItems = 'center';
-    this._loadingEl.style.justifyContent = 'center';
-    this._loadingEl.style.background = 'var(--background-primary)';
-    this._loadingEl.style.zIndex = '9999';
 
-    const box = this._loadingEl.createDiv();
-    box.style.display = 'flex';
-    box.style.flexDirection = 'column';
-    box.style.alignItems = 'center';
-    box.style.gap = '8px';
+    const box = this._loadingEl.createDiv('sc-sidebar-loading-inner');
 
     const spinner = box.createDiv('sc-sidebar-spinner');
-    spinner.style.width = '36px';
-    spinner.style.height = '36px';
-    spinner.style.border = '4px solid var(--background-modifier-border)';
-    spinner.style.borderTopColor = 'var(--interactive-accent)';
-    spinner.style.borderRadius = '50%';
-    // Inline animation if not in CSS
+    // Inline animation fallback (CSS @keyframes preferred but this works without it)
     spinner.animate([{ transform: 'rotate(0deg)' }, { transform: 'rotate(360deg)' }], { duration: 800, iterations: Infinity });
 
     box.createDiv({ text: 'Loading cards...', cls: 'sc-sidebar-loading-text' });
@@ -339,7 +313,7 @@ export class CardSidebarView extends ItemView {
   private setupPositionDetection() {
     const detect = () => {
       let position = 'right';
-      let current = this.containerEl as HTMLElement;
+      let current = this.containerEl;
       let depth = 0;
       while (current && depth < 10) {
         const cls = current.className || '';
@@ -348,12 +322,9 @@ export class CardSidebarView extends ItemView {
         current = current.parentElement as HTMLElement;
         depth++;
       }
-      // @ts-ignore
       if (this.plugin.settings.sidebarPosition !== position) {
-        // @ts-ignore
         this.plugin.settings.sidebarPosition = position;
-        // @ts-ignore
-        this.plugin.saveSettings();
+        void this.plugin.saveSettings();
       }
     };
     detect();
@@ -391,11 +362,6 @@ export class CardSidebarView extends ItemView {
 
     const header = container.createDiv('sc-sidebar-header');
     const filterGroup = header.createDiv('sc-category-group');
-    filterGroup.style.display = 'flex';
-    filterGroup.style.gap = '8px';
-    filterGroup.style.overflowX = 'auto';
-    filterGroup.style.flexWrap = 'nowrap';
-    filterGroup.style.whiteSpace = 'nowrap';
 
     const settings = this.plugin.settings;
     const cats: Array<{ id: string; label: string; showInMenu?: boolean }> =
@@ -460,7 +426,8 @@ export class CardSidebarView extends ItemView {
       if (customColors?.bgColor) btn.style.setProperty('background-color', customColors.bgColor, 'important');
       if (customColors?.textColor) btn.style.setProperty('color', customColors.textColor, 'important');
 
-      btn.addEventListener('click', async () => {
+      btn.addEventListener('click', () => {
+        void (async () => {
         filterGroup.querySelectorAll('.sc-category-btn').forEach(b => {
           (b as HTMLElement).removeClass('active');
           const bVal = (b as HTMLElement).dataset.filterValue || '';
@@ -482,6 +449,7 @@ export class CardSidebarView extends ItemView {
           this.activeFilters.category = chip.value;
         }
         await this.renderCards();
+        })();
       });
     });
   }
@@ -500,58 +468,38 @@ export class CardSidebarView extends ItemView {
 
   private createSearchBar(container: HTMLElement): void {
     const wrapper = container.createDiv('sc-search-wrap');
-    if (this.plugin.settings.searchBarVisible) {
-      wrapper.style.display = '';
-    } else {
-      wrapper.style.display = 'none';
-    }
+    wrapper.toggleClass('sc-search-wrap--hidden', !this.plugin.settings.searchBarVisible);
     const row = wrapper.createDiv('sc-search-row');
 
     const iconSpan = row.createSpan({ cls: 'sc-search-input-icon' });
-    try { setIcon(iconSpan as any, 'search'); } catch {}
+    try { setIcon(iconSpan as any, 'search'); } catch { /* icon may not exist */ }
 
     const input = row.createEl('input', { type: 'search', placeholder: 'Search cards…', cls: 'sc-search-input' });
     const clearBtn = row.createEl('button', { text: '✕', cls: 'sc-search-clear-btn' });
-    clearBtn.style.display = 'none';
+    clearBtn.toggleClass('sc-search-wrap--hidden', true);
     clearBtn.title = 'Clear search';
     clearBtn.addEventListener('click', () => {
       input.value = '';
       this.activeFilters.query = '';
       this.renderCardsDebounced();
-      clearBtn.style.display = 'none';
+      clearBtn.toggleClass('sc-search-wrap--hidden', true);
       input.focus();
     });
 
     input.addEventListener('input', () => {
       this.activeFilters.query = input.value || '';
-      clearBtn.style.display = this.activeFilters.query ? '' : 'none';
+      clearBtn.toggleClass('sc-search-wrap--hidden', !this.activeFilters.query);
       this.renderCardsDebounced();
     });
   }
 
   private createInputBox(container: HTMLElement): void {
     const inputContainer = container.createDiv('sc-sidebar-input-container');
-    inputContainer.style.padding = '8px';
-    inputContainer.style.borderTop = '1px solid var(--background-modifier-border)';
-    inputContainer.style.background = 'var(--background-primary)';
-    inputContainer.style.position = 'sticky';
-    inputContainer.style.bottom = '0';
 
-    const editorEl = inputContainer.createDiv({
-      cls: 'sc-sidebar-input',
-    });
+    const editorEl = inputContainer.createDiv({ cls: 'sc-sidebar-input' });
+
     editorEl.setAttribute('contenteditable', 'true');
     editorEl.dataset.placeholder = 'Type here... (@category, #tag)';
-    editorEl.style.width = '100%';
-    editorEl.style.minHeight = '36px';
-    editorEl.style.maxHeight = '200px';
-    editorEl.style.padding = '8px';
-    editorEl.style.border = '1px solid var(--background-modifier-border)';
-    editorEl.style.overflowY = 'auto';
-    editorEl.style.whiteSpace = 'pre-wrap';
-    editorEl.style.position = 'relative';
-
-    // Simple placeholder logic for contenteditable
     const updatePlaceholder = () => {
       if (!editorEl.textContent?.trim()) {
         editorEl.addClass('is-empty');
@@ -562,10 +510,6 @@ export class CardSidebarView extends ItemView {
     updatePlaceholder();
     editorEl.addEventListener('input', updatePlaceholder);
 
-    const autoResize = () => {
-      // For contenteditable, it auto-resizes by default, but we might want to enforce max-height
-    };
-    
     editorEl.addEventListener('focusin', () => {
       // @ts-ignore
       this.app.keymap.pushScope(this.editorScope);
@@ -583,16 +527,13 @@ export class CardSidebarView extends ItemView {
       }
     });
 
-    // Tag autocomplete logic for contenteditable (simplified version for now)
-    editorEl.addEventListener('input', () => {
-      // Simplified autocomplete trigger or use the TagAutocomplete class if compatible
-    });
+    // Tag autocomplete handled by TagAutocomplete component when integrated
     editorEl.addEventListener('keydown', (e) => {
       if (this.applyFormattingHotkey(e, editorEl)) return;
       this.applySelectionWrapShortcut(e, editorEl);
 
       // Save key handling
-      const normalizeKey = (v: string) => String(v || '').toLowerCase().replace(/[\s\+_]+/g, '-').replace(/[^a-z0-9\-]/g, '').replace(/-+/g, '-').replace(/^-|-$/g, '');
+      const normalizeKey = (v: string) => String(v || '').toLowerCase().replace(/[\s+_]+/g, '-').replace(/[^a-z0-9-]/g, '').replace(/-+/g, '-').replace(/^-|-$/g, '');
       const saveKey = normalizeKey(this.plugin.settings.saveKey || 'enter');
       let pressed = '';
       if (e.ctrlKey) pressed += 'ctrl-';
@@ -606,22 +547,18 @@ export class CardSidebarView extends ItemView {
     });
 
     const buttonContainer = inputContainer.createDiv('sc-sidebar-button-container');
-    buttonContainer.style.display = 'flex';
-    buttonContainer.style.gap = '8px';
-    buttonContainer.style.justifyContent = 'flex-end';
-    buttonContainer.style.marginTop = '8px';
 
     const searchBtn = buttonContainer.createEl('button');
     searchBtn.addClass('sc-icon-btn');
     try { setIcon(searchBtn, 'search'); } catch { searchBtn.textContent = 'Search'; }
     searchBtn.title = 'Toggle search';
     searchBtn.addEventListener('click', () => {
-      const wrap = this.containerEl.querySelector('.sc-search-wrap') as HTMLElement;
+      const wrap = this.containerEl.querySelector('.sc-search-wrap');
       if (wrap) {
-        const isVisible = wrap.style.display !== 'none';
-        wrap.style.display = isVisible ? 'none' : '';
-        this.plugin.settings.searchBarVisible = !isVisible;
-        this.plugin.saveSettings();
+        const isHidden = wrap.hasClass('sc-search-wrap--hidden');
+        wrap.toggleClass('sc-search-wrap--hidden', !isHidden);
+        this.plugin.settings.searchBarVisible = isHidden;
+        void this.plugin.saveSettings();
       }
     });
 
@@ -629,16 +566,19 @@ export class CardSidebarView extends ItemView {
     reloadBtn.addClass('sc-icon-btn');
     reloadBtn.title = 'Reload cards';
     try { setIcon(reloadBtn, 'refresh-cw'); } catch { reloadBtn.textContent = 'Reload'; }
-    reloadBtn.addEventListener('click', async () => {
-      await this.renderCards(true);
-      new Notice('Cards reloaded');
+    reloadBtn.addEventListener('click', () => {
+      void (async () => {
+        await this.renderCards(true);
+        new Notice('Cards reloaded');
+      })();
     });
 
     const sortBtn = buttonContainer.createEl('button');
     sortBtn.addClass('sc-icon-btn');
     sortBtn.title = 'Sort';
     try { setIcon(sortBtn, 'sort-desc'); } catch { sortBtn.textContent = 'Sort'; }
-    sortBtn.addEventListener('click', async (e) => {
+    sortBtn.addEventListener('click', (e) => {
+      void (async () => {
       const menu = new Menu();
       const modes: Array<{ key: SortMode; label: string }> = [
         { key: 'manual', label: 'Manual' },
@@ -653,8 +593,8 @@ export class CardSidebarView extends ItemView {
           if (this.currentSortMode === m.key) item.setChecked(true);
           item.onClick(async () => {
             this.currentSortMode = m.key;
-            (this.plugin as any).settings.sortMode = m.key;
-            await (this.plugin as any).saveSettings();
+            this.plugin.settings.sortMode = m.key;
+            await this.plugin.saveSettings();
             await this.renderCards();
           });
         });
@@ -664,83 +604,89 @@ export class CardSidebarView extends ItemView {
         item.setTitle(this.sortAscending ? 'Direction: Ascending' : 'Direction: Descending');
         item.onClick(async () => {
           this.sortAscending = !this.sortAscending;
-          (this.plugin as any).settings.sortAscending = this.sortAscending;
-          await (this.plugin as any).saveSettings();
+          this.plugin.settings.sortAscending = this.sortAscending;
+          await this.plugin.saveSettings();
           await this.renderCards();
         });
       });
       menu.showAtMouseEvent(e);
+      })();
     });
 
     const pinToggleBtn = buttonContainer.createEl('button');
     pinToggleBtn.addClass('sc-icon-btn');
     try { setIcon(pinToggleBtn, 'pin'); } catch { pinToggleBtn.textContent = 'Pin'; }
     pinToggleBtn.title = 'Show pinned only';
-    pinToggleBtn.addEventListener('click', async () => {
-      this.activeFilters.pinnedOnly = !this.activeFilters.pinnedOnly;
-      await this.renderCards();
+    pinToggleBtn.addEventListener('click', () => {
+      void (async () => {
+        this.activeFilters.pinnedOnly = !this.activeFilters.pinnedOnly;
+        await this.renderCards();
+      })();
     });
 
     const gridToggleBtn = buttonContainer.createEl('button');
     gridToggleBtn.addClass('sc-icon-btn');
     try { setIcon(gridToggleBtn, 'layout-grid'); } catch { gridToggleBtn.textContent = 'Grid'; }
     gridToggleBtn.title = 'Toggle grid layout';
-    gridToggleBtn.addEventListener('click', async () => {
-      const s = (this.plugin as any).settings;
-      s.verticalCardMode = !s.verticalCardMode;
-      await (this.plugin as any).saveSettings();
-      await flipAnimateAsync(this.cardsContainer, async () => {
-        this.applyLayoutMode();
-      }, {}, this.store.settings);
+    gridToggleBtn.addEventListener('click', () => {
+      void (async () => {
+        this.plugin.settings.verticalCardMode = !this.plugin.settings.verticalCardMode;
+        await this.plugin.saveSettings();
+        await flipAnimateAsync(this.cardsContainer, async () => {
+          this.applyLayoutMode();
+        }, {}, this.store.settings);
+      })();
     });
 
     const addButton = buttonContainer.createEl('button');
     addButton.addClass('sc-add-btn');
-    addButton.textContent = 'Add Card';
-    addButton.addEventListener('click', async () => {
-      const content = editorEl.textContent?.trim();
-      if (!content) return;
+    addButton.textContent = 'Add card';
+    addButton.addEventListener('click', () => {
+      void (async () => {
+        const content = editorEl.textContent?.trim();
+        if (!content) return;
 
-      // Extract tags (#tag) and categories (@category)
-      const tags: string[] = [];
-      const tagRegex = /#([^\s#@,.]+)/g;
-      let match;
-      while ((match = tagRegex.exec(content)) !== null) {
-        tags.push(match[1]);
-      }
+        // Extract tags (#tag) and categories (@category)
+        const tags: string[] = [];
+        const tagRegex = /#([^\s#@,.]+)/g;
+        let match;
+        while ((match = tagRegex.exec(content)) !== null) {
+          tags.push(match[1]);
+        }
 
-      const catRegex = /@([^\s#@,.]+)/g;
-      const catMatch = catRegex.exec(content);
-      const category = catMatch ? catMatch[1] : (this.activeFilters.category || undefined);
+        const catRegex = /@([^\s#@,.]+)/g;
+        const catMatch = catRegex.exec(content);
+        const category = catMatch ? catMatch[1] : (this.activeFilters.category || undefined);
 
-      // Auto color
-      const autoColor = resolveAutoColor(content, tags, this.plugin.settings);
-      const color = autoColor || 'var(--card-color-1)';
-      
-      const card = new Card({ 
-        content, 
-        tags,
-        color,
-        category: category === 'all' ? undefined : category 
-      });
-      await this.store.add(card);
-      editorEl.textContent = '';
-      updatePlaceholder();
-      await this.renderCards();
+        // Auto color
+        const autoColor = resolveAutoColor(content, tags, this.plugin.settings);
+        const color = autoColor || 'var(--card-color-1)';
+        
+        const card = new Card({ 
+          content, 
+          tags,
+          color,
+          category: category === 'all' ? undefined : category 
+        });
+        await this.store.add(card);
+        editorEl.textContent = '';
+        updatePlaceholder();
+        await this.renderCards();
+      })();
     });
   }
 
   private setupListeners(): void {
-    this.eventBus.on('card:added', () => this.renderCards());
-    this.eventBus.on('card:deleted', () => this.renderCards());
-    this.eventBus.on('card:updated', () => this.renderCards());
+    this.eventBus.on('card:added', () => { void this.renderCards(); });
+    this.eventBus.on('card:deleted', () => { void this.renderCards(); });
+    this.eventBus.on('card:updated', () => { void this.renderCards(); });
     this.eventBus.on('filter:tag', (tag) => {
       if (this.activeFilters.tags.includes(tag)) {
         this.activeFilters.tags = this.activeFilters.tags.filter(t => t !== tag);
       } else {
         this.activeFilters.tags.push(tag);
       }
-      this.renderCards();
+      void this.renderCards();
     });
 
     this.eventBus.on('card:contextmenu', ({ card, event }) => {
@@ -748,21 +694,21 @@ export class CardSidebarView extends ItemView {
       menu.addItem(item => {
         item.setTitle('Delete')
           .setIcon('trash')
-          .onClick(() => this.store.delete(card.id));
+          .onClick(() => { void this.store.delete(card.id); });
       });
       menu.addItem(item => {
         item.setTitle(card.archived ? 'Unarchive' : 'Archive')
           .setIcon('archive')
-          .onClick(() => this.store.update(card.id, { archived: !card.archived }));
+          .onClick(() => { void this.store.update(card.id, { archived: !card.archived }); });
       });
       menu.showAtMouseEvent(event);
     });
   }
 
-  private renderTimeout: any;
+  private renderTimeout: ReturnType<typeof setTimeout> | null = null;
   private renderCardsDebounced(): void {
     if (this.renderTimeout) clearTimeout(this.renderTimeout);
-    this.renderTimeout = setTimeout(() => this.renderCards(), 300);
+    this.renderTimeout = setTimeout(() => { void this.renderCards(); }, 300);
   }
 
   private async renderCards(isManualReload = false): Promise<void> {
@@ -833,7 +779,7 @@ export class CardSidebarView extends ItemView {
         this._masonryMutationObserver = null;
       }
       this.cardsContainer.querySelectorAll('.sc-card').forEach((el) => {
-        (el as HTMLElement).style.gridRowEnd = '';
+        (el as HTMLElement).style.removeProperty('grid-row-end');
       });
     }
   }
@@ -861,11 +807,11 @@ export class CardSidebarView extends ItemView {
     const cards = this.cardsContainer.querySelectorAll('.sc-card:not(.drag-spacer)');
     cards.forEach((el) => {
       const card = el as HTMLElement;
-      card.style.gridRowEnd = 'auto';
+      card.style.removeProperty('grid-row-end');
       const h = card.getBoundingClientRect().height;
       if (h > 0) {
         const span = Math.max(1, Math.ceil(h + 8));
-        card.style.gridRowEnd = `span ${span}`;
+        card.style.setProperty('grid-row-end', `span ${span}`);
       }
     });
   }
@@ -873,7 +819,7 @@ export class CardSidebarView extends ItemView {
   private setupMasonryMutationObserver(): void {
     if (!this.cardsContainer || typeof MutationObserver === 'undefined') return;
     if (this._masonryMutationObserver) this._masonryMutationObserver.disconnect();
-    let recalcTimeout: any = null;
+    let recalcTimeout: ReturnType<typeof setTimeout> | null = null;
     const debounced = () => {
       if (recalcTimeout) clearTimeout(recalcTimeout);
       recalcTimeout = setTimeout(() => this.refreshMasonrySpans(), 120);

@@ -30,7 +30,7 @@
 .sc-sidebar-header .sc-category-group {
   background: var(--background-primary);
   display: flex;
-  gap: 4px;
+  gap: 8px;
   flex-wrap: nowrap;
   overflow-x: auto;
   padding: 10px;
@@ -736,4 +736,347 @@ de
   height: 24px;
   width: 1px;
   background-color: var(--background-modifier-border);
+}
+
+/* --- Utility classes replacing inline styles --- */
+
+/* sc-sidebar-main: flex column, full height */
+.sc-sidebar-main {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+/* sc-sidebar-cards-container positional */
+.sc-sidebar-cards-container {
+  position: relative;
+}
+
+/* sc-sidebar-input-container: sticky bottom input area */
+.sc-sidebar-input-container {
+  padding: 8px;
+  border-top: 1px solid var(--background-modifier-border);
+  background: var(--background-primary);
+  position: sticky;
+  bottom: 0;
+}
+
+/* sc-sidebar-button-container: action buttons row */
+.sc-sidebar-button-container {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+  margin-top: 8px;
+}
+
+/* sc-sidebar-loading: full-cover loading overlay */
+.sc-sidebar-loading {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--background-primary);
+  z-index: 9999;
+}
+
+.sc-sidebar-loading-inner {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+}
+
+/* sc-sidebar-spinner */
+.sc-sidebar-spinner {
+  width: 36px;
+  height: 36px;
+  border: 4px solid var(--background-modifier-border);
+  border-top-color: var(--interactive-accent);
+  border-radius: 50%;
+}
+
+/* sc-category-group: filter chip row */
+.sc-category-group {
+  display: flex;
+  gap: 8px;
+  overflow-x: auto;
+  flex-wrap: nowrap;
+  white-space: nowrap;
+}
+
+/* sc-search-wrap visibility helpers */
+.sc-search-wrap--hidden {
+  display: none;
+}
+
+/* sc-search-clear-btn visibility */
+.sc-search-clear-btn--hidden {
+  display: none;
+}
+
+/* Home view: notes column hidden */
+.sc-home-left--hidden {
+  display: none;
+}
+
+/* Home view: single column when notes hidden */
+.sc-home-grid--full {
+  grid-template-columns: 1fr;
+}
+
+/* Home view: notes on right side */
+.sc-home-grid.notes-right .sc-home-left {
+  order: 2;
+}
+.sc-home-grid.notes-right .sc-home-right {
+  order: 1;
+}
+
+/* Home search input font */
+.sc-home-search-input {
+  font-family: var(--font-interface);
+}
+
+/* Color swatch grid (two-row context menu) */
+.sc-color-dots.two-row {
+  display: grid;
+  grid-template-columns: repeat(5, 18px);
+  grid-auto-rows: 18px;
+  column-gap: 8px;
+  row-gap: 8px;
+  width: fit-content;
+}
+
+/* Individual color swatch in context menu */
+.sc-color-dot-swatch {
+  width: 18px;
+  height: 18px;
+  border-radius: 4px;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+/* Masonry break-inside for style 2 */
+.sc-card.sc-style-2-masonry {
+  break-inside: avoid;
+}
+
+/* Timestamp display variants */
+.sc-timestamp--block {
+  display: block;
+  margin-bottom: 4px;
+}
+
+.sc-timestamp--inline {
+  display: inline-block;
+}
+
+.sc-timestamp--inline-spaced {
+  display: inline-block;
+  margin-left: 8px;
+}
+
+/* Generic hidden utility */
+.sc-hidden {
+  display: none !important;
+}
+
+/* Settings tab utility classes */
+.sc-preview-wrapper {
+  margin-bottom: 24px;
+  padding: 20px;
+  border-radius: 8px;
+  background-color: var(--background-secondary);
+  border: 1px solid var(--background-modifier-border);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.sc-settings-preview-card {
+  width: 100%;
+  max-width: 300px;
+  margin: 0;
+  pointer-events: none;
+}
+
+.sc-cats-container {
+  margin-top: 8px;
+}
+
+.sc-full-width {
+  width: 100% !important;
+}
+
+/* Category row controls */
+.sc-cat-row-controls {
+  flex: 1;
+  justify-content: flex-start;
+}
+
+.sc-drag-handle {
+  cursor: grab;
+  color: var(--text-muted);
+  margin-right: 10px;
+}
+
+.sc-round-btn {
+  border-radius: 50%;
+  width: 32px;
+  min-width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: none;
+  margin-right: 10px;
+}
+
+.sc-round-btn--disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.sc-round-btn--green {
+  color: var(--color-green);
+  background-color: rgba(var(--color-green-rgb), 0.2);
+}
+
+.sc-round-btn--red {
+  color: var(--color-red);
+  background-color: rgba(var(--color-red-rgb), 0.2);
+}
+
+.sc-color-picker-btn {
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: none;
+  cursor: pointer;
+  overflow: hidden;
+}
+
+.sc-cat-name-input {
+  width: 100%;
+}
+
+.sc-cat-name-input--disabled {
+  opacity: 0.6;
+}
+
+.sc-reset-btn-small {
+  padding: 2px 8px;
+  font-size: 11px;
+}
+
+.sc-spacer-32 {
+  width: 32px;
+}
+
+/* Add row / add button containers */
+.sc-add-row {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 12px;
+  margin-bottom: 24px;
+}
+
+/* Auto color rule row */
+.sc-rule-row-controls {
+  flex: 1;
+  justify-content: flex-start;
+}
+
+.sc-rule-text-input {
+  width: 100%;
+  max-width: none;
+}
+
+.sc-dropdown-normal {
+  color: var(--text-normal);
+}
+
+/* Status config */
+.sc-status-row-controls {
+  flex: 1;
+  justify-content: flex-start;
+}
+
+.sc-status-text-input {
+  width: 100%;
+  max-width: none;
+}
+
+.sc-color-picker-inline {
+  padding: 0;
+}
+
+/* FolderSuggest dropdown */
+.sc-folder-suggest {
+  display: none;
+  position: absolute;
+  z-index: 1000;
+  left: 0;
+  width: 100%;
+  background-color: var(--background-primary);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 4px;
+  max-height: 200px;
+  overflow-y: auto;
+}
+
+.sc-folder-suggest-item {
+  padding: 6px 10px;
+  cursor: pointer;
+}
+
+.sc-folder-suggest-item:hover {
+  background-color: var(--background-modifier-hover);
+}
+
+/* Icon picker modal */
+.sc-icon-picker-content {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.sc-icon-picker-search {
+  width: 100%;
+  margin-bottom: 8px;
+}
+
+.sc-icon-picker-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, 32px);
+  gap: 4px;
+  max-height: 300px;
+  overflow-y: auto;
+}
+
+.sc-icon-picker-footer {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 8px;
+}
+
+.sc-icon-picker-btn {
+  width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+/* Icon btn plus state */
+.sc-icon-btn--plus {
+  font-size: 20px;
 }

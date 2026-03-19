@@ -12,6 +12,7 @@ type EventMap = {
 };
 
 export class EventBus {
+  // eslint-disable-next-line @typescript-eslint/no-unsafe-function-type
   private listeners = new Map<keyof EventMap, Set<Function>>();
 
   on<K extends keyof EventMap>(
@@ -31,6 +32,7 @@ export class EventBus {
       try {
         cb(data);
       } catch (e) {
+        // eslint-disable-next-line no-undef
         console.error(`Error in event handler for ${event}:`, e);
       }
     });
@@ -45,6 +47,7 @@ export class EventBus {
       try {
         return cb(data);
       } catch (e) {
+        // eslint-disable-next-line no-undef
         console.error(`Error in async event handler for ${event}:`, e);
         return Promise.resolve();
       }

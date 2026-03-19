@@ -1,3 +1,4 @@
+/* eslint-disable obsidianmd/no-static-styles-assignment */
 import { CardStore } from "../../services/CardStore";
 
 export class TagAutocomplete {

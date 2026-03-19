@@ -35,7 +35,7 @@ export function resolveColorVarToHex(colorVar: string, settings: any): string | 
           if (v) return v;
         }
       }
-    } catch (e) { }
+    } catch { /* ignore */ }
     return null;
   }
   return null;

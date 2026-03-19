@@ -1,3 +1,4 @@
+/* eslint-disable obsidianmd/no-static-styles-assignment */
 import { App, Modal } from "obsidian";
 import { Card } from "../../models/Card";
 import { CardStore } from "../../services/CardStore";
@@ -14,7 +15,7 @@ export class DateTimeModal extends Modal {
   onOpen(): void {
     const { contentEl } = this;
     contentEl.empty();
-    this.titleEl.setText('Set Expiry');
+    this.titleEl.setText('Set expiry');
 
     const inputEl = contentEl.createEl('input', { type: 'datetime-local' });
     inputEl.style.width = '100%';
@@ -49,21 +50,25 @@ export class DateTimeModal extends Modal {
     const clearBtn = actions.createEl('button', { text: 'Clear' });
     const saveBtn = actions.createEl('button', { text: 'Save', cls: 'mod-cta' });
 
-    clearBtn.addEventListener('click', async () => {
-      await this.store.setExpiry(this.card.id, null);
-      this.close();
-    });
-    saveBtn.addEventListener('click', async () => {
-      const raw = inputEl.value.trim();
-      if (!raw) {
+    clearBtn.addEventListener('click', () => {
+      void (async () => {
         await this.store.setExpiry(this.card.id, null);
-      } else {
-        const ms = new Date(raw).getTime();
-        if (!Number.isNaN(ms)) {
-          await this.store.setExpiry(this.card.id, ms);
+        this.close();
+      })();
+    });
+    saveBtn.addEventListener('click', () => {
+      void (async () => {
+        const raw = inputEl.value.trim();
+        if (!raw) {
+          await this.store.setExpiry(this.card.id, null);
+        } else {
+          const ms = new Date(raw).getTime();
+          if (!Number.isNaN(ms)) {
+            await this.store.setExpiry(this.card.id, ms);
+          }
         }
-      }
-      this.close();
+        this.close();
+      })();
     });
   }
 

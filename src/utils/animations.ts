@@ -1,3 +1,4 @@
+/* eslint-disable obsidianmd/no-static-styles-assignment */
 
 export interface FlipOptions {
   duration?: number;
@@ -26,7 +27,7 @@ export async function flipAnimateAsync(
   const stagger = opts.stagger ?? 20;
   const entranceOffset = opts.offset ?? 28;
 
-  const oldEls = Array.from(container.querySelectorAll('.sc-card')) as HTMLElement[];
+  const oldEls = Array.from(container.querySelectorAll<HTMLElement>('.sc-card'));
   const oldMap = new Map<string, DOMRect>();
   oldEls.forEach(el => {
     const id = el.dataset.id;
@@ -35,7 +36,7 @@ export async function flipAnimateAsync(
 
   await asyncDomChange();
 
-  const newEls = Array.from(container.querySelectorAll('.sc-card')) as HTMLElement[];
+  const newEls = Array.from(container.querySelectorAll<HTMLElement>('.sc-card'));
   const newMap = new Map<string, DOMRect>();
   const elById = new Map<string, HTMLElement>();
   newEls.forEach(el => {

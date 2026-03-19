@@ -1,6 +1,8 @@
 
-import { App, Editor, Modal, Notice, Plugin, Scope } from "obsidian";
-import { getWordRangeAtCaret, handleKeyWrap, isWordChar } from "../../utils/editor-utils";
+/* eslint-disable obsidianmd/no-static-styles-assignment */
+
+import { App, Editor, Modal, Notice, Platform, Plugin, Scope } from "obsidian";
+import { handleKeyWrap } from "../../utils/editor-utils";
 import { resolveAutoColor } from "../../utils/dom";
 import { CardStore } from "../../services/CardStore";
 import { Card } from "../../models/Card";
@@ -177,7 +179,7 @@ export class QuickCardWithFilterModal extends Modal {
     const modifierSet = new Set((hotkey.modifiers || []).map(m => String(m).toLowerCase()));
 
     const hasMod = modifierSet.has("mod");
-    const isMac = navigator.platform.toUpperCase().indexOf('MAC') >= 0;
+    const isMac = Platform.isMacOS;
 
     const expectsCtrl = modifierSet.has("ctrl") || (hasMod && !isMac);
     const expectsMeta = modifierSet.has("meta") || (hasMod && isMac);
@@ -250,10 +252,10 @@ export class QuickCardWithFilterModal extends Modal {
     contentEl.empty();
     contentEl.addClass('sc-quick-card-modal');
 
-    contentEl.createEl('h2', { text: 'Quick Card Add', cls: 'sc-modal-title' });
+    contentEl.createEl('h2', { text: 'Quick card add', cls: 'sc-modal-title' });
 
     // Content Section
-    contentEl.createEl('h3', { text: 'Card Content', cls: 'sc-modal-section-title' });
+    contentEl.createEl('h3', { text: 'Card content', cls: 'sc-modal-section-title' });
     const editorEl = contentEl.createDiv({
       cls: 'sc-modal-textarea',
     });
@@ -383,7 +385,7 @@ export class QuickCardWithFilterModal extends Modal {
     });
 
     // Category Section
-    contentEl.createEl('h3', { text: 'Apply Category', cls: 'sc-modal-section-title' });
+    contentEl.createEl('h3', { text: 'Apply category', cls: 'sc-modal-section-title' });
     const select = contentEl.createEl('select', { cls: 'sc-modal-select' });
     this.getAvailableFilters().forEach(f => {
       const opt = select.createEl('option', { value: f.value, text: f.label });
@@ -396,7 +398,7 @@ export class QuickCardWithFilterModal extends Modal {
     const cancelBtn = btnContainer.createEl('button', { text: 'Cancel' });
     cancelBtn.addEventListener('click', () => this.close());
 
-    const createBtn = btnContainer.createEl('button', { text: 'Create Card', cls: 'mod-cta' });
+    const createBtn = btnContainer.createEl('button', { text: 'Create card', cls: 'mod-cta' });
     const handleCreate = async () => {
       const content = editorEl.textContent?.trim();
       if (!content) {
@@ -424,7 +426,7 @@ export class QuickCardWithFilterModal extends Modal {
       this.close();
     };
 
-    createBtn.addEventListener('click', handleCreate);
+    createBtn.addEventListener('click', () => { void handleCreate(); });
 
     // Keyboard Shortcuts
     editorEl.addEventListener('keydown', (e) => {
@@ -434,7 +436,7 @@ export class QuickCardWithFilterModal extends Modal {
         return;
       }
       const settings = this.store.settings;
-      const normalizeKey = (v: string) => String(v || '').toLowerCase().replace(/[\s\+_]+/g, '-').replace(/[^a-z0-9\-]/g, '').replace(/-+/g, '-').replace(/^-|-$/g, '');
+      const normalizeKey = (v: string) => String(v || '').toLowerCase().replace(/[\s+_]+/g, '-').replace(/[^a-z0-9-]/g, '').replace(/-+/g, '-').replace(/^-|-$/g, '');
       const saveKey = normalizeKey(settings.saveKey || 'enter');
 
       let pressed = '';
@@ -445,7 +447,7 @@ export class QuickCardWithFilterModal extends Modal {
 
       if (pressed === saveKey) {
         e.preventDefault();
-        handleCreate();
+        void handleCreate();
       }
     });
   }

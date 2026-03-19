@@ -1,11 +1,9 @@
-import { ItemView, WorkspaceLeaf, Menu, Notice, setIcon, Scope, Editor, TFile } from "obsidian";
+import { ItemView, WorkspaceLeaf, Menu, Notice, setIcon, Scope, Editor, TFile, Platform } from "obsidian";
 import type SideCardsPlugin from "../core/Plugin";
 import { CardStore } from "../services/CardStore";
 import { Card } from "../models/Card";
 import { CardComponent } from "./components/Card";
 import { SortService, SortMode } from "../services/SortService";
-import { handleKeyWrap } from "../utils/editor-utils";
-import { getWordRangeAtCaret, isWordChar } from "../utils/editor-utils";
 import { resolveAutoColor } from "../utils/dom";
 import { animateCardsEntrance } from "../utils/animations";
 
@@ -14,6 +12,7 @@ export class SideCardsHomeView extends ItemView {
   private selectedTags: string[] = [];
   private filterType = '';
   private filterValue = '';
+  private cardListEl: HTMLElement | null = null;
   private editorScope: Scope;
   private editor!: Editor;
   private owner!: any;
@@ -229,10 +228,8 @@ export class SideCardsHomeView extends ItemView {
     const modifierSet = new Set((hotkey.modifiers || []).map(m => String(m).toLowerCase()));
 
     const hasMod = modifierSet.has("mod");
-    const isMac = navigator.platform.toUpperCase().indexOf('MAC') >= 0;
-
-    const expectsCtrl = modifierSet.has("ctrl") || (hasMod && !isMac);
-    const expectsMeta = modifierSet.has("meta") || (hasMod && isMac);
+    const expectsCtrl = modifierSet.has("ctrl") || (hasMod && !Platform.isMacOS);
+    const expectsMeta = modifierSet.has("meta") || (hasMod && Platform.isMacOS);
     const expectsAlt = modifierSet.has("alt");
     const expectsShift = modifierSet.has("shift");
     if (expectsCtrl !== event.ctrlKey) return false;
@@ -272,7 +269,7 @@ export class SideCardsHomeView extends ItemView {
   }
 
   getDisplayText(): string {
-    return 'SideCards';
+    return 'SideCards'; // eslint-disable-line obsidianmd/ui/sentence-case
   }
 
   getIcon(): string {
@@ -296,11 +293,11 @@ export class SideCardsHomeView extends ItemView {
 
     // Hide palette row entirely if both category and swatches are hidden
     if (this.plugin.settings.hideCategoryDropdown && this.plugin.settings.hideColorSwatches) {
-      paletteRow.style.display = 'none';
+      paletteRow.addClass('sc-hidden');
     }
 
     if (!this.plugin.settings.hideCategoryDropdown) {
-      const categoryBtn = paletteRow.createEl('button', { text: 'category', cls: 'sc-home-category-btn' });
+      const categoryBtn = paletteRow.createEl('button', { text: 'Category', cls: 'sc-home-category-btn' });
       categoryBtn.addEventListener('click', (e) => {
         const menu = new Menu();
         this.getAvailableFilters().forEach((f) => {
@@ -308,6 +305,7 @@ export class SideCardsHomeView extends ItemView {
             this.filterType = f.type;
             this.filterValue = f.value;
             categoryBtn.textContent = f.label;
+            if (this.cardListEl) void this.renderCards(this.cardListEl);
           }));
         });
         menu.showAtMouseEvent(e);
@@ -372,7 +370,7 @@ export class SideCardsHomeView extends ItemView {
     });
 
     // Keydown for input
-    editorEl.addEventListener('keydown', async (e) => {
+    editorEl.addEventListener('keydown', (e) => {
       if (this.applyFormattingHotkey(e, editorEl)) return;
 
       const wrapResult = this.handleKeyWrap(e);
@@ -387,11 +385,11 @@ export class SideCardsHomeView extends ItemView {
       if (e.shiftKey) pressed += 'shift-';
       if (e.altKey) pressed += 'alt-';
       if (e.key && e.key.toLowerCase() === 'enter') pressed += 'enter';
-      const normalizeKey = (v: string) => String(v || '').toLowerCase().replace(/[\s\+_]+/g, '-').replace(/[^a-z0-9\-]/g, '').replace(/-+/g, '-').replace(/^-|-$/g, '');
+      const normalizeKey = (v: string) => String(v || '').toLowerCase().replace(/[\s+_]+/g, '-').replace(/[^a-z0-9-]/g, '').replace(/-+/g, '-').replace(/^-|-$/g, '');
       const saveKey = normalizeKey(this.plugin.settings.saveKey || 'enter');
       if (pressed === saveKey || (e.key === 'Enter' && !e.shiftKey && !e.ctrlKey && !e.altKey)) {
         e.preventDefault();
-        await this.createCardFromHomeInput(editorEl, cardList);
+        void this.createCardFromHomeInput(editorEl, cardList);
       }
     });
 
@@ -410,34 +408,33 @@ export class SideCardsHomeView extends ItemView {
 
     // Swap visual order via CSS order property (avoids grid width issues)
     if (notesOnRight) {
-      leftCol.style.order = '2';
-      rightCol.style.order = '1';
+      leftCol.addClass('sc-home-left--right');
+      rightCol.addClass('sc-home-right--left');
     }
 
     if (bothNotesHidden) {
-      leftCol.style.display = 'none';
-      contentGrid.style.gridTemplateColumns = '1fr';
-    } else if (notesOnRight) {
-      contentGrid.addClass('notes-right');
+      leftCol.addClass('sc-home-left--hidden');
+      contentGrid.addClass('sc-home-grid--full');
     }
 
     let pinnedList: HTMLElement | null = null;
     let recentList: HTMLElement | null = null;
 
     if (this.plugin.settings.showPinnedNotes !== false) {
-      leftCol.createEl('h3', { text: 'Pinned Notes', cls: 'sc-home-section-title' });
+      leftCol.createEl('h3', { text: 'Pinned notes', cls: 'sc-home-section-title' });
       pinnedList = leftCol.createDiv({ cls: 'sc-home-file-list pinned' });
       await this.renderFileList(pinnedList, 'pinned');
     }
 
     if (this.plugin.settings.showRecentNotes !== false) {
-      leftCol.createEl('h3', { text: 'Recent Notes', cls: 'sc-home-section-title' });
+      leftCol.createEl('h3', { text: 'Recent notes', cls: 'sc-home-section-title' });
       recentList = leftCol.createDiv({ cls: 'sc-home-file-list' });
       await this.renderFileList(recentList, 'recent');
     }
     
     const toolbar = rightCol.createDiv({ cls: 'sc-home-toolbar' });
     const cardList = rightCol.createDiv({ cls: 'sc-home-card-list' });
+    this.cardListEl = cardList;
     
     // Category Buttons Bar (Create before card list)
     const categoryBar = rightCol.createDiv({ cls: 'sc-home-category-bar' });
@@ -475,22 +472,22 @@ export class SideCardsHomeView extends ItemView {
       item.createSpan({ text: file.basename, cls: 'sc-home-file-name' });
       
       item.addEventListener('click', () => {
-        this.app.workspace.getLeaf(false).openFile(file);
+        void this.app.workspace.getLeaf(false).openFile(file);
       });
 
       if (type === 'pinned') {
         const isFromSettings = this.plugin.settings.pinnedNotes?.includes(file.path);
-        item.addEventListener('contextmenu', async (e) => {
+        item.addEventListener('contextmenu', (e) => {
           e.preventDefault();
           const menu = new Menu();
           if (isFromSettings) {
-            menu.addItem(i => i.setTitle('Unpin from Sidecards').setIcon('pin-off').onClick(async () => {
+            menu.addItem(i => i.setTitle('Unpin from SideCards').setIcon('pin-off').onClick(async () => { // eslint-disable-line obsidianmd/ui/sentence-case
               this.plugin.settings.pinnedNotes = (this.plugin.settings.pinnedNotes || []).filter(p => p !== file.path);
               await this.plugin.saveSettings();
               await this.renderFileList(container, 'pinned');
             }));
           } else {
-            menu.addItem(i => i.setTitle('Managed by Bookmarks plugin').setDisabled(true));
+            menu.addItem(i => i.setTitle('Managed by Bookmarks plugin').setDisabled(true)); // eslint-disable-line obsidianmd/ui/sentence-case
           }
           menu.showAtMouseEvent(e);
         });
@@ -517,10 +514,11 @@ export class SideCardsHomeView extends ItemView {
       try {
         setIcon(iconEl, normalizedLucide);
         rendered = true;
-      } catch (e) {}
+      } catch { /* icon not found, fall through */ }
     }
 
     if (!rendered && iconValue.includes('<svg')) {
+      // eslint-disable-next-line @microsoft/sdl/no-inner-html
       iconEl.innerHTML = iconValue;
       rendered = true;
     }
@@ -564,7 +562,7 @@ export class SideCardsHomeView extends ItemView {
     }
     iconName = iconName.trim();
 
-    if (!/^[a-z0-9\-]+$/i.test(iconName)) return null;
+    if (!/^[a-z0-9-]+$/i.test(iconName)) return null;
     return iconName.toLowerCase();
   }
 
@@ -603,7 +601,7 @@ export class SideCardsHomeView extends ItemView {
         this.iconicFileIconsCache = loaded?.fileIcons && typeof loaded.fileIcons === 'object'
           ? loaded.fileIcons
           : {};
-      } catch (e) {
+      } catch {
         this.iconicFileIconsCache = {};
       }
     }
@@ -641,7 +639,7 @@ export class SideCardsHomeView extends ItemView {
           }
         });
       }
-    } catch (e) {}
+    } catch { /* bookmarks plugin not available */ }
     
     return pinned.slice(0, 10); // Limit to 10 pinned notes
   }
@@ -713,18 +711,17 @@ export class SideCardsHomeView extends ItemView {
     const refreshBtn = leftActions.createEl('button', { cls: 'sc-icon-btn' });
     setIcon(refreshBtn, 'refresh-cw');
     refreshBtn.title = 'Refresh';
-    refreshBtn.addEventListener('click', async () => {
-      await this.refreshHomeContent(cardList, pinnedList, recentList);
+    refreshBtn.addEventListener('click', () => {
+      void this.refreshHomeContent(cardList, pinnedList, recentList);
     });
 
     // Search Bar
     const searchIcon = searchWrap.createSpan({ cls: 'sc-home-search-icon' });
     setIcon(searchIcon, 'search');
     const searchInput = searchWrap.createEl('input', { cls: 'sc-home-search-input', placeholder: 'Search card...' });
-    searchInput.style.fontFamily = 'var(--font-interface)';
     searchInput.addEventListener('input', () => {
       this.currentSearchQuery = searchInput.value;
-      this.renderCards(cardList);
+      void this.renderCards(cardList);
     });
 
     // Right Actions
@@ -734,7 +731,7 @@ export class SideCardsHomeView extends ItemView {
     pinBtn.addEventListener('click', () => {
       pinBtn.toggleClass('active', !pinBtn.hasClass('active'));
       this.pinnedOnly = pinBtn.hasClass('active');
-      this.renderCards(cardList);
+      void this.renderCards(cardList);
     });
 
     const moreBtn = rightActions.createEl('button', { cls: 'sc-icon-btn' });
@@ -748,7 +745,7 @@ export class SideCardsHomeView extends ItemView {
             .onClick(async () => {
               this.plugin.settings.groupTags = !this.plugin.settings.groupTags;
               await this.plugin.saveSettings();
-              this.renderCards(cardList);
+              void this.renderCards(cardList);
             });
       });
       menu.addItem(item => {
@@ -757,7 +754,7 @@ export class SideCardsHomeView extends ItemView {
             .onClick(async () => {
               this.plugin.settings.showTimestamps = !this.plugin.settings.showTimestamps;
               await this.plugin.saveSettings();
-              this.renderCards(cardList);
+              void this.renderCards(cardList);
             });
       });
       menu.showAtMouseEvent(e);
@@ -765,9 +762,9 @@ export class SideCardsHomeView extends ItemView {
 
     const sidebarBtn = rightActions.createEl('button', { cls: 'sc-icon-btn' });
     setIcon(sidebarBtn, 'panel-right');
-    sidebarBtn.title = 'Open Sidebar';
-    sidebarBtn.addEventListener('click', async () => {
-      this.plugin.activateView();
+    sidebarBtn.title = 'Open sidebar';
+    sidebarBtn.addEventListener('click', () => {
+      void this.plugin.activateView();
     });
   }
 
@@ -804,7 +801,7 @@ export class SideCardsHomeView extends ItemView {
         btn.addClass('active');
         this.filterType = f.type;
         this.filterValue = f.value;
-        this.renderCards(cardList);
+        void this.renderCards(cardList);
       });
     });
   }
@@ -829,7 +826,9 @@ export class SideCardsHomeView extends ItemView {
     
     const category = this.filterValue;
     if (category && category !== 'all') {
-      if (category === 'today') {
+      if (category === 'archived') {
+        cards = cards.filter(c => c.archived);
+      } else if (category === 'today') {
         const today = new Date().toDateString();
         cards = cards.filter(c => new Date(c.created).toDateString() === today);
       } else if (category === 'tomorrow') {
@@ -838,8 +837,15 @@ export class SideCardsHomeView extends ItemView {
         const tomorrowStr = tomorrow.toDateString();
         cards = cards.filter(c => new Date(c.created).toDateString() === tomorrowStr);
       } else {
-        cards = cards.filter(c => c.category === category);
+        // Resolve id → label for custom categories
+        const customCats = this.plugin.settings.customCategories || [];
+        const matched = customCats.find(c => c.id === category || c.label === category);
+        const categoryLabel = matched ? matched.label : category;
+        cards = cards.filter(c => c.category === categoryLabel || c.category === category);
       }
+    } else if (!category || category === 'all') {
+      // "All" shows non-archived cards only
+      cards = cards.filter(c => !c.archived);
     }
 
     cards = this.sortService.sort(cards, this.currentSortMode, this.sortAscending, this.app);
@@ -930,6 +936,6 @@ export class SideCardsHomeView extends ItemView {
     this.selectedTags = [];
     
     new Notice('Card created');
-    this.renderCards(cardList);
+    void this.renderCards(cardList);
   }
 }

@@ -27,7 +27,7 @@ export class Card {
   status: CardStatus | null;
 
   constructor(data: Partial<Card>) {
-    this.id = data.id || Math.random().toString(36).substr(2, 9);
+    this.id = data.id || Math.random().toString(36).slice(2, 9);
     this.content = data.content || '';
     this.color = data.color || 'var(--card-color-1)';
     this.tags = data.tags || [];
@@ -44,7 +44,7 @@ export class Card {
   clone(): Card {
     return new Card({ 
       ...this, 
-      id: Math.random().toString(36).substr(2, 9),
+      id: Math.random().toString(36).slice(2, 9),
       created: Date.now() 
     });
   }

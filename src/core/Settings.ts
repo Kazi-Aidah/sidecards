@@ -48,6 +48,7 @@ export interface SideCardsSettings {
   filterColors?: Record<string, { bgColor?: string; textColor?: string }>;
   saveKey?: string;
   nextLineKey?: string;
+  sidebarPosition?: string;
   sortMode?: 'manual' | 'created' | 'modified' | 'alpha' | 'status';
   sortAscending?: boolean;
   showPinnedOnly?: boolean;

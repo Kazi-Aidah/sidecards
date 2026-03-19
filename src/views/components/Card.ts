@@ -2,9 +2,9 @@
 import { Card } from "../../models/Card";
 import { CardStore } from "../../services/CardStore";
 import { applyCardColorToElement } from "../../utils/dom";
-import { App, MarkdownRenderer, Plugin, Menu, Notice, TFile, TFolder, setIcon, Scope, Editor } from "obsidian";
+import { App, MarkdownRenderer, Plugin, Menu, Notice, TFile, TFolder, setIcon, Scope, Editor, Platform } from "obsidian";
 import { DateTimeModal } from "../modals/DateTimeModal";
-import { getWordRangeAtCaret, handleKeyWrap, isWordChar } from "../../utils/editor-utils";
+import { getWordRangeAtCaret, handleKeyWrap } from "../../utils/editor-utils";
 
 export class CardComponent {
   public el: HTMLElement;
@@ -42,7 +42,7 @@ export class CardComponent {
     this.scope = new Scope(this.app.scope);
     this.setupMockEditor();
     this.ensureGlobalMouseDownHandler();
-    this.render();
+    void this.render();
     this.setupListeners();
   }
 
@@ -175,10 +175,8 @@ export class CardComponent {
     
     // In Obsidian, 'Mod' is Ctrl on Windows/Linux and Cmd on Mac
     const hasMod = modifierSet.has("mod");
-    const isMac = navigator.platform.toUpperCase().indexOf('MAC') >= 0;
-    
-    const expectsCtrl = modifierSet.has("ctrl") || (hasMod && !isMac);
-    const expectsMeta = modifierSet.has("meta") || (hasMod && isMac);
+    const expectsCtrl = modifierSet.has("ctrl") || (hasMod && !Platform.isMacOS);
+    const expectsMeta = modifierSet.has("meta") || (hasMod && Platform.isMacOS);
     const expectsAlt = modifierSet.has("alt");
     const expectsShift = modifierSet.has("shift");
     
@@ -224,8 +222,8 @@ export class CardComponent {
       ? (this.store.settings.cardStatuses || []).find(s => s.name === this.card.status!.name)
       : null;
     const useStatusColor = this.store.settings.inheritStatusColor && statusDef;
-    const effectiveColor = useStatusColor
-      ? (statusDef!.colorIndex ? `var(--card-color-${statusDef!.colorIndex})` : statusDef!.color)
+    const effectiveColor = useStatusColor && statusDef
+      ? (statusDef.colorIndex ? `var(--card-color-${statusDef.colorIndex})` : statusDef.color)
       : this.card.color;
     applyCardColorToElement(this.el, effectiveColor, this.store.settings);
 
@@ -236,11 +234,13 @@ export class CardComponent {
       delete this.el.dataset.status;
     }
 
-    // Apply max card height
+    // Apply max card height (dynamic user setting — cannot use static CSS class)
     const maxH = this.store.settings.maxCardHeight;
     if (maxH && maxH > 0) {
+      /* eslint-disable obsidianmd/no-static-styles-assignment */
       this.el.style.setProperty('max-height', `${maxH}px`, 'important');
       this.el.style.setProperty('overflow', 'hidden', 'important');
+      /* eslint-enable obsidianmd/no-static-styles-assignment */
     } else {
       this.el.style.removeProperty('max-height');
       this.el.style.removeProperty('overflow');
@@ -248,7 +248,9 @@ export class CardComponent {
     
     // detect layout mode and apply masonry if needed
     if (this.store.settings.cardStyle === 2) {
-      this.el.style.breakInside = 'avoid';
+      this.el.addClass('sc-style-2-masonry');
+    } else {
+      this.el.removeClass('sc-style-2-masonry');
     }
 
     const fragment = document.createDocumentFragment();
@@ -299,7 +301,7 @@ export class CardComponent {
     // Copy to clipboard
     navigator.clipboard.writeText(contentToCopy).then(() => {
       new Notice('Card content copied!');
-    }).catch(() => {
+    }, () => {
       new Notice('Failed to copy card content');
     });
   }
@@ -347,7 +349,7 @@ export class CardComponent {
         this.app.workspace.activeEditor = this.owner;
       });
 
-      container.addEventListener('blur', async () => {
+      container.addEventListener('blur', () => {
         // @ts-ignore
         this.app.keymap.popScope(this.scope);
         // @ts-ignore
@@ -357,20 +359,22 @@ export class CardComponent {
         }
 
         if (this.isEditing) {
-          const newContent = container.textContent || '';
-          if (newContent !== this.card.content) {
-            await this.store.update(this.card.id, { content: newContent });
-          }
-          this.isEditing = false;
-          if (CardComponent.activeEditor === this) {
-            CardComponent.activeEditor = null;
-          }
-          this.render();
+          void (async () => {
+            const newContent = container.textContent || '';
+            if (newContent !== this.card.content) {
+              await this.store.update(this.card.id, { content: newContent });
+            }
+            this.isEditing = false;
+            if (CardComponent.activeEditor === this) {
+              CardComponent.activeEditor = null;
+            }
+            void this.render();
+          })();
         }
       });
 
       // Handle Enter and Shift+Enter according to settings
-      container.addEventListener('keydown', async (e) => {
+      container.addEventListener('keydown', (e) => {
         if (handleKeyWrap(e, container, this.editor)) {
           e.preventDefault();
           e.stopPropagation();
@@ -379,7 +383,7 @@ export class CardComponent {
 
         if (this.applyFormattingHotkey(e, container)) return;
         const settings = this.store.settings;
-        const normalizeKey = (v: string) => String(v || '').toLowerCase().replace(/[\s\+_]+/g, '-').replace(/[^a-z0-9\-]/g, '').replace(/-+/g, '-').replace(/^-|-$/g, '');
+        const normalizeKey = (v: string) => String(v || '').toLowerCase().replace(/[\s+_]+/g, '-').replace(/[^a-z0-9-]/g, '').replace(/-+/g, '-').replace(/^-|-$/g, '');
         const saveKey = normalizeKey(settings.saveKey || 'enter');
         const nextLineKey = normalizeKey(settings.nextLineKey || 'shift-enter');
 
@@ -401,13 +405,9 @@ export class CardComponent {
       container.setAttribute('contenteditable', 'false');
       container.removeClass('is-editing');
       const temp = document.createElement('div');
-      await MarkdownRenderer.render(
-        this.app,
-        this.card.content,
-        temp,
-        this.card.notePath || '',
-        this.plugin
-      );
+      // eslint-disable-next-line obsidianmd/no-plugin-as-component
+      await MarkdownRenderer.render(this.app, this.card.content, temp, this.card.notePath || '', this.plugin);
+      temp.querySelectorAll('mark').forEach(el => el.addClass('cm-highlight'));
       while (temp.firstChild) container.appendChild(temp.firstChild);
       this.attachInternalLinkHandlers(container);
     }
@@ -419,11 +419,11 @@ export class CardComponent {
       if (!(link instanceof HTMLAnchorElement)) return;
       const href = link.dataset?.href || '';
       if (!href) return;
-      link.addEventListener('click', async (e) => {
+      link.addEventListener('click', (e) => {
         e.preventDefault();
         e.stopPropagation();
         const openInNewLeaf = e.metaKey || e.ctrlKey;
-        await this.openOrCreateLink(href, openInNewLeaf);
+        void this.openOrCreateLink(href, openInNewLeaf);
       });
     });
   }
@@ -485,7 +485,7 @@ export class CardComponent {
 
     try {
       return await this.app.vault.create(targetPath, '');
-    } catch (e) {
+    } catch {
       new Notice(`Failed to create file: ${targetPath}`);
       return null;
     }
@@ -521,7 +521,9 @@ export class CardComponent {
       if (existing instanceof TFile) return;
       try {
         await this.app.vault.createFolder(current);
-      } catch {}
+      } catch {
+        // folder may already exist, ignore
+      }
     }
   }
 
@@ -532,9 +534,7 @@ export class CardComponent {
     if (settings.groupTags) {
       if (settings.showTimestamps && settings.timestampBelowTags) {
         // "above tags" mode — render timestamp first
-        const ts = container.createDiv('sc-timestamp');
-        ts.style.display = 'block';
-        ts.style.marginBottom = '4px';
+        const ts = container.createDiv('sc-timestamp sc-timestamp--block');
         ts.textContent = this.formatTimestamp(this.card.created);
       }
 
@@ -554,9 +554,7 @@ export class CardComponent {
 
       if (settings.showTimestamps && !settings.timestampBelowTags) {
         // default: inline after tags
-        const ts = container.createDiv('sc-timestamp');
-        ts.style.display = 'inline-block';
-        ts.style.marginLeft = hasTags ? '8px' : '0';
+        const ts = container.createDiv(`sc-timestamp ${hasTags ? 'sc-timestamp--inline-spaced' : 'sc-timestamp--inline'}`);
         ts.textContent = this.formatTimestamp(this.card.created);
       }
     } else {
@@ -597,7 +595,7 @@ export class CardComponent {
 
       this.isEditing = true;
       CardComponent.activeEditor = this;
-      this.render();
+      void this.render();
     });
 
     // Context menu
@@ -616,33 +614,22 @@ export class CardComponent {
         container.className = 'sc-color-dots';
         if (this.store.settings.twoRowSwatches) {
           container.classList.add('two-row');
-          container.style.display = 'grid';
-          container.style.gridTemplateColumns = 'repeat(5, 18px)';
-          container.style.gridAutoRows = '18px';
-          container.style.columnGap = '8px';
-          container.style.rowGap = '8px';
-          container.style.width = 'fit-content';
         }
 
         colors.forEach((color, idx) => {
           const swatch = document.createElement('div');
-          swatch.className = 'sc-color-dot';
-          swatch.style.width = '18px';
-          swatch.style.height = '18px';
-          swatch.style.borderRadius = '4px';
-          swatch.style.cursor = 'pointer';
-          swatch.style.flexShrink = '0';
+          swatch.className = 'sc-color-dot sc-color-dot-swatch';
           swatch.style.border = this.card.color === color ? '2px solid var(--text-accent)' : '1px solid var(--background-modifier-border)';
           swatch.title = this.store.settings.colorNames[idx] || `Color ${idx + 1}`;
           const root = document.documentElement;
           const computed = getComputedStyle(root).getPropertyValue(color.replace('var(', '').replace(')', ''));
           swatch.style.backgroundColor = computed.trim() || color;
-          swatch.addEventListener('click', async () => {
-            await this.store.setColor(this.card.id, color);
+          swatch.addEventListener('click', () => {
+            void this.store.setColor(this.card.id, color);
           });
           container.appendChild(swatch);
         });
-        ((item as any).titleEl as HTMLElement)?.appendChild(container);
+        (item as any).titleEl?.appendChild(container);
       });
 
       const s = this.store.settings;
@@ -655,7 +642,7 @@ export class CardComponent {
         menu.addSeparator();
         if (todayVisible) {
           menu.addItem(item => {
-            item.setTitle('Add to Today')
+            item.setTitle('Add to today')
               .setIcon(s.builtinCategoryIcons?.['today'] ?? 'calendar-check')
               .onClick(async () => {
                 await this.store.setCategory(this.card.id, 'today');
@@ -664,7 +651,7 @@ export class CardComponent {
         }
         if (tomorrowVisible) {
           menu.addItem(item => {
-            item.setTitle('Add to Tomorrow')
+            item.setTitle('Add to tomorrow')
               .setIcon(s.builtinCategoryIcons?.['tomorrow'] ?? 'calendar-plus')
               .onClick(async () => {
                 await this.store.setCategory(this.card.id, 'tomorrow');
@@ -694,7 +681,7 @@ export class CardComponent {
       if (this.store.settings.enableCardStatus && Array.isArray(this.store.settings.cardStatuses) && this.store.settings.cardStatuses.length > 0) {
         menu.addSeparator();
         menu.addItem(item => {
-          item.setTitle('Set Status')
+          item.setTitle('Set status')
             .setIcon('flag')
             .onClick(() => {
               const menu2 = new Menu();
@@ -712,7 +699,7 @@ export class CardComponent {
                 });
               });
               menu2.addItem(i => {
-                i.setTitle('Clear Status')
+                i.setTitle('Clear status')
                   .onClick(async () => {
                     await this.store.setStatus(this.card.id, null);
                   });
@@ -731,7 +718,7 @@ export class CardComponent {
           });
       });
       menu.addItem(item => {
-        item.setTitle('Set Expiry')
+        item.setTitle('Set expiry')
           .setIcon('alarm-clock')
           .onClick(() => {
             new DateTimeModal(this.app, this.card, this.store).open();
@@ -801,7 +788,7 @@ export class CardComponent {
     const unbind = this.store.eventBus.on('card:updated', (updated: Card) => {
       if (updated.id === this.card.id) {
         this.card = updated;
-        this.render();
+        void this.render();
       }
     });
     this.unsubscribe.push(unbind);

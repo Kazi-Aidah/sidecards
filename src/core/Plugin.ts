@@ -61,31 +61,31 @@ export default class SideCardsPlugin extends Plugin {
     );
 
     this.addCommand({
-      id: 'open-card-sidebar',
-      name: 'Open Sidebar',
-      callback: () => this.activateView()
+      id: 'open-sidebar',
+      name: 'Open sidebar',
+      callback: () => void this.activateView()
     });
     this.addCommand({
-      id: 'open-sidecards-home',
-      name: 'Open SideCards Home',
-      callback: () => this.activateHomeView()
+      id: 'open-home',
+      name: 'Open home',
+      callback: () => void this.activateHomeView()
     });
 
     this.addCommand({
       id: 'quick-card-add',
-      name: 'Quick Card Add',
+      name: 'Quick card add',
       callback: () => new QuickCardWithFilterModal(this.app, this, this.store).open(),
     });
 
     this.addCommand({
       id: 'search-cards',
-      name: 'Search Cards',
+      name: 'Search cards',
       callback: () => new SearchModal(this.app, this, this.store).open()
     });
 
     this.addCommand({
       id: 'pin-to-homepage',
-      name: 'Pin to Sidecards Homepage',
+      name: 'Pin to homepage',
       checkCallback: (checking: boolean) => {
         const file = this.app.workspace.getActiveFile();
         if (!file) return false;
@@ -101,7 +101,7 @@ export default class SideCardsPlugin extends Plugin {
               new Notice(`Pinned ${file.name} to Sidecards Homepage.`);
             }
           }
-          this.saveSettings();
+          void this.saveSettings();
           const leaves = this.app.workspace.getLeavesOfType('sidecards-home');
           leaves.forEach((leaf) => {
             if (leaf.view && typeof (leaf.view as any).refreshPinnedNotes === 'function') {
@@ -217,7 +217,7 @@ export default class SideCardsPlugin extends Plugin {
           if (state?.type === 'empty' && !state?.state?.file) {
             void this.replaceWithHomepage(leaf);
           }
-        } catch {}
+        } catch { /* leaf state may not be accessible */ }
       })
     );
 
@@ -228,7 +228,7 @@ export default class SideCardsPlugin extends Plugin {
     // Auto-open sidebar on startup
     this.app.workspace.onLayoutReady(() => {
       if (this.settings.autoOpen) {
-        this.activateView();
+        void this.activateView();
       }
     });
   }
@@ -242,6 +242,7 @@ export default class SideCardsPlugin extends Plugin {
     const paddingPx = this.settings.buttonPaddingBottom ?? 26;
     let styleEl = document.getElementById('card-button-padding') as HTMLStyleElement | null;
     if (!styleEl) {
+      // eslint-disable-next-line obsidianmd/no-forbidden-elements
       styleEl = document.createElement('style');
       styleEl.id = 'card-button-padding';
       document.head.appendChild(styleEl);
@@ -252,6 +253,7 @@ export default class SideCardsPlugin extends Plugin {
   injectStatusColors(): void {
     let styleEl = document.getElementById('sc-status-colors') as HTMLStyleElement | null;
     if (!styleEl) {
+      // eslint-disable-next-line obsidianmd/no-forbidden-elements
       styleEl = document.createElement('style');
       styleEl.id = 'sc-status-colors';
       document.head.appendChild(styleEl);
@@ -289,7 +291,7 @@ export default class SideCardsPlugin extends Plugin {
     }
 
     if (leaf) {
-      workspace.revealLeaf(leaf);
+      void workspace.revealLeaf(leaf);
     }
   }
 
@@ -365,13 +367,13 @@ export default class SideCardsPlugin extends Plugin {
   async activateHomeView() {
     const existing = this.app.workspace.getLeavesOfType('sidecards-home');
     if (existing.length > 0) {
-      this.app.workspace.revealLeaf(existing[0]);
+      void this.app.workspace.revealLeaf(existing[0]);
       return;
     }
     const leaf = this.app.workspace.getLeaf(true);
     if (leaf) {
       await leaf.setViewState({ type: 'sidecards-home', active: true });
-      this.app.workspace.revealLeaf(leaf);
+      void this.app.workspace.revealLeaf(leaf);
     }
   }
 
@@ -379,7 +381,7 @@ export default class SideCardsPlugin extends Plugin {
     this.app.workspace.getLeavesOfType('sidecards-home').forEach(leaf => {
       const view = leaf.view as any;
       if (typeof view.onOpen === 'function') {
-        try { view.onOpen(); } catch {}
+        try { void view.onOpen(); } catch { /* view may not be ready */ }
       }
     });
   }
@@ -387,7 +389,7 @@ export default class SideCardsPlugin extends Plugin {
   private async replaceWithHomepage(leaf: any) {
     try {
       await leaf.setViewState({ type: 'sidecards-home', active: true });
-    } catch {}
+    } catch { /* leaf may have been detached */ }
   }
 
   async fetchAllReleases() {
@@ -502,8 +504,8 @@ class SideCardsSettingTab extends PluginSettingTab {
           const header = main.querySelector('.sc-sidebar-header');
           if (header) main.prepend(header);
         }
-        try { if (typeof view.applyFilters === 'function') view.applyFilters(); } catch {}
-      } catch {}
+        try { if (typeof view.applyFilters === 'function') view.applyFilters(); } catch { /* applyFilters may not exist */ }
+      } catch { /* sidebar may not be open */ }
     };
     const refreshSidebarCards = () => {
       try {
@@ -511,7 +513,7 @@ class SideCardsSettingTab extends PluginSettingTab {
         if (view && typeof view.renderCards === 'function') {
           view.renderCards();
         }
-      } catch {}
+      } catch { /* sidebar may not be open */ }
     };
 
     // ── General ──────────────────────────────────────────────────────────────
@@ -561,30 +563,30 @@ class SideCardsSettingTab extends PluginSettingTab {
     }));
 
     // ── Homepage ──────────────────────────────────────────────────────────────
-    new Setting(containerEl).setName('Homepage').setDesc('Configure the Sidecards homepage tab.').setHeading();
+    new Setting(containerEl).setName('Homepage').setDesc('Configure the SideCards homepage tab.').setHeading(); // eslint-disable-line obsidianmd/ui/sentence-case
 
     const refreshHomepage = () => this.plugin.refreshHomepageViews();
 
     new Setting(containerEl)
       .setName('Replace default tab with homepage')
-      .setDesc('Open the Sidecards homepage instead of the default new tab.')
+      .setDesc('Open the SideCards homepage instead of the default new tab.') // eslint-disable-line obsidianmd/ui/sentence-case
       .addToggle(toggle => toggle.setValue(!!this.plugin.settings.replaceHomepageWithSidecards).onChange(async (value) => {
         this.plugin.settings.replaceHomepageWithSidecards = value;
         await this.plugin.saveSettings();
       }));
 
     new Setting(containerEl)
-      .setName('Replace "SideCards" name')
+      .setName('Replace "SideCards" name') // eslint-disable-line obsidianmd/ui/sentence-case
       .setDesc('Title shown in the homepage.')
       .addText(text => {
-        text.setPlaceholder('SideCards')
+        text.setPlaceholder('SideCards') // eslint-disable-line obsidianmd/ui/sentence-case
           .setValue(this.plugin.settings.homepageName || 'SideCards')
           .onChange(async (value) => {
             this.plugin.settings.homepageName = value || 'SideCards';
             await this.plugin.saveSettings();
             refreshHomepage();
           });
-        text.inputEl.style.width = '100%';
+        text.inputEl.addClass('sc-full-width');
       })
       .addExtraButton(btn => {
         btn.setIcon('rotate-ccw').setTooltip('Reset to default').onClick(async () => {
@@ -616,31 +618,37 @@ class SideCardsSettingTab extends PluginSettingTab {
     new Setting(containerEl)
       .setName('Show pinned notes')
       .setDesc('Show pinned notes in the homepage notes column.')
-      .addToggle(toggle => toggle.setValue(this.plugin.settings.showPinnedNotes !== false).onChange(async (value) => {
-        this.plugin.settings.showPinnedNotes = value;
-        await this.plugin.saveSettings();
-        refreshHomepage();
+      .addToggle(toggle => toggle.setValue(this.plugin.settings.showPinnedNotes !== false).onChange((value) => {
+        void (async () => {
+          this.plugin.settings.showPinnedNotes = value;
+          await this.plugin.saveSettings();
+          refreshHomepage();
+        })();
       }));
 
     new Setting(containerEl)
       .setName('Show recent notes')
       .setDesc('Show recently opened notes in the homepage notes column.')
-      .addToggle(toggle => toggle.setValue(this.plugin.settings.showRecentNotes !== false).onChange(async (value) => {
-        this.plugin.settings.showRecentNotes = value;
-        await this.plugin.saveSettings();
-        refreshHomepage();
+      .addToggle(toggle => toggle.setValue(this.plugin.settings.showRecentNotes !== false).onChange((value) => {
+        void (async () => {
+          this.plugin.settings.showRecentNotes = value;
+          await this.plugin.saveSettings();
+          refreshHomepage();
+        })();
       }));
 
     new Setting(containerEl)
       .setName('Recent notes limit')
       .setDesc('How many recent notes to show.')
       .addDropdown(dd => {
-        [3, 5, 10, 15, 20, 25].forEach(n => dd.addOption(String(n), String(n)));
+        [3, 5, 10, 15, 20, 25].forEach(n => { dd.addOption(String(n), String(n)); });
         dd.setValue(String(this.plugin.settings.recentNotesLimit ?? 5));
-        dd.onChange(async (value) => {
-          this.plugin.settings.recentNotesLimit = Number(value);
-          await this.plugin.saveSettings();
-          refreshHomepage();
+        dd.onChange((value) => {
+          void (async () => {
+            this.plugin.settings.recentNotesLimit = Number(value);
+            await this.plugin.saveSettings();
+            refreshHomepage();
+          })();
         });
       });
 
@@ -651,10 +659,12 @@ class SideCardsSettingTab extends PluginSettingTab {
         .addOption('left', 'Left')
         .addOption('right', 'Right')
         .setValue(this.plugin.settings.notesPlacement || 'left')
-        .onChange(async (value) => {
-          this.plugin.settings.notesPlacement = value as 'left' | 'right';
-          await this.plugin.saveSettings();
-          refreshHomepage();
+        .onChange((value) => {
+          void (async () => {
+            this.plugin.settings.notesPlacement = value as 'left' | 'right';
+            await this.plugin.saveSettings();
+            refreshHomepage();
+          })();
         }));
 
     // ── Appearance ────────────────────────────────────────────────────────────
@@ -662,20 +672,8 @@ class SideCardsSettingTab extends PluginSettingTab {
 
     // Card preview
     const previewContainer = containerEl.createDiv({ cls: 'sc-preview-wrapper' });
-    previewContainer.style.marginBottom = '24px';
-    previewContainer.style.padding = '20px';
-    previewContainer.style.borderRadius = '8px';
-    previewContainer.style.backgroundColor = 'var(--background-secondary)';
-    previewContainer.style.border = '1px solid var(--background-modifier-border)';
-    previewContainer.style.display = 'flex';
-    previewContainer.style.flexDirection = 'column';
-    previewContainer.style.alignItems = 'center';
 
-    const previewCard = previewContainer.createDiv({ cls: 'sc-card' });
-    previewCard.style.width = '100%';
-    previewCard.style.maxWidth = '300px';
-    previewCard.style.margin = '0';
-    previewCard.style.pointerEvents = 'none';
+    const previewCard = previewContainer.createDiv({ cls: 'sc-card sc-settings-preview-card' });
 
     const updatePreview = () => {
       const settings = this.plugin.settings;
@@ -686,7 +684,7 @@ class SideCardsSettingTab extends PluginSettingTab {
       root.style.setProperty('--card-color-1', color1);
       previewCard.style.setProperty('border-radius', `${settings.borderRadius || 0}px`, 'important');
       previewCard.style.setProperty('border-width', `${settings.borderThickness ?? 2}px`, 'important');
-      import("../utils/dom").then(({ applyCardColorToElement }) => {
+      void import("../utils/dom").then(({ applyCardColorToElement }) => {
         applyCardColorToElement(previewCard, 'var(--card-color-1)', settings);
       });
       previewCard.empty();
@@ -700,9 +698,7 @@ class SideCardsSettingTab extends PluginSettingTab {
           tagsEl.createSpan({ cls: 'sc-tag', text: settings.omitTagHash ? t : `#${t}` });
         });
         if (settings.showTimestamps && !settings.timestampBelowTags) {
-          const ts = previewCard.createDiv({ cls: 'sc-timestamp', text: (window as any).moment ? (window as any).moment().format(settings.datetimeFormat || 'ddd D') : 'Today 12:00' });
-          ts.style.display = 'inline-block';
-          ts.style.marginLeft = '8px';
+          previewCard.createDiv({ cls: 'sc-timestamp sc-timestamp--inline-spaced', text: (window as any).moment ? (window as any).moment().format(settings.datetimeFormat || 'ddd D') : 'Today 12:00' });
         }
       } else {
         if (settings.showTimestamps) {
@@ -712,7 +708,7 @@ class SideCardsSettingTab extends PluginSettingTab {
     };
     updatePreview();
 
-    new Setting(containerEl).setName('Card Style').setDesc('Choose card design style').addDropdown(dropdown => dropdown.addOption('1', 'Style 1 (Flat)').addOption('2', 'Style 2 (Shadow)').addOption('3', 'Style 3 (Left Accent)').setValue(String(this.plugin.settings.cardStyle || 2)).onChange(async (value) => {
+    new Setting(containerEl).setName('Card style').setDesc('Choose card design style').addDropdown(dropdown => dropdown.addOption('1', 'Style 1 (flat)').addOption('2', 'Style 2 (shadow)').addOption('3', 'Style 3 (left accent)').setValue(String(this.plugin.settings.cardStyle || 2)).onChange(async (value) => {
       this.plugin.settings.cardStyle = Number(value);
       await this.plugin.saveSettings();
       updatePreview();
@@ -737,12 +733,13 @@ class SideCardsSettingTab extends PluginSettingTab {
       updatePreview();
       refreshSidebarCards();
     }));
-    new Setting(containerEl).setName('Maximum Card Height').setDesc('Limit card height in pixels (0 = no limit)').addSlider(slider => slider.setLimits(0, 800, 10).setValue(this.plugin.settings.maxCardHeight || 0).setDynamicTooltip().onChange(async (value) => {
+    new Setting(containerEl).setName('Maximum card height').setDesc('Limit card height in pixels (0 = no limit)').addSlider(slider => slider.setLimits(0, 800, 10).setValue(this.plugin.settings.maxCardHeight || 0).setDynamicTooltip().onChange(async (value) => {
       this.plugin.settings.maxCardHeight = Number(value) || 0;
       await this.plugin.saveSettings();
       const styleId = 'card-max-height-style';
       document.getElementById(styleId)?.remove();
       if (this.plugin.settings.maxCardHeight && this.plugin.settings.maxCardHeight > 0) {
+        // eslint-disable-next-line obsidianmd/no-forbidden-elements
         const s = document.createElement('style');
         s.id = styleId;
         s.textContent = `.sc-card { max-height: ${this.plugin.settings.maxCardHeight}px !important; overflow: hidden !important; }`;
@@ -772,7 +769,7 @@ class SideCardsSettingTab extends PluginSettingTab {
 
     const timestampSetting = new Setting(containerEl)
       .setName('Timestamp date & time format')
-      .addText(text => text.setPlaceholder('YYYY-MM-DD hh:mma').setValue(this.plugin.settings.datetimeFormat || 'YYYY-MM-DD hh:mma').onChange(async (value) => {
+      .addText(text => text.setPlaceholder('YYYY-MM-DD hh:mma').setValue(this.plugin.settings.datetimeFormat || 'YYYY-MM-DD hh:mma').onChange(async (value) => { // eslint-disable-line obsidianmd/ui/sentence-case
         this.plugin.settings.datetimeFormat = value;
         await this.plugin.saveSettings();
         updateTimestampPreview(value);
@@ -810,7 +807,7 @@ class SideCardsSettingTab extends PluginSettingTab {
       try {
         const view: any = this.app.workspace.getLeavesOfType('card-sidebar')[0]?.view;
         if (view && typeof view.applyScrollbarSetting === 'function') view.applyScrollbarSetting();
-      } catch {}
+      } catch { /* view may not be open */ }
     }));
     new Setting(containerEl).setName('Hide categories topbar').setDesc('Hide the category filter button bar.').addToggle(toggle => toggle.setValue(!!this.plugin.settings.disableFilterButtons).onChange(async (value) => {
       this.plugin.settings.disableFilterButtons = value;
@@ -828,6 +825,7 @@ class SideCardsSettingTab extends PluginSettingTab {
     const styleId = 'card-max-height-style';
     document.getElementById(styleId)?.remove();
     if (this.plugin.settings.maxCardHeight && this.plugin.settings.maxCardHeight > 0) {
+      // eslint-disable-next-line obsidianmd/no-forbidden-elements
       const s = document.createElement('style');
       s.id = styleId;
       s.textContent = `.sc-card { max-height: ${this.plugin.settings.maxCardHeight}px !important; overflow: hidden !important; }`;
@@ -856,7 +854,7 @@ class SideCardsSettingTab extends PluginSettingTab {
     colorVars.forEach((color, i) => {
       const row = new Setting(containerEl).setName(color.name);
       row.addText(txt => txt
-        .setPlaceholder('e.g. red')
+        .setPlaceholder('e.g. red') // eslint-disable-line obsidianmd/ui/sentence-case
         .setValue((this.plugin.settings.colorNames && this.plugin.settings.colorNames[i]) || '')
         .onChange(async (v) => {
           if (!this.plugin.settings.colorNames) this.plugin.settings.colorNames = [];
@@ -875,15 +873,14 @@ class SideCardsSettingTab extends PluginSettingTab {
     });
     // ── Categories ────────────────────────────────────────────────────────────
     new Setting(containerEl).setName('Categories').setDesc('Configure category display and reordering.').setHeading();
-    new Setting(containerEl).setName('Enable Custom Categories').setDesc('Allow custom categories in the right-click menu.').addToggle(toggle => toggle.setValue(!!this.plugin.settings.enableCustomCategories).onChange(async (value) => {
+    new Setting(containerEl).setName('Enable custom categories').setDesc('Allow custom categories in the right-click menu.').addToggle(toggle => toggle.setValue(!!this.plugin.settings.enableCustomCategories).onChange(async (value) => {
       this.plugin.settings.enableCustomCategories = value;
       await this.plugin.saveSettings();
       this.display();
       refreshSidebarHeader();
     }));
 
-    const catsContainer = containerEl.createDiv({ cls: 'categories-list' });
-    catsContainer.style.marginTop = '8px';
+    const catsContainer = containerEl.createDiv({ cls: 'categories-list sc-cats-container' });
 
     const renderCategories = () => {
       catsContainer.empty();
@@ -929,15 +926,6 @@ class SideCardsSettingTab extends PluginSettingTab {
       allItems.forEach(item => {
         if (!orderedIds.includes(item.id)) orderedIds.push(item.id);
       });
-
-      const saveOrder = async () => {
-        const ids = Array.from(catsContainer.querySelectorAll('.setting-item[data-cat-id]'))
-          .map(r => (r as HTMLElement).dataset.catId)
-          .filter(Boolean) as string[];
-        this.plugin.settings.allItemsOrder = ids;
-        await this.plugin.saveSettings();
-        refreshSidebarHeader();
-      };
 
       let dragSrcId: string | null = null;
 
@@ -1002,7 +990,8 @@ class SideCardsSettingTab extends PluginSettingTab {
           setting.settingEl.removeClass('sc-drag-over-top', 'sc-drag-over-bottom');
         });
 
-        setting.settingEl.addEventListener('drop', async (e) => {
+        setting.settingEl.addEventListener('drop', (e) => {
+          void (async () => {
           e.preventDefault();
           if (!dragSrcId || dragSrcId === itemId) return;
 
@@ -1039,91 +1028,63 @@ class SideCardsSettingTab extends PluginSettingTab {
           await this.plugin.saveSettings();
           renderCategories();
           refreshSidebarHeader();
+          })();
         });
 
         setting.infoEl.remove();
 
         const row = setting.controlEl;
-        row.style.flex = '1';
-        row.style.justifyContent = 'flex-start';
+        row.addClass('sc-cat-row-controls');
 
         // Drag handle
-        const handle = row.createEl('div', { cls: 'drag-handle' });
+        const handle = row.createEl('div', { cls: 'drag-handle sc-drag-handle' });
         try { setIcon(handle as any, 'grip-vertical'); } catch { handle.textContent = '⋮⋮'; }
-        handle.style.cursor = 'grab';
-        handle.style.color = 'var(--text-muted)';
-        handle.style.marginRight = '10px';
 
         // Eye icon (Round button)
-        const eyeBtn = row.createEl('button', { cls: 'clickable-icon sc-eye' });
-        eyeBtn.style.borderRadius = '50%';
-        eyeBtn.style.width = '32px';
-        eyeBtn.style.minWidth = '32px';
-        eyeBtn.style.height = '32px';
-        eyeBtn.style.display = 'flex';
-        eyeBtn.style.alignItems = 'center';
-        eyeBtn.style.justifyContent = 'center';
-        eyeBtn.style.padding = '0';
-        eyeBtn.style.border = 'none';
-        eyeBtn.style.marginRight = '10px';
+        const eyeBtn = row.createEl('button', { cls: 'clickable-icon sc-eye sc-round-btn' });
 
         const updateEye = () => {
           eyeBtn.empty();
           const iconName = isVisible ? 'eye' : 'eye-off';
           try { setIcon(eyeBtn as any, iconName); } catch { eyeBtn.textContent = isVisible ? '👁' : '🚫'; }
           eyeBtn.title = isVisible ? 'Visible' : 'Hidden';
-          
-          if (isVisible) {
-            eyeBtn.style.color = 'var(--color-green)';
-            eyeBtn.style.backgroundColor = 'rgba(var(--color-green-rgb), 0.2)';
-          } else {
-            eyeBtn.style.color = 'var(--color-red)';
-            eyeBtn.style.backgroundColor = 'rgba(var(--color-red-rgb), 0.2)';
-          }
+          eyeBtn.removeClass('sc-round-btn--green', 'sc-round-btn--red');
+          eyeBtn.addClass(isVisible ? 'sc-round-btn--green' : 'sc-round-btn--red');
         };
 
         if (itemInfo.canHide) {
           updateEye();
-          eyeBtn.addEventListener('click', async () => {
+          eyeBtn.addEventListener('click', () => {
             isVisible = !isVisible;
-            if (isBuiltin) {
-              const sKey = itemInfo.settingKey;
-              if (sKey === 'hideTodayFilter') {
-                this.plugin.settings.hideTodayFilter = !isVisible;
-              } else if (sKey === 'hideTomorrowFilter') {
-                this.plugin.settings.hideTomorrowFilter = !isVisible;
-              } else if (sKey === 'hideArchivedFilterButton') {
-                this.plugin.settings.hideArchivedFilterButton = !isVisible;
+            void (async () => {
+              if (isBuiltin) {
+                const sKey = itemInfo.settingKey;
+                if (sKey === 'hideTodayFilter') {
+                  this.plugin.settings.hideTodayFilter = !isVisible;
+                } else if (sKey === 'hideTomorrowFilter') {
+                  this.plugin.settings.hideTomorrowFilter = !isVisible;
+                } else if (sKey === 'hideArchivedFilterButton') {
+                  this.plugin.settings.hideArchivedFilterButton = !isVisible;
+                }
+              } else {
+                const idx = customList.findIndex(c => c.id === itemId);
+                if (idx >= 0) this.plugin.settings.customCategories[idx].showInMenu = isVisible;
               }
-            } else {
-              const idx = customList.findIndex(c => c.id === itemId);
-              if (idx >= 0) this.plugin.settings.customCategories[idx].showInMenu = isVisible;
-            }
-            await this.plugin.saveSettings();
-            updateEye();
-            refreshSidebarHeader();
-            applyPreviewColors();
+              await this.plugin.saveSettings();
+              updateEye();
+              refreshSidebarHeader();
+              applyPreviewColors();
+            })();
           });
         } else {
           isVisible = true;
           updateEye();
-          eyeBtn.style.opacity = '0.5';
-          eyeBtn.style.cursor = 'default';
+          eyeBtn.addClass('sc-round-btn--disabled');
         }
 
         // Icon picker button (for custom categories and builtins with a builtinKey)
         if (itemInfo.isCustom || itemInfo.builtinKey) {
-          const iconBtn = row.createEl('button', { cls: 'clickable-icon sc-cat-icon-btn' });
-          iconBtn.style.borderRadius = '50%';
-          iconBtn.style.width = '32px';
-          iconBtn.style.minWidth = '32px';
-          iconBtn.style.height = '32px';
-          iconBtn.style.display = 'flex';
-          iconBtn.style.alignItems = 'center';
-          iconBtn.style.justifyContent = 'center';
-          iconBtn.style.padding = '0';
-          iconBtn.style.border = 'none';
-          iconBtn.style.marginRight = '10px';
+          const iconBtn = row.createEl('button', { cls: 'clickable-icon sc-cat-icon-btn sc-round-btn' });
 
           const getCurrentIcon = (): string | undefined => {
             if (itemInfo.builtinKey) {
@@ -1137,10 +1098,10 @@ class SideCardsSettingTab extends PluginSettingTab {
             const currentIcon = getCurrentIcon();
             if (currentIcon) {
               try { setIcon(iconBtn as any, currentIcon); } catch { iconBtn.textContent = '+'; }
-              iconBtn.style.fontSize = '';
+              iconBtn.removeClass('sc-icon-btn--plus');
             } else {
               iconBtn.textContent = '+';
-              iconBtn.style.fontSize = '20px';
+              iconBtn.addClass('sc-icon-btn--plus');
             }
             iconBtn.title = 'Icon in context menu';
           };
@@ -1149,28 +1110,32 @@ class SideCardsSettingTab extends PluginSettingTab {
           iconBtn.addEventListener('click', () => {
             const modal = new SideCardsIconPickerModal(
               this.plugin.app,
-              async (pickedIcon) => {
-                if (itemInfo.builtinKey) {
-                  if (!this.plugin.settings.builtinCategoryIcons) this.plugin.settings.builtinCategoryIcons = {};
-                  this.plugin.settings.builtinCategoryIcons[itemInfo.builtinKey] = pickedIcon;
-                } else {
+              (pickedIcon) => {
+                void (async () => {
+                  if (itemInfo.builtinKey) {
+                    if (!this.plugin.settings.builtinCategoryIcons) this.plugin.settings.builtinCategoryIcons = {};
+                    this.plugin.settings.builtinCategoryIcons[itemInfo.builtinKey] = pickedIcon;
+                  } else {
+                    const idx = customList.findIndex(c => c.id === itemId);
+                    if (idx >= 0) {
+                      this.plugin.settings.customCategories[idx].icon = pickedIcon;
+                      if (itemInfo.data) itemInfo.data.icon = pickedIcon;
+                    }
+                  }
+                  await this.plugin.saveSettings();
+                  updateIconBtn();
+                })();
+              },
+              itemInfo.isCustom ? () => {
+                void (async () => {
                   const idx = customList.findIndex(c => c.id === itemId);
                   if (idx >= 0) {
-                    this.plugin.settings.customCategories[idx].icon = pickedIcon;
-                    if (itemInfo.data) itemInfo.data.icon = pickedIcon;
+                    this.plugin.settings.customCategories[idx].icon = undefined;
+                    if (itemInfo.data) itemInfo.data.icon = undefined;
                   }
-                }
-                await this.plugin.saveSettings();
-                updateIconBtn();
-              },
-              itemInfo.isCustom ? async () => {
-                const idx = customList.findIndex(c => c.id === itemId);
-                if (idx >= 0) {
-                  this.plugin.settings.customCategories[idx].icon = undefined;
-                  if (itemInfo.data) itemInfo.data.icon = undefined;
-                }
-                await this.plugin.saveSettings();
-                updateIconBtn();
+                  await this.plugin.saveSettings();
+                  updateIconBtn();
+                })();
               } : undefined
             );
             modal.open();
@@ -1179,47 +1144,37 @@ class SideCardsSettingTab extends PluginSettingTab {
         }
 
         // Text color picker
-        const textColorPicker = row.createEl('input');
+        const textColorPicker = row.createEl('input', { cls: 'sc-color-picker-btn' });
         textColorPicker.type = 'color';
         textColorPicker.value = this.plugin.settings.filterColors?.[colorKey]?.textColor || '#c0c3c7';
         textColorPicker.title = 'Text color';
-        textColorPicker.style.width = '24px';
-        textColorPicker.style.height = '24px';
-        textColorPicker.style.padding = '0';
-        textColorPicker.style.border = 'none';
-        textColorPicker.style.borderRadius = '50%';
-        textColorPicker.style.background = 'none';
-        textColorPicker.style.cursor = 'pointer';
-        textColorPicker.style.overflow = 'hidden';
-        textColorPicker.addEventListener('input', async (e: any) => {
-          if (!this.plugin.settings.filterColors) this.plugin.settings.filterColors = {};
-          if (!this.plugin.settings.filterColors[colorKey]) this.plugin.settings.filterColors[colorKey] = {};
-          this.plugin.settings.filterColors[colorKey].textColor = e.target.value;
-          await this.plugin.saveSettings();
-          refreshSidebarHeader();
-          applyPreviewColors();
+        textColorPicker.addEventListener('input', (e: Event) => {
+          const val = (e.target as HTMLInputElement).value;
+          void (async () => {
+            if (!this.plugin.settings.filterColors) this.plugin.settings.filterColors = {};
+            if (!this.plugin.settings.filterColors[colorKey]) this.plugin.settings.filterColors[colorKey] = {};
+            this.plugin.settings.filterColors[colorKey].textColor = val;
+            await this.plugin.saveSettings();
+            refreshSidebarHeader();
+            applyPreviewColors();
+          })();
         });
 
         // BG color picker
-        const bgColorPicker = row.createEl('input');
+        const bgColorPicker = row.createEl('input', { cls: 'sc-color-picker-btn' });
         bgColorPicker.type = 'color';
         bgColorPicker.value = this.plugin.settings.filterColors?.[colorKey]?.bgColor || '#1a1a1a';
         bgColorPicker.title = 'Background color';
-        bgColorPicker.style.width = '24px';
-        bgColorPicker.style.height = '24px';
-        bgColorPicker.style.padding = '0';
-        bgColorPicker.style.border = 'none';
-        bgColorPicker.style.borderRadius = '50%';
-        bgColorPicker.style.background = 'none';
-        bgColorPicker.style.cursor = 'pointer';
-        bgColorPicker.style.overflow = 'hidden';
-        bgColorPicker.addEventListener('input', async (e: any) => {
-          if (!this.plugin.settings.filterColors) this.plugin.settings.filterColors = {};
-          if (!this.plugin.settings.filterColors[colorKey]) this.plugin.settings.filterColors[colorKey] = {};
-          this.plugin.settings.filterColors[colorKey].bgColor = e.target.value;
-          await this.plugin.saveSettings();
-          refreshSidebarHeader();
-          applyPreviewColors();
+        bgColorPicker.addEventListener('input', (e: Event) => {
+          const val = (e.target as HTMLInputElement).value;
+          void (async () => {
+            if (!this.plugin.settings.filterColors) this.plugin.settings.filterColors = {};
+            if (!this.plugin.settings.filterColors[colorKey]) this.plugin.settings.filterColors[colorKey] = {};
+            this.plugin.settings.filterColors[colorKey].bgColor = val;
+            await this.plugin.saveSettings();
+            refreshSidebarHeader();
+            applyPreviewColors();
+          })();
         });
 
         const previewBtn = row.createEl('button', { cls: 'sc-category-preview' });
@@ -1233,24 +1188,25 @@ class SideCardsSettingTab extends PluginSettingTab {
         };
         applyPreviewColors();
 
-        const nameInput = row.createEl('input');
+        const nameInput = row.createEl('input', { cls: 'sc-cat-name-input' });
         nameInput.type = 'text';
         nameInput.value = itemInfo.label;
-        nameInput.style.width = '100%';
         nameInput.placeholder = 'Category name';
         if (isBuiltin) {
           nameInput.disabled = true;
-          nameInput.style.opacity = '0.6';
+          nameInput.addClass('sc-cat-name-input--disabled');
         } else {
-          nameInput.addEventListener('input', async (e: any) => {
-            const newLabel = String(e.target.value || '').trim();
-            const idx = customList.findIndex(c => c.id === itemId);
-            if (idx >= 0) {
-              this.plugin.settings.customCategories[idx].label = newLabel || 'New Category';
-              await this.plugin.saveSettings();
-              previewBtn.textContent = this.plugin.settings.customCategories[idx].label;
-              refreshSidebarHeader();
-            }
+          nameInput.addEventListener('input', (e: Event) => {
+            const newLabel = String((e.target as HTMLInputElement).value || '').trim();
+            void (async () => {
+              const idx = customList.findIndex(c => c.id === itemId);
+              if (idx >= 0) {
+                this.plugin.settings.customCategories[idx].label = newLabel || 'New Category';
+                await this.plugin.saveSettings();
+                previewBtn.textContent = this.plugin.settings.customCategories[idx].label;
+                refreshSidebarHeader();
+              }
+            })();
           });
         }
 
@@ -1259,47 +1215,38 @@ class SideCardsSettingTab extends PluginSettingTab {
         if (Platform.isMobile) {
           resetBtn = row.createEl('button', { cls: 'clickable-icon' });
           setIcon(resetBtn, 'rotate-ccw');
-          resetBtn.title = 'reset colors';
+          resetBtn.title = 'Reset colors';
         } else {
-          resetBtn = row.createEl('button', { text: 'Reset colors' });
-          resetBtn.style.padding = '2px 8px';
-          resetBtn.style.fontSize = '11px';
+          resetBtn = row.createEl('button', { text: 'Reset colors', cls: 'sc-reset-btn-small' });
         }
-        resetBtn.addEventListener('click', async () => {
-          if (this.plugin.settings.filterColors?.[colorKey]) {
-            delete this.plugin.settings.filterColors[colorKey];
-            await this.plugin.saveSettings();
-            renderCategories();
-            refreshSidebarHeader();
-          }
+        resetBtn.addEventListener('click', () => {
+          void (async () => {
+            if (this.plugin.settings.filterColors?.[colorKey]) {
+              delete this.plugin.settings.filterColors[colorKey];
+              await this.plugin.saveSettings();
+              renderCategories();
+              refreshSidebarHeader();
+            }
+          })();
         });
 
         // Reset-to-default icon button — only for builtins
         if (itemInfo.builtinKey) {
-          const resetIconBtn = row.createEl('button', { cls: 'clickable-icon' });
-          resetIconBtn.style.borderRadius = '50%';
-          resetIconBtn.style.width = '32px';
-          resetIconBtn.style.minWidth = '32px';
-          resetIconBtn.style.height = '32px';
-          resetIconBtn.style.display = 'flex';
-          resetIconBtn.style.alignItems = 'center';
-          resetIconBtn.style.justifyContent = 'center';
-          resetIconBtn.style.padding = '0';
-          resetIconBtn.style.border = 'none';
-          // resetIconBtn.style.marginRight = '10px';
+          const resetIconBtn = row.createEl('button', { cls: 'clickable-icon sc-round-btn' });
           resetIconBtn.title = 'Reset to default icon';
           try { setIcon(resetIconBtn as any, 'rotate-ccw'); } catch { resetIconBtn.textContent = '↺'; }
-          resetIconBtn.addEventListener('click', async () => {
-            if (!this.plugin.settings.builtinCategoryIcons) this.plugin.settings.builtinCategoryIcons = {};
-            this.plugin.settings.builtinCategoryIcons[itemInfo.builtinKey!] = itemInfo.defaultIcon!;
-            await this.plugin.saveSettings();
-            // Refresh the icon picker button display
-            const iconBtnEl = row.querySelector('.sc-cat-icon-btn') as HTMLElement | null;
-            if (iconBtnEl) {
-              iconBtnEl.empty();
-              try { setIcon(iconBtnEl as any, itemInfo.defaultIcon!); } catch { iconBtnEl.textContent = '+'; }
-              iconBtnEl.style.fontSize = '';
-            }
+          resetIconBtn.addEventListener('click', () => {
+            void (async () => {
+              if (!this.plugin.settings.builtinCategoryIcons) this.plugin.settings.builtinCategoryIcons = {};
+              this.plugin.settings.builtinCategoryIcons[itemInfo.builtinKey!] = itemInfo.defaultIcon!;
+              await this.plugin.saveSettings();
+              // Refresh the icon picker button display
+              const iconBtnEl = row.querySelector('.sc-cat-icon-btn');
+              if (iconBtnEl instanceof HTMLElement) {
+                iconBtnEl.empty();
+                try { setIcon(iconBtnEl as any, itemInfo.defaultIcon!); } catch { iconBtnEl.textContent = '+'; }
+              }
+            })();
           });
         }
 
@@ -1308,7 +1255,6 @@ class SideCardsSettingTab extends PluginSettingTab {
           const removeBtn = row.createEl('button', { cls: 'clickable-icon' });
           setIcon(removeBtn, 'trash');
           removeBtn.setAttr('title', 'Delete category');
-          removeBtn.style.padding = 'var(--size-4-1) var(--size-4-1)';
           removeBtn.addEventListener('click', () => {
             new ConfirmDeleteModal(this.app, `Delete category "${itemInfo.label}"?`, async () => {
               const idx = customList.findIndex(c => c.id === itemId);
@@ -1322,29 +1268,26 @@ class SideCardsSettingTab extends PluginSettingTab {
             }).open();
           });
         } else {
-          const spacer = row.createEl('div');
-          spacer.style.width = '32px';
+          row.createEl('div', { cls: 'sc-spacer-32' });
         }
       };
 
       orderedIds.forEach(id => renderRow(id));
 
       // Add category button
-      const addRow = catsContainer.createDiv();
-      addRow.style.display = 'flex';
-      addRow.style.justifyContent = 'flex-end';
-      addRow.style.marginTop = '12px';
-      addRow.style.marginBottom = '24px';
-      const addBtn = addRow.createEl('button', { text: '+ Add Custom Category', cls: 'mod-cta' });
-      addBtn.addEventListener('click', async () => {
-        if (!Array.isArray(this.plugin.settings.customCategories)) this.plugin.settings.customCategories = [];
-        const id = 'cat-' + Date.now();
-        this.plugin.settings.customCategories.push({ id, label: 'New Category', showInMenu: true });
-        if (!Array.isArray(this.plugin.settings.allItemsOrder)) this.plugin.settings.allItemsOrder = [];
-        this.plugin.settings.allItemsOrder.push(id);
-        await this.plugin.saveSettings();
-        renderCategories();
-        refreshSidebarHeader();
+      const addRow = catsContainer.createDiv({ cls: 'sc-add-row' });
+      const addBtn = addRow.createEl('button', { text: 'Add custom category', cls: 'mod-cta' });
+      addBtn.addEventListener('click', () => {
+        void (async () => {
+          if (!Array.isArray(this.plugin.settings.customCategories)) this.plugin.settings.customCategories = [];
+          const id = 'cat-' + Date.now();
+          this.plugin.settings.customCategories.push({ id, label: 'New category', showInMenu: true });
+          if (!Array.isArray(this.plugin.settings.allItemsOrder)) this.plugin.settings.allItemsOrder = [];
+          this.plugin.settings.allItemsOrder.push(id);
+          await this.plugin.saveSettings();
+          renderCategories();
+          refreshSidebarHeader();
+        })();
       });
     };
     renderCategories();
@@ -1364,16 +1307,18 @@ class SideCardsSettingTab extends PluginSettingTab {
           opts.push({ value: 'archived', label: 'Archived' });
         }
         (this.plugin.settings.customCategories || []).forEach(c => opts.push({ value: String(c.id || c.label || ''), label: String(c.label || c.id || '') }));
-        opts.forEach(o => dropdown.addOption(o.value, o.label));
+        opts.forEach(o => { dropdown.addOption(o.value, o.label); });
         dropdown.setValue(String(this.plugin.settings.openCategoryOnLoad || 'all'));
-        dropdown.onChange(async (v) => {
-          this.plugin.settings.openCategoryOnLoad = v;
-          await this.plugin.saveSettings();
+        dropdown.onChange((v) => {
+          void (async () => {
+            this.plugin.settings.openCategoryOnLoad = v;
+            await this.plugin.saveSettings();
+          })();
         });
       });
 
     // ── Auto Color ────────────────────────────────────────────────────────────
-    new Setting(containerEl).setName('Auto Color').setDesc('Cards inherit a color based on text or tag rules when no color is manually set.').setHeading();
+    new Setting(containerEl).setName('Auto color').setDesc('Cards inherit a color based on text or tag rules when no color is manually set.').setHeading();
     const rulesContainer = containerEl.createDiv();
     const renderRules = () => {
       rulesContainer.empty();
@@ -1384,7 +1329,7 @@ class SideCardsSettingTab extends PluginSettingTab {
         const setting = new Setting(rulesContainer)
           .addExtraButton(btn => {
             btn.setIcon('grip-vertical').setTooltip('Drag to reorder');
-            btn.extraSettingsEl.style.cursor = 'grab';
+            btn.extraSettingsEl.addClass('sc-drag-handle');
           })
           .addDropdown(dropdown => {
             dropdown
@@ -1395,18 +1340,17 @@ class SideCardsSettingTab extends PluginSettingTab {
                 this.plugin.settings.autoColorRules![idx].type = value as 'text' | 'tag';
                 await this.plugin.saveSettings();
               });
-            dropdown.selectEl.style.color = 'var(--text-normal)';
+            dropdown.selectEl.addClass('sc-dropdown-normal');
           })
           .addText(text => {
             text
-              .setPlaceholder('match')
+              .setPlaceholder('match') // eslint-disable-line obsidianmd/ui/sentence-case
               .setValue(r.match || '')
               .onChange(async (value) => {
                 this.plugin.settings.autoColorRules![idx].match = value;
                 await this.plugin.saveSettings();
               });
-            text.inputEl.style.width = '100%';
-            text.inputEl.style.maxWidth = 'none';
+            text.inputEl.addClass('sc-rule-text-input');
           })
           .addDropdown(dropdown => {
             const colors = this.plugin.settings.colorNames || [];
@@ -1421,8 +1365,8 @@ class SideCardsSettingTab extends PluginSettingTab {
               await this.plugin.saveSettings();
               this.applyColorToDropdown(dropdown.selectEl, value);
             });
-            dropdown.selectEl.style.color = 'var(--text-normal)';
-            Array.from(dropdown.selectEl.options).forEach(opt => opt.style.color = 'var(--text-normal)');
+            dropdown.selectEl.addClass('sc-dropdown-normal');
+            Array.from(dropdown.selectEl.options).forEach(opt => opt.addClass('sc-dropdown-normal'));
           })
           .addExtraButton(button => {
             button
@@ -1435,8 +1379,7 @@ class SideCardsSettingTab extends PluginSettingTab {
               });
           });
         setting.infoEl.remove();
-        setting.controlEl.style.flex = '1';
-        setting.controlEl.style.justifyContent = 'flex-start';
+        setting.controlEl.addClass('sc-rule-row-controls');
 
         // Add drag events for Auto Color
         setting.settingEl.setAttr('draggable', 'true');
@@ -1462,7 +1405,8 @@ class SideCardsSettingTab extends PluginSettingTab {
         setting.settingEl.addEventListener('dragleave', () => {
           setting.settingEl.removeClass('sc-drag-over-top', 'sc-drag-over-bottom');
         });
-        setting.settingEl.addEventListener('drop', async (e) => {
+        setting.settingEl.addEventListener('drop', (e) => {
+          void (async () => {
           e.preventDefault();
           if (!ruleDragSrcId || !ruleDragSrcId.startsWith('rule-')) return;
           const srcIdx = parseInt(ruleDragSrcId.replace('rule-', ''));
@@ -1473,27 +1417,26 @@ class SideCardsSettingTab extends PluginSettingTab {
           rules.splice(idx, 0, moved);
           await this.plugin.saveSettings();
           renderRules();
+          })();
         });
       });
 
-      const addBtnContainer = rulesContainer.createDiv();
-      addBtnContainer.style.display = 'flex';
-      addBtnContainer.style.justifyContent = 'flex-end';
-      addBtnContainer.style.marginTop = '12px';
-      addBtnContainer.style.marginBottom = '24px';
-      const addBtn = addBtnContainer.createEl('button', { text: 'Add Auto Color Rule', cls: 'mod-cta' });
-      addBtn.addEventListener('click', async () => {
-        if (!Array.isArray(this.plugin.settings.autoColorRules)) this.plugin.settings.autoColorRules = [];
-        this.plugin.settings.autoColorRules.push({ type: 'text', match: '', colorIndex: 1 });
-        await this.plugin.saveSettings();
-        renderRules();
+      const addBtnContainer = rulesContainer.createDiv({ cls: 'sc-add-row' });
+      const addBtn = addBtnContainer.createEl('button', { text: 'Add auto color rule', cls: 'mod-cta' });
+      addBtn.addEventListener('click', () => {
+        void (async () => {
+          if (!Array.isArray(this.plugin.settings.autoColorRules)) this.plugin.settings.autoColorRules = [];
+          this.plugin.settings.autoColorRules.push({ type: 'text', match: '', colorIndex: 1 });
+          await this.plugin.saveSettings();
+          renderRules();
+        })();
       });
     };
     renderRules();
 
     new Setting(containerEl).setName('Status').setDesc('Dropdown colors take precedence over custom unless the dropdown is set to custom.').setHeading();
     const statusSection = containerEl.createDiv();
-    new Setting(statusSection).setName('Enable Card Status').setDesc('Drag to reorder status pills and set their sorting priority.').addToggle(toggle => toggle.setValue(!!this.plugin.settings.enableCardStatus).onChange(async (value) => {
+    new Setting(statusSection).setName('Enable card status').setDesc('Drag to reorder status pills and set their sorting priority.').addToggle(toggle => toggle.setValue(!!this.plugin.settings.enableCardStatus).onChange(async (value) => {
       this.plugin.settings.enableCardStatus = value;
       await this.plugin.saveSettings();
       renderStatusConfig();
@@ -1512,7 +1455,7 @@ class SideCardsSettingTab extends PluginSettingTab {
         const setting = new Setting(statusConfigContainer)
           .addExtraButton(btn => {
             btn.setIcon('grip-vertical').setTooltip('Drag to reorder');
-            btn.extraSettingsEl.style.cursor = 'grab';
+            btn.extraSettingsEl.addClass('sc-drag-handle');
           })
           .addText(text => {
             text
@@ -1521,48 +1464,44 @@ class SideCardsSettingTab extends PluginSettingTab {
                 this.plugin.settings.cardStatuses![idx].name = value;
                 await this.plugin.saveSettings();
               });
-            text.inputEl.style.width = '100%';
-            text.inputEl.style.maxWidth = 'none';
+            text.inputEl.addClass('sc-status-text-input');
           });
         setting.infoEl.remove();
 
-        const colorPickerContainer = createDiv();
-        const colorPicker = new Setting(colorPickerContainer);
-        const textColorPicker = new Setting(colorPickerContainer);
+        // Color pickers as plain inputs (not Setting instances, to avoid ghost setting-item rows)
+        const colorPickerEl = setting.controlEl.createEl('input', { cls: 'sc-color-picker-inline sc-hidden' });
+        colorPickerEl.type = 'color';
+        colorPickerEl.value = s.color || '#20bf6b';
+        colorPickerEl.addEventListener('input', (e: Event) => {
+          void (async () => {
+            this.plugin.settings.cardStatuses![idx].color = (e.target as HTMLInputElement).value;
+            await this.plugin.saveSettings();
+            this.plugin.injectStatusColors();
+          })();
+        });
+
+        const textColorPickerEl = setting.controlEl.createEl('input', { cls: 'sc-color-picker-inline sc-hidden' });
+        textColorPickerEl.type = 'color';
+        textColorPickerEl.value = s.textColor || '#000000';
+        textColorPickerEl.addEventListener('input', (e: Event) => {
+          void (async () => {
+            this.plugin.settings.cardStatuses![idx].textColor = (e.target as HTMLInputElement).value;
+            await this.plugin.saveSettings();
+          })();
+        });
 
         const updatePickersVisibility = (val: string) => {
           if (val === 'custom') {
-            setting.controlEl.appendChild(colorPicker.controlEl);
-            setting.controlEl.appendChild(textColorPicker.controlEl);
-            colorPicker.controlEl.style.display = 'flex';
-            textColorPicker.controlEl.style.display = 'flex';
+            colorPickerEl.removeClass('sc-hidden');
+            textColorPickerEl.removeClass('sc-hidden');
           } else {
-            colorPicker.controlEl.style.display = 'none';
-            textColorPicker.controlEl.style.display = 'none';
+            colorPickerEl.addClass('sc-hidden');
+            textColorPickerEl.addClass('sc-hidden');
           }
         };
 
-        colorPicker.addColorPicker(cp => cp
-          .setValue(s.color || '#20bf6b')
-          .onChange(async (value) => {
-            this.plugin.settings.cardStatuses![idx].color = value;
-            await this.plugin.saveSettings();
-            this.plugin.injectStatusColors();
-          }));
-        colorPicker.controlEl.style.padding = '0';
-        colorPicker.infoEl.remove();
-
-        textColorPicker.addColorPicker(cp => cp
-          .setValue(s.textColor || '#000000')
-          .onChange(async (value) => {
-            this.plugin.settings.cardStatuses![idx].textColor = value;
-            await this.plugin.saveSettings();
-          }));
-        textColorPicker.controlEl.style.padding = '0';
-        textColorPicker.infoEl.remove();
-
         setting.addDropdown(dropdown => {
-          dropdown.addOption('custom', 'custom');
+          dropdown.addOption('custom', 'Custom');
           for (let i = 1; i <= 10; i++) {
             const colorName = (this.plugin.settings.colorNames && this.plugin.settings.colorNames[i - 1]) || `Color ${i}`;
             dropdown.addOption(String(i), colorName);
@@ -1584,6 +1523,7 @@ class SideCardsSettingTab extends PluginSettingTab {
           dropdown.setValue(currentVal);
 
           const applyDropdownColors = (val: string) => {
+            /* eslint-disable obsidianmd/no-static-styles-assignment */
             if (val === 'custom') {
               dropdown.selectEl.style.backgroundColor = 'var(--background-modifier-form-field)';
               dropdown.selectEl.style.color = 'var(--text-normal)';
@@ -1601,9 +1541,10 @@ class SideCardsSettingTab extends PluginSettingTab {
                 const cKey = `color${opt.value}` as keyof SideCardsSettings;
                 const c = this.plugin.settings[cKey] as string;
                 opt.style.backgroundColor = c;
-                opt.style.color = 'var(--text-normal)'; // Per user request: var(--text-normal) for options
+                opt.style.color = 'var(--text-normal)';
               }
             });
+            /* eslint-enable obsidianmd/no-static-styles-assignment */
           };
 
           applyDropdownColors(currentVal);
@@ -1636,8 +1577,7 @@ class SideCardsSettingTab extends PluginSettingTab {
             });
         });
 
-        setting.controlEl.style.flex = '1';
-        setting.controlEl.style.justifyContent = 'flex-start';
+        setting.controlEl.addClass('sc-status-row-controls');
 
         // Add drag events for Status
         setting.settingEl.setAttr('draggable', 'true');
@@ -1663,7 +1603,8 @@ class SideCardsSettingTab extends PluginSettingTab {
         setting.settingEl.addEventListener('dragleave', () => {
           setting.settingEl.removeClass('sc-drag-over-top', 'sc-drag-over-bottom');
         });
-        setting.settingEl.addEventListener('drop', async (e) => {
+        setting.settingEl.addEventListener('drop', (e) => {
+          void (async () => {
           e.preventDefault();
           if (!statusDragSrcId || !statusDragSrcId.startsWith('status-')) return;
           const srcIdx = parseInt(statusDragSrcId.replace('status-', ''));
@@ -1674,20 +1615,19 @@ class SideCardsSettingTab extends PluginSettingTab {
           statuses.splice(idx, 0, moved);
           await this.plugin.saveSettings();
           renderStatusConfig();
+          })();
         });
       });
 
-      const addBtnContainer = statusConfigContainer.createDiv();
-      addBtnContainer.style.display = 'flex';
-      addBtnContainer.style.justifyContent = 'flex-end';
-      addBtnContainer.style.marginTop = '12px';
-      addBtnContainer.style.marginBottom = '24px';
-      const addBtn = addBtnContainer.createEl('button', { text: 'Add Status', cls: 'mod-cta' });
-      addBtn.addEventListener('click', async () => {
-        if (!Array.isArray(this.plugin.settings.cardStatuses)) this.plugin.settings.cardStatuses = [];
-        this.plugin.settings.cardStatuses.push({ name: 'focus', color: '#20bf6b', textColor: '#000000' });
-        await this.plugin.saveSettings();
-        renderStatusConfig();
+      const addBtnContainer = statusConfigContainer.createDiv({ cls: 'sc-add-row' });
+      const addBtn = addBtnContainer.createEl('button', { text: 'Add status', cls: 'mod-cta' });
+      addBtn.addEventListener('click', () => {
+        void (async () => {
+          if (!Array.isArray(this.plugin.settings.cardStatuses)) this.plugin.settings.cardStatuses = [];
+          this.plugin.settings.cardStatuses.push({ name: 'focus', color: '#20bf6b', textColor: '#000000' });
+          await this.plugin.saveSettings();
+          renderStatusConfig();
+        })();
       });
     };
     renderStatusConfig();
@@ -1704,7 +1644,7 @@ class ConfirmDeleteModal extends Modal {
     const btnRow = contentEl.createDiv({ cls: 'modal-button-container' });
     btnRow.createEl('button', { text: 'Cancel' }).addEventListener('click', () => this.close());
     const confirmBtn = btnRow.createEl('button', { text: 'Delete', cls: 'mod-warning' });
-    confirmBtn.addEventListener('click', async () => { this.close(); await this.onConfirm(); });
+    confirmBtn.addEventListener('click', () => { this.close(); void this.onConfirm(); });
   }
   onClose() { this.contentEl.empty(); }
 }
@@ -1740,7 +1680,7 @@ class ChangelogModal extends Modal {
       borderBottom: '1px solid var(--divider-color)'
     });
 
-    const title = header.createEl('h2', { text: 'SideCards' });
+    const title = header.createEl('h2', { text: 'SideCards' }); // eslint-disable-line obsidianmd/ui/sentence-case
     title.setCssStyles({ margin: '0', fontSize: '1.5em', fontWeight: '600' });
 
     const link = header.createEl('a', { text: 'View on GitHub' });
@@ -1764,7 +1704,7 @@ class ChangelogModal extends Modal {
         return;
       }
 
-      rels.forEach(async (rel) => {
+      rels.forEach((rel) => { void (async () => {
         const meta = body.createEl('div');
         meta.setCssStyles({ marginBottom: '6px', borderBottom: '1px solid var(--divider-color)' });
 
@@ -1810,7 +1750,7 @@ class ChangelogModal extends Modal {
           });
           preEl.textContent = md;
         }
-      });
+      })(); });
     } catch {
       body.empty();
       body.createEl('div', { text: 'Failed to load release notes.' }).setCssStyles({ marginTop: '12px' });
@@ -1831,17 +1771,7 @@ class FolderSuggest {
   constructor(private app: App, private inputEl: HTMLInputElement, folders: Set<string>) {
     this.folders = Array.from(folders).sort();
     this.suggestEl = document.createElement('div');
-    this.suggestEl.className = 'suggestion-container';
-    this.suggestEl.style.display = 'none';
-    this.suggestEl.style.position = 'absolute';
-    this.suggestEl.style.zIndex = '1000';
-    this.suggestEl.style.left = '0';
-    this.suggestEl.style.width = '100%';
-    this.suggestEl.style.backgroundColor = 'var(--background-primary)';
-    this.suggestEl.style.border = '1px solid var(--background-modifier-border)';
-    this.suggestEl.style.borderRadius = '4px';
-    this.suggestEl.style.maxHeight = '200px';
-    this.suggestEl.style.overflowY = 'auto';
+    this.suggestEl.className = 'suggestion-container sc-folder-suggest';
     this.inputEl.parentElement?.appendChild(this.suggestEl);
     this.inputEl.addEventListener('click', () => this.onFocus());
     this.inputEl.addEventListener('input', () => this.onInput());
@@ -1866,9 +1796,10 @@ class FolderSuggest {
       this.app.vault.getAllLoadedFiles().forEach((file: any) => {
         if (file && file.parent) foldersSet.add(file.parent.path);
       });
-    } catch {}
+    } catch { /* ignore */ }
     this.folders = Array.from(foldersSet).sort();
     this.updateSuggestions();
+    // eslint-disable-next-line obsidianmd/no-static-styles-assignment
     this.suggestEl.style.display = 'block';
   }
 
@@ -1880,6 +1811,7 @@ class FolderSuggest {
     const target = event.target as Node | null;
     if (!target) return;
     if (!this.inputEl.contains(target) && !this.suggestEl.contains(target)) {
+      // eslint-disable-next-line obsidianmd/no-static-styles-assignment
       this.suggestEl.style.display = 'none';
     }
   }
@@ -1890,13 +1822,12 @@ class FolderSuggest {
     const filtered = this.folders.filter(folder => folder.toLowerCase().includes(inputValue)).slice(0, 100);
     filtered.forEach(folder => {
       const item = document.createElement('div');
-      item.className = 'suggestion-item';
+      item.className = 'suggestion-item sc-folder-suggest-item';
       item.textContent = folder;
-      item.style.padding = '6px 10px';
-      item.style.cursor = 'pointer';
       item.addEventListener('click', () => {
         this.inputEl.value = folder;
         this.inputEl.dispatchEvent(new Event('input'));
+        // eslint-disable-next-line obsidianmd/no-static-styles-assignment
         this.suggestEl.style.display = 'none';
       });
       this.suggestEl.appendChild(item);
@@ -1918,25 +1849,13 @@ class SideCardsIconPickerModal extends Modal {
   onOpen() {
     const c = this.contentEl;
     c.empty();
-    c.style.display = 'flex';
-    c.style.flexDirection = 'column';
-    c.style.gap = '8px';
+    c.addClass('sc-icon-picker-content');
 
-    const searchInput = c.createEl('input', { type: 'text', attr: { placeholder: 'Search icons...' } });
-    searchInput.style.width = '100%';
-    searchInput.style.marginBottom = '8px';
+    const searchInput = c.createEl('input', { type: 'text', attr: { placeholder: 'Search icons...' }, cls: 'sc-icon-picker-search' });
 
-    const list = c.createDiv();
-    list.style.display = 'grid';
-    list.style.gridTemplateColumns = 'repeat(auto-fill, 32px)';
-    list.style.gap = '4px';
-    list.style.maxHeight = '300px';
-    list.style.overflowY = 'auto';
+    const list = c.createDiv({ cls: 'sc-icon-picker-list' });
 
-    const footer = c.createDiv();
-    footer.style.display = 'flex';
-    footer.style.justifyContent = 'flex-end';
-    footer.style.marginTop = '8px';
+    const footer = c.createDiv({ cls: 'sc-icon-picker-footer' });
     const removeBtn = footer.createEl('button', { text: 'Remove icon' });
     removeBtn.addEventListener('click', () => { if (this.onRemove) this.onRemove(); this.close(); });
 
@@ -1951,16 +1870,7 @@ class SideCardsIconPickerModal extends Modal {
       list.empty();
       const toShow = limit > 0 ? icons.slice(0, limit) : icons;
       toShow.forEach(id => {
-        const btn = list.createEl('button');
-        btn.style.width = '32px';
-        btn.style.height = '32px';
-        btn.style.display = 'flex';
-        btn.style.alignItems = 'center';
-        btn.style.justifyContent = 'center';
-        btn.style.padding = '0';
-        btn.style.border = '1px solid var(--background-modifier-border)';
-        btn.style.borderRadius = '4px';
-        btn.style.cursor = 'pointer';
+        const btn = list.createEl('button', { cls: 'sc-icon-picker-btn' });
         btn.title = id;
         try { setIcon(btn as any, id); } catch { btn.textContent = id.slice(0, 2); }
         btn.addEventListener('click', () => { this.onPick(id); this.close(); });

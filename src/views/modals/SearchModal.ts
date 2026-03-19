@@ -1,4 +1,5 @@
 
+/* eslint-disable obsidianmd/no-static-styles-assignment */
 import { Modal, App, Plugin } from "obsidian";
 import { CardStore } from "../../services/CardStore";
 import { Card } from "../../models/Card";
@@ -20,7 +21,7 @@ export class SearchModal extends Modal {
   onOpen() {
     const { contentEl } = this;
     contentEl.empty();
-    this.titleEl.setText('Search Cards');
+    this.titleEl.setText('Search cards');
 
     const searchWrapper = contentEl.createDiv('sc-search-wrapper');
     this.searchInput = searchWrapper.createEl('input', {
@@ -63,7 +64,7 @@ export class SearchModal extends Modal {
   }
 
   private updateSelection() {
-    const els = Array.from(this.resultsContainer.querySelectorAll('.sc-search-result')) as HTMLElement[];
+    const els = Array.from(this.resultsContainer.querySelectorAll<HTMLElement>('.sc-search-result'));
     els.forEach((el, idx) => {
       if (idx === this.selectedIndex) {
         el.addClass('selected');

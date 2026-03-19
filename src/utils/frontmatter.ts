@@ -28,7 +28,7 @@ export function updateFrontmatter(content: string, key: string, value: any): str
       valueStr = String(value);
     } else {
       const s = String(value);
-      if (/^[A-Za-z0-9 _\-]+$/.test(s)) valueStr = s;
+      if (/^[A-Za-z0-9 _-]+$/.test(s)) valueStr = s;
       else valueStr = '"' + s.replace(/"/g, '\\"') + '"';
     }
 
@@ -36,6 +36,7 @@ export function updateFrontmatter(content: string, key: string, value: any): str
     const newFm = filtered.join('\n');
     return '---\n' + newFm + '\n---\n' + rest;
   } catch (err) {
+    // eslint-disable-next-line no-undef
     console.error('Error in updateFrontmatter:', err);
     return content;
   }
@@ -69,8 +70,8 @@ export function parseTagsFromFrontmatter(fm: string): string[] {
     try {
       const parsed = JSON.parse(content.replace(/'/g, '"'));
       return Array.isArray(parsed) ? parsed.map(sanitize) : [sanitize(String(parsed))];
-    } catch (e) {
-      return content.replace(/[\[\]"']/g, '').split(',').map(sanitize).filter(Boolean);
+    } catch {
+      return content.replace(/[[\]"']/g, '').split(',').map(sanitize).filter(Boolean);
     }
   }
   

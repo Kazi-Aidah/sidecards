@@ -213,7 +213,8 @@ export class CardStore {
     const files: TFile[] = [];
     const stack: TFolder[] = [abstractFolder];
     while (stack.length) {
-      const current = stack.pop() as TFolder;
+      const current = stack.pop();
+      if (!current) break;
       for (const child of current.children) {
         if (child instanceof TFile) {
           if (child.extension === 'md') files.push(child);
@@ -326,6 +327,7 @@ export class CardStore {
 
       await this.app.vault.modify(file, content);
     } catch (e) {
+      // eslint-disable-next-line no-undef
       console.error('Error reapplying tags:', e);
     } finally {
       this._reapplyingTags.delete(file.path);
@@ -337,19 +339,21 @@ export class CardStore {
     if (this.expiryInterval) {
       window.clearInterval(this.expiryInterval);
     }
-    this.expiryInterval = window.setInterval(async () => {
-      const now = Date.now();
-      const cards = this.getAll();
-      for (const card of cards) {
-        if (!card.expiresAt || card.archived) continue;
-        if (card.expiresAt <= now) {
-          if (this.settings.autoArchiveOnExpiry) {
-            await this.toggleArchive(card.id, true);
-          } else {
-            await this.delete(card.id);
+    this.expiryInterval = window.setInterval(() => {
+      void (async () => {
+        const now = Date.now();
+        const cards = this.getAll();
+        for (const card of cards) {
+          if (!card.expiresAt || card.archived) continue;
+          if (card.expiresAt <= now) {
+            if (this.settings.autoArchiveOnExpiry) {
+              await this.toggleArchive(card.id, true);
+            } else {
+              await this.delete(card.id);
+            }
           }
         }
-      }
+      })();
     }, 60_000);
   }
 
@@ -361,12 +365,14 @@ export class CardStore {
     const next = new Date(now);
     next.setHours(24, 0, 1, 0);
     const delay = Math.max(1000, next.getTime() - now.getTime());
-    this.dateRolloverTimeout = window.setTimeout(async () => {
-      const cards = this.getAll().filter(c => String(c.category || '').toLowerCase() === 'tomorrow');
-      for (const card of cards) {
-        await this.setCategory(card.id, 'today');
-      }
-      this.handleDateRollover();
+    this.dateRolloverTimeout = window.setTimeout(() => {
+      void (async () => {
+        const cards = this.getAll().filter(c => String(c.category || '').toLowerCase() === 'tomorrow');
+        for (const card of cards) {
+          await this.setCategory(card.id, 'today');
+        }
+        this.handleDateRollover();
+      })();
     }, delay);
   }
 
@@ -407,7 +413,7 @@ export class CardStore {
       let text = '';
       try {
         text = await this.app.vault.read(file);
-      } catch (e) {
+      } catch {
         continue;
       }
       const fmMatch = text.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n/);
