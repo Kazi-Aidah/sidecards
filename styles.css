@@ -27,6 +27,15 @@
   margin: 0;
 }
 
+.sc-content blockquote {
+  border-left: 3px solid var(--text-accent);
+  margin: 4px 0;
+  padding: 2px 0 2px 10px;
+  color: var(--text-muted);
+  font-style: italic;
+  background: transparent;
+}
+
 .sc-sidebar-header .sc-category-group {
   background: var(--background-primary);
   display: flex;
@@ -150,9 +159,11 @@
 }
 
 .sc-home-main {
-  max-width: 1000px;
+  width: 100%;
+  max-width: var(--sc-home-max-width, 1000px);
   margin: 0 auto;
   padding: 40px 20px;
+  box-sizing: border-box;
 }
 
 .sc-home-top {
@@ -529,11 +540,21 @@
 }
 
 .sc-timestamp {
-  font-size: 11px;
+  font-size: small;
   color: var(--text-normal) !important;
   opacity: 0.7 !important;
   margin-top: 4px;
 }
+
+.sc-expiry-pill::before {
+    content: "Expires in ";
+}
+
+.sc-expiry-pill {
+    font-size: small;
+    color: var(--text-muted);
+}
+
 
 .sc-footer {
   margin-top: 4px;
@@ -1079,4 +1100,164 @@ de
 /* Icon btn plus state */
 .sc-icon-btn--plus {
   font-size: 20px;
+}
+
+
+.sc-ac-parent {
+  position: relative;
+}
+
+/* ── Inline Autocomplete (@category / #tag) ─────────────────────────── */
+.sc-inline-autocomplete {
+  position: absolute;
+  z-index: 9999;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 6px;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+  min-width: 160px;
+  max-height: 180px;
+  overflow-y: auto;
+  display: none;
+}
+
+.sc-inline-autocomplete.is-visible {
+  display: block;
+}
+
+/* Position variants — set via CSS custom properties on the element */
+.sc-inline-autocomplete.ac-above {
+  bottom: var(--sc-ac-bottom, 4px);
+  top: auto;
+  left: var(--sc-ac-left, 0px);
+}
+
+.sc-inline-autocomplete.ac-below {
+  top: var(--sc-ac-top, 4px);
+  bottom: auto;
+  left: var(--sc-ac-left, 0px);
+}
+
+.sc-inline-ac-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  cursor: pointer;
+  font-size: 13px;
+  border-bottom: 1px solid var(--background-modifier-border);
+}
+
+.sc-inline-ac-item:last-child { border-bottom: none; }
+
+.sc-inline-ac-item:hover,
+.sc-inline-ac-item.is-selected {
+  background: var(--background-modifier-hover);
+}
+
+.sc-inline-ac-badge {
+  font-weight: 700;
+  color: var(--text-accent);
+  font-size: 12px;
+  min-width: 12px;
+}
+
+/* ── DateTimeModal ───────────────────────────────────────────────────── */
+.sc-datetime-modal .sc-dt-mode-row {
+  display: flex;
+  gap: 16px;
+  margin-bottom: 14px;
+}
+
+.sc-dt-radio-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  font-size: 14px;
+}
+
+.sc-dt-panel { margin-bottom: 8px; }
+
+.sc-dt-slots { display: flex; flex-direction: column; gap: 6px; margin-bottom: 8px; }
+
+.sc-dt-slot-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.sc-dt-slot-num {
+  width: 70px;
+  padding: 4px 6px;
+  border-radius: 4px;
+  border: 1px solid var(--background-modifier-border);
+  color: var(--text-normal);
+}
+
+.sc-dt-slot-unit {
+  flex: 1;
+  padding: 4px 6px;
+  border-radius: 4px;
+  border: 1px solid var(--background-modifier-border);
+  color: var(--text-normal);
+}
+
+.sc-dt-slot-remove {
+  padding: 2px 7px;
+  border-radius: 4px;
+  opacity: 0.6;
+  cursor: pointer;
+}
+
+.sc-dt-slot-remove:hover { opacity: 1; }
+
+.sc-dt-add-slot-btn {
+  font-size: 12px;
+  padding: 4px 10px;
+  margin-bottom: 10px;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.sc-dt-presets {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 4px;
+}
+
+.sc-dt-preset-btn {
+  font-size: 12px;
+  padding: 3px 9px;
+  border-radius: 12px;
+  border: 1px solid var(--background-modifier-border);
+  cursor: pointer;
+  background: var(--background-secondary);
+}
+
+.sc-dt-preset-btn:hover { background: var(--background-modifier-hover); }
+
+.sc-dt-exact-input {
+  width: 100%;
+  padding: 6px 8px;
+  margin-bottom: 8px;
+  border-radius: 4px;
+  border: 1px solid var(--background-modifier-border);
+  color: var(--text-normal);
+}
+
+.sc-dt-quick-row { display: flex; gap: 8px; margin-bottom: 4px; }
+
+.sc-dt-quick-btn {
+  font-size: 12px;
+  padding: 4px 10px;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.sc-dt-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 14px;
 }

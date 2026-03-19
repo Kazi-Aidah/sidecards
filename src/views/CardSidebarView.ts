@@ -8,6 +8,7 @@ import { CardComponent } from "./components/Card";
 import { flipAnimateAsync } from "../utils/animations";
 import { Card } from "../models/Card";
 import SideCardsPlugin from "../core/Plugin";
+import { InlineAutocomplete } from "./components/InlineAutocomplete";
 import { resolveAutoColor } from "../utils/dom";
 
 export class CardSidebarView extends ItemView {
@@ -346,6 +347,9 @@ export class CardSidebarView extends ItemView {
   private registerVaultEvents() {
     this.plugin.registerEvent(this.app.vault.on('modify', async (file) => {
       if (!(file instanceof TFile)) return;
+      // Skip if we're the ones writing this file (prevents expiry/color wipe race)
+      // @ts-ignore
+      if (this.store._syncingPaths?.has(file.path)) return;
       // @ts-ignore
       const pending = this.store._pendingTagWrites.get(file.path);
       if (pending) {
@@ -527,7 +531,9 @@ export class CardSidebarView extends ItemView {
       }
     });
 
-    // Tag autocomplete handled by TagAutocomplete component when integrated
+    // @category / #tag inline autocomplete
+    new InlineAutocomplete(editorEl, this.store);
+
     editorEl.addEventListener('keydown', (e) => {
       if (this.applyFormattingHotkey(e, editorEl)) return;
       this.applySelectionWrapShortcut(e, editorEl);
@@ -671,7 +677,6 @@ export class CardSidebarView extends ItemView {
         await this.store.add(card);
         editorEl.textContent = '';
         updatePlaceholder();
-        await this.renderCards();
       })();
     });
   }

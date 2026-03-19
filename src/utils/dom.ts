@@ -22,21 +22,20 @@ export function resolveColorVarToHex(colorVar: string, settings: any): string | 
   if (colorVar.startsWith('#')) return colorVar;
   const m = colorVar.match(/--card-color-(\d+)/);
   if (m) {
-    const idx = m[1];
-    const key = `color${idx}`;
-    const fromSettings = settings[key] || null;
-    if (fromSettings) return fromSettings;
+    // Always read the live CSS variable so color changes are reflected immediately
     try {
       const root = window && window.getComputedStyle ? window.getComputedStyle(document.documentElement) : null;
       if (root) {
-        const val = root.getPropertyValue(`--card-color-${idx}`);
+        const val = root.getPropertyValue(`--card-color-${m[1]}`);
         if (val) {
           const v = String(val).trim();
           if (v) return v;
         }
       }
     } catch { /* ignore */ }
-    return null;
+    // Fallback to settings value
+    const key = `color${m[1]}`;
+    return settings[key] || null;
   }
   return null;
 }

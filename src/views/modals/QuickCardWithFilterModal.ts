@@ -6,6 +6,7 @@ import { handleKeyWrap } from "../../utils/editor-utils";
 import { resolveAutoColor } from "../../utils/dom";
 import { CardStore } from "../../services/CardStore";
 import { Card } from "../../models/Card";
+import { InlineAutocomplete } from "../components/InlineAutocomplete";
 
 export class QuickCardWithFilterModal extends Modal {
   private editorScope: Scope;
@@ -262,6 +263,9 @@ export class QuickCardWithFilterModal extends Modal {
     editorEl.setAttribute('contenteditable', 'true');
     editorEl.dataset.placeholder = 'Type here... (@category, #tag)';
     
+    // @category / #tag inline autocomplete
+    new InlineAutocomplete(editorEl, this.store);
+
     // Simple placeholder logic for contenteditable
     editorEl.addEventListener('input', () => {
       editorEl.toggleClass('is-empty', !editorEl.textContent);

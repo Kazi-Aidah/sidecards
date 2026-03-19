@@ -25,6 +25,7 @@ export class CardComponent {
   private isEditing: boolean = false;
   private ignoreNextClick: boolean = false;
   private renderCount: number = 0;
+  private expiryTickInterval: number | null = null;
   private scope: Scope;
   private editor!: Editor;
   private owner!: any;
@@ -213,9 +214,10 @@ export class CardComponent {
 
   private async render(): Promise<void> {
     const currentRender = ++this.renderCount;
+    this.stopExpiryTick();
     this.el.empty();
     this.el.dataset.id = this.card.id;
-    this.el.draggable = !this.isEditing; // Disable dragging while editing
+    this.el.draggable = !this.isEditing;
     
     // Apply styling
     const statusDef = this.card.status
@@ -227,14 +229,12 @@ export class CardComponent {
       : this.card.color;
     applyCardColorToElement(this.el, effectiveColor, this.store.settings);
 
-    // Set data-status for CSS-based custom color targeting
     if (this.card.status?.name) {
       this.el.dataset.status = this.card.status.name;
     } else {
       delete this.el.dataset.status;
     }
 
-    // Apply max card height (dynamic user setting — cannot use static CSS class)
     const maxH = this.store.settings.maxCardHeight;
     if (maxH && maxH > 0) {
       /* eslint-disable obsidianmd/no-static-styles-assignment */
@@ -246,46 +246,40 @@ export class CardComponent {
       this.el.style.removeProperty('overflow');
     }
     
-    // detect layout mode and apply masonry if needed
     if (this.store.settings.cardStyle === 2) {
       this.el.addClass('sc-style-2-masonry');
     } else {
       this.el.removeClass('sc-style-2-masonry');
     }
 
-    const fragment = document.createDocumentFragment();
-    
-    // Copy button (if enabled)
+    // --- Synchronous parts: render directly into this.el before any await ---
+
     if (this.store.settings.enableCopyCardContent) {
-      const copyBtn = fragment.createDiv('sc-copy-btn');
-      try {
-        setIcon(copyBtn, 'copy');
-      } catch {
-        copyBtn.textContent = '📋';
-      }
+      const copyBtn = this.el.createDiv('sc-copy-btn');
+      try { setIcon(copyBtn, 'copy'); } catch { copyBtn.textContent = '📋'; }
       copyBtn.title = 'Copy card content';
-      copyBtn.addEventListener('click', (e) => {
-        e.stopPropagation();
-        this.copyCardContent();
-      });
+      copyBtn.addEventListener('click', (e) => { e.stopPropagation(); this.copyCardContent(); });
     }
-    
-    // Pill bar
-    const pillBar = fragment.createDiv('sc-pill-bar');
+
+    const pillBar = this.el.createDiv('sc-pill-bar');
     this.renderPills(pillBar);
-    
-    // Content
-    const content = fragment.createDiv('sc-content');
+
+    // --- Async part: content rendering ---
+    const content = this.el.createDiv('sc-content');
     await this.renderContent(content);
 
-    // If a new render has started, discard this one
-    if (currentRender !== this.renderCount) return;
+    // If a newer render started while we were awaiting, remove the stale content
+    // but keep the pills already in the DOM — the newer render will replace everything
+    if (currentRender !== this.renderCount) {
+      content.remove();
+      return;
+    }
 
-    // Footer (grouped tags + timestamp) — tags are rendered here, not above
-    const footer = fragment.createDiv('sc-footer');
+    const footer = this.el.createDiv('sc-footer');
     this.renderFooter(footer);
-    
-    this.el.appendChild(fragment);
+
+    // Start live countdown tick if this card has an expiry
+    this.startExpiryTick();
   }
 
   private copyCardContent(): void {
@@ -307,7 +301,10 @@ export class CardComponent {
   }
 
   private renderPills(container: HTMLElement): void {
-    if (this.card.expiresAt) {
+    if (this.card.expiresAt && this.store.settings.showExpiryTimeLeft) {
+      const pill = container.createDiv('sc-expiry-pill');
+      pill.textContent = this.formatExpiryTimeLeft(this.card.expiresAt);
+    } else if (this.card.expiresAt) {
       const pill = container.createDiv('sc-expiry-pill');
       pill.textContent = this.formatExpiry(this.card.expiresAt);
     }
@@ -602,90 +599,85 @@ export class CardComponent {
     this.el.addEventListener('contextmenu', (e) => {
       e.preventDefault();
       const menu = new Menu();
-      const colors = [
-        'var(--card-color-1)', 'var(--card-color-2)', 'var(--card-color-3)',
-        'var(--card-color-4)', 'var(--card-color-5)', 'var(--card-color-6)',
-        'var(--card-color-7)', 'var(--card-color-8)', 'var(--card-color-9)',
-        'var(--card-color-10)'
-      ];
+      const s = this.store.settings;
+
+      // Colors
       menu.addItem(item => {
         item.setTitle('Colors');
         const container = document.createElement('div');
         container.className = 'sc-color-dots';
-        if (this.store.settings.twoRowSwatches) {
-          container.classList.add('two-row');
-        }
-
+        if (s.twoRowSwatches) container.classList.add('two-row');
+        const colors = [
+          'var(--card-color-1)', 'var(--card-color-2)', 'var(--card-color-3)',
+          'var(--card-color-4)', 'var(--card-color-5)', 'var(--card-color-6)',
+          'var(--card-color-7)', 'var(--card-color-8)', 'var(--card-color-9)',
+          'var(--card-color-10)'
+        ];
         colors.forEach((color, idx) => {
           const swatch = document.createElement('div');
           swatch.className = 'sc-color-dot sc-color-dot-swatch';
           swatch.style.border = this.card.color === color ? '2px solid var(--text-accent)' : '1px solid var(--background-modifier-border)';
-          swatch.title = this.store.settings.colorNames[idx] || `Color ${idx + 1}`;
-          const root = document.documentElement;
-          const computed = getComputedStyle(root).getPropertyValue(color.replace('var(', '').replace(')', ''));
+          swatch.title = s.colorNames[idx] || `Color ${idx + 1}`;
+          const computed = getComputedStyle(document.documentElement).getPropertyValue(color.replace('var(', '').replace(')', ''));
           swatch.style.backgroundColor = computed.trim() || color;
-          swatch.addEventListener('click', () => {
-            void this.store.setColor(this.card.id, color);
-          });
+          swatch.addEventListener('click', () => { void this.store.setColor(this.card.id, color); });
           container.appendChild(swatch);
         });
         (item as any).titleEl?.appendChild(container);
       });
 
-      const s = this.store.settings;
+      // Categories
       const todayVisible = !s.hideTodayFilter;
       const tomorrowVisible = !s.hideTomorrowFilter;
       const customCategories = s.enableCustomCategories ? (s.customCategories || []).filter(c => c.showInMenu !== false) : [];
-      const hasCategoryItems = todayVisible || tomorrowVisible || customCategories.length > 0;
-
-      if (hasCategoryItems) {
-        menu.addSeparator();
+      if (todayVisible || tomorrowVisible || customCategories.length > 0) {
         if (todayVisible) {
           menu.addItem(item => {
             item.setTitle('Add to today')
               .setIcon(s.builtinCategoryIcons?.['today'] ?? 'calendar-check')
-              .onClick(async () => {
-                await this.store.setCategory(this.card.id, 'today');
-              });
+              .onClick(async () => { await this.store.setCategory(this.card.id, 'today'); });
           });
         }
         if (tomorrowVisible) {
           menu.addItem(item => {
             item.setTitle('Add to tomorrow')
               .setIcon(s.builtinCategoryIcons?.['tomorrow'] ?? 'calendar-plus')
-              .onClick(async () => {
-                await this.store.setCategory(this.card.id, 'tomorrow');
-              });
+              .onClick(async () => { await this.store.setCategory(this.card.id, 'tomorrow'); });
           });
         }
         customCategories.forEach(cat => {
           menu.addItem(item => {
             item.setTitle(`Add to ${cat.label}`)
               .setIcon(cat.icon || 'plus-square')
-              .onClick(async () => {
-                await this.store.setCategory(this.card.id, cat.label || cat.id);
-              });
+              .onClick(async () => { await this.store.setCategory(this.card.id, cat.label || cat.id); });
           });
         });
         if (this.card.category) {
           menu.addItem(item => {
             item.setTitle(`Remove from ${this.card.category}`)
-              .setIcon('trash')
-              .onClick(async () => {
-                await this.store.setCategory(this.card.id, null);
-              });
+              .setIcon('x')
+              .onClick(async () => { await this.store.setCategory(this.card.id, null); });
           });
         }
       }
 
-      if (this.store.settings.enableCardStatus && Array.isArray(this.store.settings.cardStatuses) && this.store.settings.cardStatuses.length > 0) {
-        menu.addSeparator();
+      menu.addSeparator();
+
+      // Pin
+      menu.addItem(item => {
+        item.setTitle(this.card.pinned ? 'Unpin' : 'Pin card')
+          .setIcon('pin')
+          .onClick(async () => { await this.store.togglePin(this.card.id, !this.card.pinned); });
+      });
+
+      // Set status
+      if (s.enableCardStatus && Array.isArray(s.cardStatuses) && s.cardStatuses.length > 0) {
         menu.addItem(item => {
           item.setTitle('Set status')
             .setIcon('flag')
             .onClick(() => {
               const menu2 = new Menu();
-              this.store.settings.cardStatuses?.forEach(st => {
+              s.cardStatuses?.forEach(st => {
                 menu2.addItem(i => {
                   i.setTitle(st.name || '')
                     .onClick(async () => {
@@ -699,41 +691,33 @@ export class CardComponent {
                 });
               });
               menu2.addItem(i => {
-                i.setTitle('Clear status')
-                  .onClick(async () => {
-                    await this.store.setStatus(this.card.id, null);
-                  });
+                i.setTitle('Clear status').onClick(async () => { await this.store.setStatus(this.card.id, null); });
               });
               menu2.showAtMouseEvent(e);
             });
         });
       }
 
-      menu.addSeparator();
-      menu.addItem(item => {
-        item.setTitle(this.card.pinned ? 'Unpin' : 'Pin')
-          .setIcon('pin')
-          .onClick(async () => {
-            await this.store.togglePin(this.card.id, !this.card.pinned);
-          });
-      });
+      // Set expiry
       menu.addItem(item => {
         item.setTitle('Set expiry')
           .setIcon('alarm-clock')
-          .onClick(() => {
-            new DateTimeModal(this.app, this.card, this.store).open();
-          });
+          .onClick(() => { new DateTimeModal(this.app, this.card, this.store).open(); });
       });
+
+      menu.addSeparator();
+
+      // Duplicate
       menu.addItem(item => {
         item.setTitle('Duplicate')
           .setIcon('copy')
-          .onClick(async () => {
-            await this.store.duplicateCard(this.card.id);
-          });
+          .onClick(async () => { await this.store.duplicateCard(this.card.id); });
       });
+
+      // View / Create note
       menu.addItem(item => {
-        item.setTitle(this.card.notePath ? 'View Note' : 'Create Note')
-          .setIcon(this.card.notePath ? 'link' : 'document')
+        item.setTitle(this.card.notePath ? 'View note' : 'Create note')
+          .setIcon(this.card.notePath ? 'link' : 'file-plus')
           .onClick(async () => {
             if (this.card.notePath) {
               const file = this.app.vault.getAbstractFileByPath(this.card.notePath);
@@ -752,20 +736,23 @@ export class CardComponent {
             }
           });
       });
-      menu.addItem(item => {
-        item.setTitle(this.card.archived ? 'Unarchive' : 'Archive')
-          .setIcon(this.store.settings.builtinCategoryIcons?.['archived'] ?? 'archive')
-          .onClick(async () => {
-            await this.store.toggleArchive(this.card.id, !this.card.archived);
-          });
-      });
+
+      // Archive
+      if (!s.hideArchivedFilterButton || this.card.archived) {
+        menu.addItem(item => {
+          item.setTitle(this.card.archived ? 'Unarchive' : 'Archive')
+            .setIcon(s.builtinCategoryIcons?.['archived'] ?? 'archive')
+            .onClick(async () => { await this.store.toggleArchive(this.card.id, !this.card.archived); });
+        });
+      }
+
+      // Delete
       menu.addItem(item => {
         item.setTitle('Delete')
           .setIcon('trash')
-          .onClick(async () => {
-            await this.store.delete(this.card.id);
-          });
+          .onClick(async () => { await this.store.delete(this.card.id); });
       });
+
       menu.showAtMouseEvent(e);
     });
 
@@ -802,11 +789,21 @@ export class CardComponent {
   }
 
   private formatTimestamp(ts: number): string {
+    // Prefer the file's actual creation time from Obsidian's metadata
+    const created = this.getCreatedTime();
     const fmt = this.store.settings.datetimeFormat;
     if (fmt && (window as any).moment) {
-      return (window as any).moment(ts).format(fmt);
+      return (window as any).moment(created).format(fmt);
     }
-    return new Date(ts).toLocaleDateString() + ' ' + new Date(ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    return new Date(created).toLocaleDateString() + ' ' + new Date(created).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  }
+
+  private getCreatedTime(): number {
+    if (this.card.notePath) {
+      const file = this.app.vault.getAbstractFileByPath(this.card.notePath);
+      if (file instanceof TFile) return file.stat.ctime;
+    }
+    return this.card.created;
   }
 
   private formatExpiry(ts: number): string {
@@ -818,6 +815,41 @@ export class CardComponent {
     return `Expires in ${days} days`;
   }
 
+  private formatExpiryTimeLeft(ts: number): string {
+    const diff = ts - Date.now();
+    if (diff <= 0) return 'Expired';
+    const fmt = this.store.settings.expiryTimeFormat || 'human';
+    const totalSecs = Math.floor(diff / 1000);
+    const years   = Math.floor(totalSecs / (365 * 24 * 3600));
+    const months  = Math.floor((totalSecs % (365 * 24 * 3600)) / (30 * 24 * 3600));
+    const weeks   = Math.floor((totalSecs % (30 * 24 * 3600)) / (7 * 24 * 3600));
+    const days    = Math.floor((totalSecs % (7 * 24 * 3600)) / (24 * 3600));
+    const hours   = Math.floor((totalSecs % (24 * 3600)) / 3600);
+    const mins    = Math.floor((totalSecs % 3600) / 60);
+    const secs    = totalSecs % 60;
+    if (fmt === 'short') {
+      const parts: string[] = [];
+      if (years)  parts.push(`${years}y`);
+      if (months) parts.push(`${months}mo`);
+      if (weeks)  parts.push(`${weeks}w`);
+      if (days)   parts.push(`${days}d`);
+      if (hours)  parts.push(`${hours}h`);
+      if (mins)   parts.push(`${mins}m`);
+      if (secs && parts.length < 2) parts.push(`${secs}s`);
+      return parts.slice(0, 3).join(' ') || '< 1s';
+    }
+    // human format
+    const parts: string[] = [];
+    if (years)  parts.push(`${years} year${years !== 1 ? 's' : ''}`);
+    if (months) parts.push(`${months} month${months !== 1 ? 's' : ''}`);
+    if (weeks)  parts.push(`${weeks} week${weeks !== 1 ? 's' : ''}`);
+    if (days)   parts.push(`${days} day${days !== 1 ? 's' : ''}`);
+    if (hours)  parts.push(`${hours} hour${hours !== 1 ? 's' : ''}`);
+    if (mins)   parts.push(`${mins} min${mins !== 1 ? 's' : ''}`);
+    if (secs && parts.length < 2) parts.push(`${secs} sec${secs !== 1 ? 's' : ''}`);
+    return parts.slice(0, 3).join(' ') || '< 1 sec';
+  }
+
   destroy(): void {
     if (CardComponent.activeEditor === this) {
       CardComponent.activeEditor = null;
@@ -827,7 +859,29 @@ export class CardComponent {
       document.removeEventListener('mousedown', CardComponent.handleGlobalMouseDown, true);
       CardComponent.globalMouseDownBound = false;
     }
+    this.stopExpiryTick();
     this.unsubscribe.forEach(fn => fn());
     this.el.remove();
+  }
+
+  private startExpiryTick(): void {
+    this.stopExpiryTick();
+    if (!this.card.expiresAt) return;
+    // Tick every second so the countdown stays live
+    this.expiryTickInterval = window.setInterval(() => {
+      const pill = this.el.querySelector('.sc-expiry-pill');
+      if (!(pill instanceof HTMLElement) || !this.card.expiresAt) return;
+      const text = this.store.settings.showExpiryTimeLeft
+        ? this.formatExpiryTimeLeft(this.card.expiresAt)
+        : this.formatExpiry(this.card.expiresAt);
+      pill.textContent = text;
+    }, 1000);
+  }
+
+  private stopExpiryTick(): void {
+    if (this.expiryTickInterval !== null) {
+      window.clearInterval(this.expiryTickInterval);
+      this.expiryTickInterval = null;
+    }
   }
 }

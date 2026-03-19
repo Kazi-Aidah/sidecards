@@ -173,6 +173,10 @@ export default class SideCardsPlugin extends Plugin {
       },
     });
 
+    this.addRibbonIcon('home', 'Open sidecards homepage', () => void this.activateHomeView());
+    this.addRibbonIcon('rows-3', 'Open sidecards sidebar', () => void this.activateView());
+    this.addRibbonIcon('rectangle-horizontal', 'Add card to sidecards', () => new QuickCardWithFilterModal(this.app, this, this.store).open());
+
     this.addSettingTab(new SideCardsSettingTab(this.app, this));
 
     this.registerEvent(
@@ -544,11 +548,22 @@ class SideCardsSettingTab extends PluginSettingTab {
       });
 
     // ── Behaviour ─────────────────────────────────────────────────────────────
-    new Setting(containerEl).setName('Behaviour').setDesc('Configure how you interact with cards and the sidebar.').setHeading();
-    new Setting(containerEl).setName('Auto-open sidebar').setDesc('Automatically open the sidebar when Obsidian starts').addToggle(toggle => toggle.setValue(!!this.plugin.settings.autoOpen).onChange(async (value) => {
-      this.plugin.settings.autoOpen = value;
-      await this.plugin.saveSettings();
-    }));
+    new Setting(containerEl).setName('Behaviour').setDesc('').setHeading();
+
+    new Setting(containerEl)
+      .setName('Note title format')
+      .setDesc('Format used when creating a note from a card.')
+      .addDropdown(dd => dd
+        .addOption('words3_hhmm', 'First 3 words + HHmm') // eslint-disable-line obsidianmd/ui/sentence-case
+        .addOption('words5_hhmm', 'First 5 words + HHmm') // eslint-disable-line obsidianmd/ui/sentence-case
+        .addOption('datetime', 'YYYYMMDD HHmm') // eslint-disable-line obsidianmd/ui/sentence-case
+        .setValue(this.plugin.settings.noteTitleFormat || 'words3_hhmm')
+        .onChange(async (value) => {
+          this.plugin.settings.noteTitleFormat = value as 'words3_hhmm' | 'words5_hhmm' | 'datetime';
+          await this.plugin.saveSettings();
+        }));
+
+
     new Setting(containerEl).setName('Save key').setDesc('Choose which key combo saves/submits a card').addDropdown(dropdown => dropdown.addOption('enter', 'Enter').addOption('shift-enter', 'Shift+Enter').addOption('ctrl-enter', 'Ctrl+Enter').addOption('alt-enter', 'Alt+Enter').addOption('ctrl-shift-enter', 'Ctrl+Shift+Enter').setValue(this.plugin.settings.saveKey || 'enter').onChange(async (value) => {
       this.plugin.settings.saveKey = value;
       await this.plugin.saveSettings();
@@ -557,10 +572,37 @@ class SideCardsSettingTab extends PluginSettingTab {
       this.plugin.settings.nextLineKey = value;
       await this.plugin.saveSettings();
     }));
+
+    new Setting(containerEl).setName('Auto-open sidebar').setDesc('Automatically open the sidebar when Obsidian starts').addToggle(toggle => toggle.setValue(!!this.plugin.settings.autoOpen).onChange(async (value) => {
+      this.plugin.settings.autoOpen = value;
+      await this.plugin.saveSettings();
+    }));
+    
     new Setting(containerEl).setName('Auto-archive on expiry').setDesc('Automatically archive cards when their expiry time passes').addToggle(toggle => toggle.setValue(!!this.plugin.settings.autoArchiveOnExpiry).onChange(async (value) => {
       this.plugin.settings.autoArchiveOnExpiry = value;
       await this.plugin.saveSettings();
     }));
+    
+    new Setting(containerEl)
+      .setName('Show time left to expire')
+      .setDesc('Show a pill on cards with the remaining time until expiry.')
+      .addToggle(toggle => toggle.setValue(!!this.plugin.settings.showExpiryTimeLeft).onChange(async (value) => {
+        this.plugin.settings.showExpiryTimeLeft = value;
+        await this.plugin.saveSettings();
+        refreshSidebarCards();
+      }));
+    new Setting(containerEl)
+      .setName('Expiry time format')
+      .setDesc('How to display the remaining expiry time.')
+      .addDropdown(dd => dd
+        .addOption('human', 'Human (2 years 3 months 5 days)')
+        .addOption('short', 'Short (2y 3mo 5d 4h 3m)')
+        .setValue(this.plugin.settings.expiryTimeFormat || 'human')
+        .onChange(async (value) => {
+          this.plugin.settings.expiryTimeFormat = value as 'human' | 'short';
+          await this.plugin.saveSettings();
+          refreshSidebarCards();
+        }));
 
     // ── Homepage ──────────────────────────────────────────────────────────────
     new Setting(containerEl).setName('Homepage').setDesc('Configure the SideCards homepage tab.').setHeading(); // eslint-disable-line obsidianmd/ui/sentence-case
@@ -667,6 +709,28 @@ class SideCardsSettingTab extends PluginSettingTab {
           })();
         }));
 
+    new Setting(containerEl)
+      .setName('Homepage max width')
+      .setDesc('Maximum width of the homepage content area in pixels. Drag to adjust.')
+      .addSlider(slider => {
+        const label = containerEl.createSpan({ text: `${this.plugin.settings.homepageMaxWidth ?? 1000}px`, cls: 'sc-slider-label' });
+        slider
+          .setLimits(400, 2400, 50)
+          .setValue(this.plugin.settings.homepageMaxWidth ?? 1000)
+          .setDynamicTooltip()
+          .onChange(async (value) => {
+            this.plugin.settings.homepageMaxWidth = value;
+            label.textContent = `${value}px`;
+            await this.plugin.saveSettings();
+            // Apply live to open homepage views
+            document.querySelectorAll('.sc-home-container').forEach((el) => {
+              (el as HTMLElement).style.setProperty('--sc-home-max-width', `${value}px`);
+            });
+          });
+        // Append label after the slider control
+        slider.sliderEl.insertAdjacentElement('afterend', label);
+      });
+
     // ── Appearance ────────────────────────────────────────────────────────────
     new Setting(containerEl).setName('Appearance').setDesc('Customize how cards and the sidebar look.').setHeading();
 
@@ -688,7 +752,7 @@ class SideCardsSettingTab extends PluginSettingTab {
         applyCardColorToElement(previewCard, 'var(--card-color-1)', settings);
       });
       previewCard.empty();
-      previewCard.createDiv({ text: 'This is how yours cards will look!', cls: 'sc-content' });
+      previewCard.createDiv({ text: 'This is how yours cards will look like!', cls: 'sc-content' });
       if (settings.groupTags) {
         if (settings.showTimestamps && settings.timestampBelowTags) {
           previewCard.createDiv({ cls: 'sc-timestamp', text: (window as any).moment ? (window as any).moment().format(settings.datetimeFormat || 'ddd D') : 'Today 12:00' });
@@ -869,6 +933,17 @@ class SideCardsSettingTab extends PluginSettingTab {
           this.updateCSSVariables();
           if (color.key === 'color1') updatePreview();
           refreshSidebarCards();
+        }));
+      row.addExtraButton(btn => btn
+        .setIcon('rotate-ccw')
+        .setTooltip('Reset to default')
+        .onClick(async () => {
+          (this.plugin.settings as any)[color.key] = color.default;
+          await this.plugin.saveSettings();
+          this.updateCSSVariables();
+          if (color.key === 'color1') updatePreview();
+          refreshSidebarCards();
+          this.display();
         }));
     });
     // ── Categories ────────────────────────────────────────────────────────────
@@ -1631,6 +1706,69 @@ class SideCardsSettingTab extends PluginSettingTab {
       });
     };
     renderStatusConfig();
+
+    // ── Data Management ───────────────────────────────────────────────────────
+    new Setting(containerEl).setName('Data management').setHeading();
+
+    new Setting(containerEl)
+      .setName('Export data')
+      .setDesc('Download all cards as a JSON file.')
+      .addButton(btn => btn
+        .setButtonText('Export data')
+        .onClick(() => {
+          const cards = this.plugin.store.getAll().map(c => c.toJSON());
+          const payload = JSON.stringify({ version: 1, exportedAt: new Date().toISOString(), cards }, null, 2);
+          const blob = new Blob([payload], { type: 'application/json' });
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement('a');
+          a.href = url;
+          a.download = `sidecards-export-${new Date().toISOString().slice(0, 10)}.json`;
+          document.body.appendChild(a);
+          a.click();
+          document.body.removeChild(a);
+          URL.revokeObjectURL(url);
+          new Notice('Cards exported.');
+        }));
+
+    new Setting(containerEl)
+      .setName('Import data')
+      .setDesc('Import cards from a previously exported JSON file. Existing cards with the same ID will be skipped.')
+      .addButton(btn => btn
+        .setButtonText('Import data')
+        .onClick(() => {
+          const input = document.createElement('input');
+          input.type = 'file';
+          input.accept = '.json,application/json';
+          input.addEventListener('change', () => {
+            const file = input.files?.[0];
+            if (!file) return;
+            const reader = new FileReader();
+            reader.onload = () => {
+              void (async () => {
+                try {
+                  const parsed = JSON.parse(reader.result as string);
+                  const incoming: any[] = Array.isArray(parsed) ? parsed : (Array.isArray(parsed?.cards) ? parsed.cards : []);
+                  if (incoming.length === 0) { new Notice('No cards found in file.'); return; }
+                  const existing = new Set(this.plugin.store.getAll().map(c => c.id));
+                  let added = 0;
+                  for (const raw of incoming) {
+                    if (!raw?.id || existing.has(raw.id)) continue;
+                    const { Card } = await import('../models/Card');
+                    await this.plugin.store.add(new Card(raw));
+                    added++;
+                  }
+                  new Notice(`Imported ${added} card${added !== 1 ? 's' : ''}.`);
+                } catch (e) {
+                  new Notice('Import failed: invalid JSON file.');
+                  // eslint-disable-next-line no-undef
+                  console.error('SideCards import error:', e);
+                }
+              })();
+            };
+            reader.readAsText(file);
+          });
+          input.click();
+        }));
   }
 }
 

@@ -79,6 +79,10 @@ export interface SideCardsSettings {
   showRecentNotes?: boolean;
   recentNotesLimit?: number;
   notesPlacement?: 'left' | 'right';
+  noteTitleFormat?: 'words3_hhmm' | 'words5_hhmm' | 'datetime';
+  showExpiryTimeLeft?: boolean;
+  expiryTimeFormat?: 'human' | 'short';
+  homepageMaxWidth?: number; // px, 0 = no limit
 }
 
 export const DEFAULT_SETTINGS: SideCardsSettings = {
@@ -147,4 +151,8 @@ export const DEFAULT_SETTINGS: SideCardsSettings = {
   showRecentNotes: true,
   recentNotesLimit: 5,
   notesPlacement: 'left',
+  noteTitleFormat: 'words3_hhmm',
+  showExpiryTimeLeft: false,
+  expiryTimeFormat: 'human',
+  homepageMaxWidth: 1000,
 };

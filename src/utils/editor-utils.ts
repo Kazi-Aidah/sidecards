@@ -52,7 +52,14 @@ export function handleKeyWrap(event: KeyboardEvent, editorEl: HTMLElement, edito
   range.insertNode(node);
 
   const newRange = document.createRange();
-  newRange.selectNode(node);
+  if (selectedText.length === 0) {
+    // No selection: place cursor between the pair
+    newRange.setStart(node, open.length);
+    newRange.collapse(true);
+  } else {
+    // Had selection: select the wrapped text
+    newRange.selectNode(node);
+  }
   sel.removeAllRanges();
   sel.addRange(newRange);
 

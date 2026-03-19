@@ -11,6 +11,8 @@ export class CardStore {
   private pendingWrites: Map<string, Promise<void>> = new Map();
   private _pendingTagWrites: Map<string, { tags: string[], expiresAt: number }> = new Map();
   private _reapplyingTags: Set<string> = new Set();
+  // Paths currently being written by syncCardToFrontmatter — skip vault modify re-reads for these
+  public _syncingPaths: Set<string> = new Set();
   private expiryInterval: number | null = null;
   private dateRolloverTimeout: number | null = null;
 
@@ -80,8 +82,10 @@ export class CardStore {
 
   async add(card: Card): Promise<void> {
     this.cards.set(card.id, card);
-    this.eventBus.emit('card:added', card);
     await this.persist();
+    // Always create a backing note immediately before notifying views
+    await this.createNoteFromCard(card.id);
+    this.eventBus.emit('card:added', card);
   }
 
   async update(id: string, updates: Partial<Card>): Promise<Card> {
@@ -131,8 +135,21 @@ export class CardStore {
     if (folder && folder !== '/' && !(await this.app.vault.adapter.exists(folder))) {
       await this.app.vault.createFolder(folder);
     }
-    const title = (card.content || 'card').split(/\s+/).slice(0, 10).join(' ').replace(/[^a-zA-Z0-9\s-]/g, '').trim() || `card-${Date.now()}`;
-    let fileName = `${title} ${new Date(card.created).getHours().toString().padStart(2, '0')}${new Date(card.created).getMinutes().toString().padStart(2, '0')}.md`;
+    const fmt = this.settings.noteTitleFormat || 'words3_hhmm';
+    const d = new Date(card.created);
+    const hhmm = `${d.getHours().toString().padStart(2, '0')}${d.getMinutes().toString().padStart(2, '0')}`;
+    let title: string;
+    if (fmt === 'datetime') {
+      const yyyy = d.getFullYear();
+      const mo = (d.getMonth() + 1).toString().padStart(2, '0');
+      const dy = d.getDate().toString().padStart(2, '0');
+      title = `${yyyy}${mo}${dy} ${hhmm}`;
+    } else {
+      const wordCount = fmt === 'words5_hhmm' ? 5 : 3;
+      const words = (card.content || 'card').split(/\s+/).slice(0, wordCount).join(' ').replace(/[^a-zA-Z0-9\s-]/g, '').trim() || `card-${Date.now()}`;
+      title = `${words} ${hhmm}`;
+    }
+    let fileName = `${title}.md`;
     let filePath = folder && folder !== '/' ? `${folder}/${fileName}` : fileName;
     if (await this.app.vault.adapter.exists(filePath)) {
       fileName = `${title}-${Date.now()}.md`;
@@ -143,7 +160,6 @@ export class CardStore {
       '---',
       tagsYaml,
       `card-color: ${this.getFrontmatterColorValueForCard(card.color)}`,
-      `Created-Date: ${new Date(card.created).toISOString()}`,
       card.archived ? 'Archived: true' : '',
       card.pinned ? 'Pinned: true' : '',
       card.category ? `Category: ${String(card.category).replace(/\n/g, ' ')}` : '',
@@ -272,6 +288,7 @@ export class CardStore {
         expiresAt: expiresMatch ? new Date(expiresMatch[1].trim()).getTime() : null,
         status: statusMatch ? { name: statusMatch[1].trim(), color: card.status?.color || '', textColor: card.status?.textColor || '#000' } : null,
         color: normalizedColor.color,
+        created: file.stat.ctime,
         content: content.replace(fmMatch[0], '').trim() 
       });
       if (colorRaw && normalizedColor.frontmatterColor !== null && colorRaw !== String(normalizedColor.frontmatterColor)) {
@@ -339,11 +356,11 @@ export class CardStore {
     if (this.expiryInterval) {
       window.clearInterval(this.expiryInterval);
     }
+    // Check every second so expiry fires promptly
     this.expiryInterval = window.setInterval(() => {
       void (async () => {
         const now = Date.now();
-        const cards = this.getAll();
-        for (const card of cards) {
+        for (const card of this.getAll()) {
           if (!card.expiresAt || card.archived) continue;
           if (card.expiresAt <= now) {
             if (this.settings.autoArchiveOnExpiry) {
@@ -354,7 +371,7 @@ export class CardStore {
           }
         }
       })();
-    }, 60_000);
+    }, 1000);
   }
 
   handleDateRollover(): void {
@@ -380,27 +397,33 @@ export class CardStore {
     if (!card.notePath) return;
     const file = this.app.vault.getAbstractFileByPath(card.notePath);
     if (!(file instanceof TFile)) return;
-    let text = await this.app.vault.read(file);
-    if (typeof updates.archived !== 'undefined') {
-      text = updateFrontmatter(text, 'Archived', !!updates.archived);
+    this._syncingPaths.add(card.notePath);
+    try {
+      let text = await this.app.vault.read(file);
+      if (typeof updates.archived !== 'undefined') {
+        text = updateFrontmatter(text, 'Archived', !!updates.archived);
+      }
+      if (typeof updates.pinned !== 'undefined') {
+        text = updateFrontmatter(text, 'Pinned', !!updates.pinned);
+      }
+      if (typeof updates.category !== 'undefined') {
+        text = updateFrontmatter(text, 'Category', updates.category || null);
+      }
+      if (typeof updates.expiresAt !== 'undefined') {
+        text = updateFrontmatter(text, 'Expires-At', updates.expiresAt ? new Date(updates.expiresAt).toISOString() : null);
+      }
+      if (typeof updates.color !== 'undefined') {
+        const normalizedColor = this.normalizeCardColorValue(updates.color as any, card.color);
+        text = updateFrontmatter(text, 'card-color', normalizedColor.frontmatterColor ?? normalizedColor.color);
+      }
+      if (typeof updates.status !== 'undefined') {
+        text = updateFrontmatter(text, 'Status', updates.status?.name || null);
+      }
+      await this.app.vault.modify(file, text);
+    } finally {
+      // Small delay so the vault modify event fires before we clear the guard
+      setTimeout(() => this._syncingPaths.delete(card.notePath!), 500);
     }
-    if (typeof updates.pinned !== 'undefined') {
-      text = updateFrontmatter(text, 'Pinned', !!updates.pinned);
-    }
-    if (typeof updates.category !== 'undefined') {
-      text = updateFrontmatter(text, 'Category', updates.category || null);
-    }
-    if (typeof updates.expiresAt !== 'undefined') {
-      text = updateFrontmatter(text, 'Expires-At', updates.expiresAt ? new Date(updates.expiresAt).toISOString() : null);
-    }
-    if (typeof updates.color !== 'undefined') {
-      const normalizedColor = this.normalizeCardColorValue(updates.color as any, card.color);
-      text = updateFrontmatter(text, 'card-color', normalizedColor.frontmatterColor ?? normalizedColor.color);
-    }
-    if (typeof updates.status !== 'undefined') {
-      text = updateFrontmatter(text, 'Status', updates.status?.name || null);
-    }
-    await this.app.vault.modify(file, text);
   }
 
   async migrateCardColorFrontmatterFormat(): Promise<void> {

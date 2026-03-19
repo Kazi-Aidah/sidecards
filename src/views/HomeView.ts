@@ -6,6 +6,7 @@ import { CardComponent } from "./components/Card";
 import { SortService, SortMode } from "../services/SortService";
 import { resolveAutoColor } from "../utils/dom";
 import { animateCardsEntrance } from "../utils/animations";
+import { InlineAutocomplete } from "./components/InlineAutocomplete";
 
 export class SideCardsHomeView extends ItemView {
   private selectedColor = 'var(--card-color-1)';
@@ -284,6 +285,9 @@ export class SideCardsHomeView extends ItemView {
     this.sortAscending = typeof this.plugin.settings.sortAscending === 'boolean' ? this.plugin.settings.sortAscending : false;
 
     const main = container.createDiv({ cls: 'sc-home-main' });
+    // Apply user-configured max width via CSS variable so it overrides correctly
+    const maxW = this.plugin.settings.homepageMaxWidth ?? 1000;
+    container.style.setProperty('--sc-home-max-width', `${maxW}px`);
     
     // Top Section
     const topSection = main.createDiv({ cls: 'sc-home-top' });
@@ -349,6 +353,9 @@ export class SideCardsHomeView extends ItemView {
     const editorEl = topSection.createDiv({ cls: 'sc-home-editor' });
     editorEl.setAttribute('contenteditable', 'true');
     editorEl.dataset.placeholder = 'Type here... (@category, #tag)';
+
+    // @category / #tag inline autocomplete
+    new InlineAutocomplete(editorEl, this.store);
 
     const updatePlaceholder = () => {
       if (!editorEl.textContent?.trim()) editorEl.addClass('is-empty');
@@ -452,6 +459,12 @@ export class SideCardsHomeView extends ItemView {
     }
 
     this.renderCategoryBar(categoryBar, cardList);
+
+    // Live-update when cards change
+    const onCardChange = () => { void this.renderCards(cardList); };
+    this.store.eventBus.on('card:added', onCardChange);
+    this.store.eventBus.on('card:updated', onCardChange);
+    this.store.eventBus.on('card:deleted', onCardChange);
 
     await this.renderCards(cardList);
   }
@@ -829,19 +842,15 @@ export class SideCardsHomeView extends ItemView {
       if (category === 'archived') {
         cards = cards.filter(c => c.archived);
       } else if (category === 'today') {
-        const today = new Date().toDateString();
-        cards = cards.filter(c => new Date(c.created).toDateString() === today);
+        cards = cards.filter(c => (c.category || '').toLowerCase() === 'today' && !c.archived);
       } else if (category === 'tomorrow') {
-        const tomorrow = new Date();
-        tomorrow.setDate(tomorrow.getDate() + 1);
-        const tomorrowStr = tomorrow.toDateString();
-        cards = cards.filter(c => new Date(c.created).toDateString() === tomorrowStr);
+        cards = cards.filter(c => (c.category || '').toLowerCase() === 'tomorrow' && !c.archived);
       } else {
         // Resolve id → label for custom categories
         const customCats = this.plugin.settings.customCategories || [];
         const matched = customCats.find(c => c.id === category || c.label === category);
         const categoryLabel = matched ? matched.label : category;
-        cards = cards.filter(c => c.category === categoryLabel || c.category === category);
+        cards = cards.filter(c => (c.category === categoryLabel || c.category === category) && !c.archived);
       }
     } else if (!category || category === 'all') {
       // "All" shows non-archived cards only
@@ -936,6 +945,5 @@ export class SideCardsHomeView extends ItemView {
     this.selectedTags = [];
     
     new Notice('Card created');
-    void this.renderCards(cardList);
   }
 }
