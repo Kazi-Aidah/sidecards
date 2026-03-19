@@ -44,6 +44,7 @@ export function applyCardColorToElement(cardEl: HTMLElement, colorVar: string, s
   const style = Number(settings.cardStyle ?? 2);
   const opacity = Number(settings.cardBgOpacity ?? 0.08);
   const borderThickness = Number(settings.borderThickness ?? 2);
+  const borderShadowOpacity = Number(settings.cardBorderShadowOpacity ?? 1);
 
   // Reset styles using setProperty to ensure consistency
   cardEl.style.removeProperty('border-left');
@@ -53,22 +54,23 @@ export function applyCardColorToElement(cardEl: HTMLElement, colorVar: string, s
 
   const hex = resolveColorVarToHex(colorVar, settings) || colorVar;
   const rgba = hexToRgba(hex, opacity);
+  const borderColor = borderShadowOpacity >= 1 ? colorVar : hexToRgba(hex, borderShadowOpacity);
   const borderRadius = settings.borderRadius ?? 6;
 
   if (style === 1) {
-    cardEl.style.setProperty('border', `${borderThickness}px solid ${colorVar}`, 'important');
+    cardEl.style.setProperty('border', `${borderThickness}px solid ${borderColor}`, 'important');
     cardEl.style.setProperty('background-color', rgba, 'important');
   } else if (style === 3) {
-    cardEl.style.setProperty('border-left', `${borderThickness}px solid ${colorVar}`, 'important');
+    cardEl.style.setProperty('border-left', `${borderThickness}px solid ${borderColor}`, 'important');
     cardEl.style.setProperty('background-color', rgba, 'important');
     cardEl.style.setProperty('border-top', `1px solid var(--background-modifier-border)`, 'important');
     cardEl.style.setProperty('border-right', `1px solid var(--background-modifier-border)`, 'important');
     cardEl.style.setProperty('border-bottom', `1px solid var(--background-modifier-border)`, 'important');
   } else {
     // Style 2 (Default)
-    cardEl.style.setProperty('border', `${borderThickness}px solid ${colorVar}`, 'important');
+    cardEl.style.setProperty('border', `${borderThickness}px solid ${borderColor}`, 'important');
     cardEl.style.setProperty('background-color', rgba, 'important');
-    cardEl.style.setProperty('box-shadow', `2px 2px 0 0 ${colorVar}`, 'important');
+    cardEl.style.setProperty('box-shadow', `2px 2px 0 0 ${borderColor}`, 'important');
   }
 
   cardEl.style.setProperty('border-radius', `${borderRadius}px`, 'important');

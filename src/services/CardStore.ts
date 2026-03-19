@@ -243,15 +243,51 @@ export class CardStore {
     for (const file of files) {
       const exists = this.getAll().some(c => c.notePath === file.path);
       if (!exists) {
-        const content = await this.app.vault.read(file);
+        const raw = await this.app.vault.read(file);
+        const fmMatch = raw.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n/);
+        let cardContent = raw.trim();
+        let tags: string[] = [];
+        let category: string | null = null;
+        let expiresAt: number | null = null;
+        let color = 'var(--card-color-1)';
+        let archived = false;
+        let pinned = false;
+
+        if (fmMatch) {
+          const fm = fmMatch[1];
+          tags = parseTagsFromFrontmatter(fm);
+          archived = /archived:\s*true/i.test(fm);
+          pinned = /pinned:\s*true/i.test(fm);
+          const categoryMatch = fm.match(/^\s*category\s*:\s*(.+)$/im);
+          const expiresMatch = fm.match(/^\s*expires-at\s*:\s*(.+)$/im);
+          const colorMatch = fm.match(/^\s*card-color\s*:\s*(.+)$/im);
+          if (categoryMatch) category = categoryMatch[1].trim();
+          if (expiresMatch) {
+            const parsed = new Date(expiresMatch[1].trim()).getTime();
+            if (!Number.isNaN(parsed)) expiresAt = parsed;
+          }
+          if (colorMatch) {
+            const normalized = this.normalizeCardColorValue(colorMatch[1].trim(), color);
+            color = normalized.color;
+          }
+          cardContent = raw.replace(fmMatch[0], '').trim();
+        }
+
         const card = new Card({
-          content: content.trim(),
+          content: cardContent,
           notePath: file.path,
-          created: file.stat.ctime
+          created: file.stat.ctime,
+          tags,
+          category,
+          expiresAt,
+          color,
+          archived,
+          pinned,
         });
-        await this.add(card);
+        this.cards.set(card.id, card);
       }
     }
+    await this.persist();
     if (!silent) new Notice(`Imported ${files.length} notes from ${folder}`);
   }
 

@@ -412,10 +412,15 @@ export class QuickCardWithFilterModal extends Modal {
 
       const tags = tagsInput.value.split(',').map(t => t.trim()).filter(t => !!t);
       const category = select.value === 'all' ? null : select.value;
+
+      // Also extract inline @category from content and strip @/# tokens
+      const inlineCatMatch = /@([^\s#@,.]+)/.exec(content);
+      const effectiveCategory = inlineCatMatch ? inlineCatMatch[1] : category;
+      const cleanContent = content.replace(/@[^\s#@,.]+/g, '').replace(/\s{2,}/g, ' ').trim();
       
       const autoColor = resolveAutoColor(content, tags, this.store.settings);
       const effectiveColor = autoColor || selectedColor;
-      const card = new Card({ content, color: effectiveColor, tags, category });
+      const card = new Card({ content: cleanContent, color: effectiveColor, tags, category: effectiveCategory === 'all' ? null : effectiveCategory });
       await this.store.add(card);
       
       // If we chose a specific category, try to filter the sidebar to it

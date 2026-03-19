@@ -301,12 +301,9 @@ export class CardComponent {
   }
 
   private renderPills(container: HTMLElement): void {
-    if (this.card.expiresAt && this.store.settings.showExpiryTimeLeft) {
+    if (this.card.expiresAt) {
       const pill = container.createDiv('sc-expiry-pill');
       pill.textContent = this.formatExpiryTimeLeft(this.card.expiresAt);
-    } else if (this.card.expiresAt) {
-      const pill = container.createDiv('sc-expiry-pill');
-      pill.textContent = this.formatExpiry(this.card.expiresAt);
     }
     if (this.card.status) {
       const pill = container.createDiv('sc-status-pill');
@@ -836,7 +833,7 @@ export class CardComponent {
       if (hours)  parts.push(`${hours}h`);
       if (mins)   parts.push(`${mins}m`);
       if (secs && parts.length < 2) parts.push(`${secs}s`);
-      return parts.slice(0, 3).join(' ') || '< 1s';
+      return 'Expires in ' + (parts.slice(0, 3).join(' ') || '< 1s');
     }
     // human format
     const parts: string[] = [];
@@ -847,7 +844,7 @@ export class CardComponent {
     if (hours)  parts.push(`${hours} hour${hours !== 1 ? 's' : ''}`);
     if (mins)   parts.push(`${mins} min${mins !== 1 ? 's' : ''}`);
     if (secs && parts.length < 2) parts.push(`${secs} sec${secs !== 1 ? 's' : ''}`);
-    return parts.slice(0, 3).join(' ') || '< 1 sec';
+    return 'Expires in ' + (parts.slice(0, 3).join(' ') || '< 1 sec');
   }
 
   destroy(): void {
@@ -871,10 +868,7 @@ export class CardComponent {
     this.expiryTickInterval = window.setInterval(() => {
       const pill = this.el.querySelector('.sc-expiry-pill');
       if (!(pill instanceof HTMLElement) || !this.card.expiresAt) return;
-      const text = this.store.settings.showExpiryTimeLeft
-        ? this.formatExpiryTimeLeft(this.card.expiresAt)
-        : this.formatExpiry(this.card.expiresAt);
-      pill.textContent = text;
+      pill.textContent = this.formatExpiryTimeLeft(this.card.expiresAt);
     }, 1000);
   }
 

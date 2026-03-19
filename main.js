@@ -76,30 +76,32 @@ function resolveColorVarToHex(colorVar, settings) {
   return null;
 }
 function applyCardColorToElement(cardEl, colorVar, settings) {
-  var _a, _b, _c, _d;
+  var _a, _b, _c, _d, _e;
   const style = Number((_a = settings.cardStyle) != null ? _a : 2);
   const opacity = Number((_b = settings.cardBgOpacity) != null ? _b : 0.08);
   const borderThickness = Number((_c = settings.borderThickness) != null ? _c : 2);
+  const borderShadowOpacity = Number((_d = settings.cardBorderShadowOpacity) != null ? _d : 1);
   cardEl.style.removeProperty("border-left");
   cardEl.style.removeProperty("border");
   cardEl.style.removeProperty("background-color");
   cardEl.style.removeProperty("box-shadow");
   const hex = resolveColorVarToHex(colorVar, settings) || colorVar;
   const rgba = hexToRgba(hex, opacity);
-  const borderRadius = (_d = settings.borderRadius) != null ? _d : 6;
+  const borderColor = borderShadowOpacity >= 1 ? colorVar : hexToRgba(hex, borderShadowOpacity);
+  const borderRadius = (_e = settings.borderRadius) != null ? _e : 6;
   if (style === 1) {
-    cardEl.style.setProperty("border", `${borderThickness}px solid ${colorVar}`, "important");
+    cardEl.style.setProperty("border", `${borderThickness}px solid ${borderColor}`, "important");
     cardEl.style.setProperty("background-color", rgba, "important");
   } else if (style === 3) {
-    cardEl.style.setProperty("border-left", `${borderThickness}px solid ${colorVar}`, "important");
+    cardEl.style.setProperty("border-left", `${borderThickness}px solid ${borderColor}`, "important");
     cardEl.style.setProperty("background-color", rgba, "important");
     cardEl.style.setProperty("border-top", `1px solid var(--background-modifier-border)`, "important");
     cardEl.style.setProperty("border-right", `1px solid var(--background-modifier-border)`, "important");
     cardEl.style.setProperty("border-bottom", `1px solid var(--background-modifier-border)`, "important");
   } else {
-    cardEl.style.setProperty("border", `${borderThickness}px solid ${colorVar}`, "important");
+    cardEl.style.setProperty("border", `${borderThickness}px solid ${borderColor}`, "important");
     cardEl.style.setProperty("background-color", rgba, "important");
-    cardEl.style.setProperty("box-shadow", `2px 2px 0 0 ${colorVar}`, "important");
+    cardEl.style.setProperty("box-shadow", `2px 2px 0 0 ${borderColor}`, "important");
   }
   cardEl.style.setProperty("border-radius", `${borderRadius}px`, "important");
 }
@@ -327,8 +329,8 @@ var DateTimeModal = class extends import_obsidian.Modal {
         } else {
           let totalMs = 0;
           for (const slot of this.slots) {
-            const v = slot.value;
-            if (!v || v <= 0)
+            const v = parseFloat(slot.numInput.value) || 0;
+            if (v <= 0)
               continue;
             if (slot.unit === "seconds")
               totalMs += v * 1e3;
@@ -364,7 +366,8 @@ var DateTimeModal = class extends import_obsidian.Modal {
     const slot = {
       value: defaultValue,
       unit: defaultUnit,
-      el: row
+      el: row,
+      numInput
     };
     this.slots.push(slot);
     numInput.addEventListener("input", () => {
@@ -721,12 +724,9 @@ var _CardComponent = class {
     });
   }
   renderPills(container) {
-    if (this.card.expiresAt && this.store.settings.showExpiryTimeLeft) {
+    if (this.card.expiresAt) {
       const pill = container.createDiv("sc-expiry-pill");
       pill.textContent = this.formatExpiryTimeLeft(this.card.expiresAt);
-    } else if (this.card.expiresAt) {
-      const pill = container.createDiv("sc-expiry-pill");
-      pill.textContent = this.formatExpiry(this.card.expiresAt);
     }
     if (this.card.status) {
       const pill = container.createDiv("sc-status-pill");
@@ -1195,7 +1195,7 @@ var _CardComponent = class {
         parts2.push(`${mins}m`);
       if (secs && parts2.length < 2)
         parts2.push(`${secs}s`);
-      return parts2.slice(0, 3).join(" ") || "< 1s";
+      return "Expires in " + (parts2.slice(0, 3).join(" ") || "< 1s");
     }
     const parts = [];
     if (years)
@@ -1212,7 +1212,7 @@ var _CardComponent = class {
       parts.push(`${mins} min${mins !== 1 ? "s" : ""}`);
     if (secs && parts.length < 2)
       parts.push(`${secs} sec${secs !== 1 ? "s" : ""}`);
-    return parts.slice(0, 3).join(" ") || "< 1 sec";
+    return "Expires in " + (parts.slice(0, 3).join(" ") || "< 1 sec");
   }
   destroy() {
     if (_CardComponent.activeEditor === this) {
@@ -1235,8 +1235,7 @@ var _CardComponent = class {
       const pill = this.el.querySelector(".sc-expiry-pill");
       if (!(pill instanceof HTMLElement) || !this.card.expiresAt)
         return;
-      const text = this.store.settings.showExpiryTimeLeft ? this.formatExpiryTimeLeft(this.card.expiresAt) : this.formatExpiry(this.card.expiresAt);
-      pill.textContent = text;
+      pill.textContent = this.formatExpiryTimeLeft(this.card.expiresAt);
     }, 1e3);
   }
   stopExpiryTick() {
@@ -1580,9 +1579,9 @@ var InlineAutocomplete = class {
       this.selectedIndex = (this.selectedIndex - 1 + this.items.length) % this.items.length;
       this.highlightSelected();
     } else if (e.key === "Enter") {
+      e.preventDefault();
+      e.stopImmediatePropagation();
       if (this.selectedIndex >= 0) {
-        e.preventDefault();
-        e.stopImmediatePropagation();
         this.selectItem(this.selectedIndex);
       } else {
         this.hide();
@@ -2230,10 +2229,11 @@ var CardSidebarView = class extends import_obsidian4.ItemView {
         const catRegex = /@([^\s#@,.]+)/g;
         const catMatch = catRegex.exec(content);
         const category = catMatch ? catMatch[1] : this.activeFilters.category || void 0;
+        const cleanContent = content.replace(/@[^\s#@,.]+/g, "").replace(/#[^\s#@,.]+/g, "").replace(/\s{2,}/g, " ").trim();
         const autoColor = resolveAutoColor(content, tags, this.plugin.settings);
         const color = autoColor || "var(--card-color-1)";
         const card = new Card({
-          content,
+          content: cleanContent,
           tags,
           color,
           category: category === "all" ? void 0 : category
@@ -2707,15 +2707,51 @@ var CardStore = class {
     for (const file of files) {
       const exists = this.getAll().some((c) => c.notePath === file.path);
       if (!exists) {
-        const content = await this.app.vault.read(file);
+        const raw = await this.app.vault.read(file);
+        const fmMatch = raw.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n/);
+        let cardContent = raw.trim();
+        let tags = [];
+        let category = null;
+        let expiresAt = null;
+        let color = "var(--card-color-1)";
+        let archived = false;
+        let pinned = false;
+        if (fmMatch) {
+          const fm = fmMatch[1];
+          tags = parseTagsFromFrontmatter(fm);
+          archived = /archived:\s*true/i.test(fm);
+          pinned = /pinned:\s*true/i.test(fm);
+          const categoryMatch = fm.match(/^\s*category\s*:\s*(.+)$/im);
+          const expiresMatch = fm.match(/^\s*expires-at\s*:\s*(.+)$/im);
+          const colorMatch = fm.match(/^\s*card-color\s*:\s*(.+)$/im);
+          if (categoryMatch)
+            category = categoryMatch[1].trim();
+          if (expiresMatch) {
+            const parsed = new Date(expiresMatch[1].trim()).getTime();
+            if (!Number.isNaN(parsed))
+              expiresAt = parsed;
+          }
+          if (colorMatch) {
+            const normalized = this.normalizeCardColorValue(colorMatch[1].trim(), color);
+            color = normalized.color;
+          }
+          cardContent = raw.replace(fmMatch[0], "").trim();
+        }
         const card = new Card({
-          content: content.trim(),
+          content: cardContent,
           notePath: file.path,
-          created: file.stat.ctime
+          created: file.stat.ctime,
+          tags,
+          category,
+          expiresAt,
+          color,
+          archived,
+          pinned
         });
-        await this.add(card);
+        this.cards.set(card.id, card);
       }
     }
+    await this.persist();
     if (!silent)
       new import_obsidian5.Notice(`Imported ${files.length} notes from ${folder}`);
   }
@@ -3086,10 +3122,11 @@ var EventBus = class {
 
 // src/core/Settings.ts
 var DEFAULT_SETTINGS = {
-  storageFolder: "/",
+  storageFolder: "",
   cards: [],
   cardStyle: 2,
   cardBgOpacity: 0.08,
+  cardBorderShadowOpacity: 1,
   borderThickness: 2,
   disableFilterButtons: false,
   disableTimeBasedFiltering: false,
@@ -3527,9 +3564,12 @@ var QuickCardWithFilterModal = class extends import_obsidian7.Modal {
       }
       const tags = tagsInput.value.split(",").map((t) => t.trim()).filter((t) => !!t);
       const category = select.value === "all" ? null : select.value;
+      const inlineCatMatch = /@([^\s#@,.]+)/.exec(content);
+      const effectiveCategory = inlineCatMatch ? inlineCatMatch[1] : category;
+      const cleanContent = content.replace(/@[^\s#@,.]+/g, "").replace(/\s{2,}/g, " ").trim();
       const autoColor = resolveAutoColor(content, tags, this.store.settings);
       const effectiveColor = autoColor || selectedColor;
-      const card = new Card({ content, color: effectiveColor, tags, category });
+      const card = new Card({ content: cleanContent, color: effectiveColor, tags, category: effectiveCategory === "all" ? null : effectiveCategory });
       await this.store.add(card);
       if (category) {
         const view = (_b = this.app.workspace.getLeavesOfType("card-sidebar")[0]) == null ? void 0 : _b.view;
@@ -4088,7 +4128,6 @@ var SideCardsHomeView = class extends import_obsidian9.ItemView {
     await this.renderCards(cardList);
   }
   async renderFileList(container, type) {
-    var _a;
     container.empty();
     const files = type === "recent" ? await this.getRecentFiles() : await this.getPinnedFiles();
     if (files.length === 0) {
@@ -4104,25 +4143,21 @@ var SideCardsHomeView = class extends import_obsidian9.ItemView {
         void this.app.workspace.getLeaf(false).openFile(file);
       });
       if (type === "pinned") {
-        const isFromSettings = (_a = this.plugin.settings.pinnedNotes) == null ? void 0 : _a.includes(file.path);
         item.addEventListener("contextmenu", (e) => {
           e.preventDefault();
           const menu = new import_obsidian9.Menu();
-          if (isFromSettings) {
-            menu.addItem((i) => i.setTitle("Unpin from SideCards").setIcon("pin-off").onClick(async () => {
-              this.plugin.settings.pinnedNotes = (this.plugin.settings.pinnedNotes || []).filter((p) => p !== file.path);
-              await this.plugin.saveSettings();
-              await this.renderFileList(container, "pinned");
-            }));
-          } else {
-            menu.addItem((i) => i.setTitle("Managed by Bookmarks plugin").setDisabled(true));
-          }
+          menu.addItem((i) => i.setTitle("Unpin from SideCards").setIcon("pin-off").onClick(async () => {
+            this.plugin.settings.pinnedNotes = (this.plugin.settings.pinnedNotes || []).filter((p) => p !== file.path);
+            await this.plugin.saveSettings();
+            await this.renderFileList(container, "pinned");
+          }));
           menu.showAtMouseEvent(e);
         });
       }
     }
   }
   async renderCustomFileIcon(iconEl, file) {
+    var _a;
     const iconInfo = await this.getIconicFileIcon(file);
     if (!iconInfo) {
       (0, import_obsidian9.setIcon)(iconEl, "file-text");
@@ -4155,7 +4190,21 @@ var SideCardsHomeView = class extends import_obsidian9.ItemView {
       rendered = true;
     }
     if (iconInfo.color) {
-      iconEl.style.color = iconInfo.color;
+      const colorNameToVar = {
+        red: "var(--color-red)",
+        orange: "var(--color-orange)",
+        yellow: "var(--color-yellow)",
+        green: "var(--color-green)",
+        cyan: "var(--color-cyan)",
+        blue: "var(--color-blue)",
+        purple: "var(--color-purple)",
+        pink: "var(--color-pink)",
+        magenta: "var(--color-pink)",
+        gray: "var(--color-base-70)",
+        grey: "var(--color-base-70)"
+      };
+      const normalized = iconInfo.color.trim().toLowerCase();
+      iconEl.style.color = (_a = colorNameToVar[normalized]) != null ? _a : iconInfo.color;
     }
   }
   normalizeLucideIconName(rawIcon) {
@@ -4234,7 +4283,6 @@ var SideCardsHomeView = class extends import_obsidian9.ItemView {
     return this.app.vault.getMarkdownFiles().sort((a, b) => b.stat.mtime - a.stat.mtime).slice(0, limit);
   }
   async getPinnedFiles() {
-    var _a, _b;
     const pinned = [];
     if (this.plugin.settings.pinnedNotes) {
       this.plugin.settings.pinnedNotes.forEach((path) => {
@@ -4243,26 +4291,36 @@ var SideCardsHomeView = class extends import_obsidian9.ItemView {
           pinned.push(file);
       });
     }
-    try {
-      const bookmarks = (_b = (_a = this.app.internalPlugins) == null ? void 0 : _a.getPluginById("bookmarks")) == null ? void 0 : _b.instance;
-      if (bookmarks && bookmarks.items) {
-        bookmarks.items.forEach((item) => {
-          if (item.type === "file") {
-            const file = this.app.vault.getAbstractFileByPath(item.path);
-            if (file instanceof import_obsidian9.TFile && !pinned.includes(file))
-              pinned.push(file);
-          }
-        });
-      }
-    } catch (e) {
-    }
-    return pinned.slice(0, 10);
+    return pinned;
   }
   async refreshPinnedNotes() {
     const pinnedList = this.containerEl.querySelector(".sc-home-file-list.pinned");
     if (pinnedList) {
       await this.renderFileList(pinnedList, "pinned");
     }
+  }
+  async refresh() {
+    var _a;
+    const main = this.containerEl.querySelector(".sc-home-main");
+    if (!main)
+      return;
+    const titleEl = main.querySelector(".sc-home-title");
+    if (titleEl)
+      titleEl.textContent = this.plugin.settings.homepageName || "SideCards";
+    const maxW = (_a = this.plugin.settings.homepageMaxWidth) != null ? _a : 1e3;
+    this.containerEl.style.setProperty("--sc-home-max-width", `${maxW}px`);
+    const categoryBar = main.querySelector(".sc-home-category-bar");
+    if (categoryBar) {
+      this.renderCategoryBar(categoryBar, this.cardListEl);
+    }
+    const pinnedList = main.querySelector(".sc-home-file-list.pinned");
+    if (pinnedList)
+      await this.renderFileList(pinnedList, "pinned");
+    const recentList = main.querySelector(".sc-home-file-list:not(.pinned)");
+    if (recentList)
+      await this.renderFileList(recentList, "recent");
+    if (this.cardListEl)
+      await this.renderCards(this.cardListEl);
   }
   async refreshHomeContent(cardList, pinnedList, recentList) {
     this.iconicFileIconsCache = null;
@@ -4487,11 +4545,12 @@ var SideCardsHomeView = class extends import_obsidian9.ItemView {
     const catRegex = /@([^\s#@,.]+)/g;
     const catMatch = catRegex.exec(content);
     const category = catMatch ? catMatch[1] : this.filterValue === "all" ? void 0 : this.filterValue;
+    const cleanContent = content.replace(/@[^\s#@,.]+/g, "").replace(/#[^\s#@,.]+/g, "").replace(/\s{2,}/g, " ").trim();
     const allTags = [.../* @__PURE__ */ new Set([...tags, ...this.selectedTags])];
     const autoColor = resolveAutoColor(content, allTags, this.plugin.settings);
     const effectiveColor = autoColor || this.selectedColor;
     const card = new Card({
-      content,
+      content: cleanContent,
       color: effectiveColor,
       tags: allTags,
       category
@@ -4706,6 +4765,11 @@ var SideCardsPlugin = class extends import_obsidian10.Plugin {
     this.injectStatusColors();
     this.applyButtonPadding();
     this.app.workspace.onLayoutReady(() => {
+      if (!this.settings.storageFolder) {
+        this.showStorageFolderSetupModal();
+      } else {
+        void this.store.importNotesFromFolderToSettings(this.settings.storageFolder, true);
+      }
       if (this.settings.autoOpen) {
         void this.activateView();
       }
@@ -4857,6 +4921,72 @@ var SideCardsPlugin = class extends import_obsidian10.Plugin {
     } catch (e) {
     }
   }
+  showStorageFolderSetupModal() {
+    const modal = new import_obsidian10.Modal(this.app);
+    modal.modalEl.addClass("sc-setup-modal");
+    modal.titleEl.setText("Welcome to SideCards");
+    const content = modal.contentEl;
+    content.createEl("p", { text: "Set a storage folder to save your cards as notes." });
+    const folderRow = content.createDiv({ cls: "sc-setup-folder-row" });
+    const folderInput = folderRow.createEl("input", {
+      type: "text",
+      placeholder: "e.g. Cards",
+      cls: "sc-setup-folder-input"
+    });
+    const suggestEl = folderRow.createDiv({ cls: "sc-setup-folder-suggest" });
+    const folderSet = /* @__PURE__ */ new Set();
+    this.app.vault.getAllLoadedFiles().forEach((f) => {
+      if (f.children) {
+        if (f.path && f.path !== "/")
+          folderSet.add(f.path);
+      } else if (f.parent && f.parent.path && f.parent.path !== "/") {
+        folderSet.add(f.parent.path);
+      }
+    });
+    const allFolders = Array.from(folderSet).sort();
+    const renderSuggestions = (query) => {
+      suggestEl.empty();
+      const matches = query ? allFolders.filter((p) => p.toLowerCase().includes(query.toLowerCase())) : allFolders;
+      if (matches.length === 0) {
+        suggestEl.removeClass("is-visible");
+        return;
+      }
+      matches.slice(0, 10).forEach((path) => {
+        const item = suggestEl.createDiv({ cls: "sc-setup-folder-item", text: path });
+        item.addEventListener("mousedown", (e) => {
+          e.preventDefault();
+          folderInput.value = path;
+          suggestEl.removeClass("is-visible");
+        });
+      });
+      suggestEl.addClass("is-visible");
+    };
+    folderInput.addEventListener("focus", () => renderSuggestions(folderInput.value));
+    folderInput.addEventListener("input", () => renderSuggestions(folderInput.value));
+    folderInput.addEventListener("blur", () => setTimeout(() => suggestEl.removeClass("is-visible"), 150));
+    const btnRow = content.createDiv({ cls: "sc-setup-btn-row" });
+    const cancelBtn = btnRow.createEl("button", { text: "Cancel" });
+    cancelBtn.addEventListener("click", () => {
+      this.settings.tutorialShown = true;
+      void this.saveSettings();
+      modal.close();
+    });
+    const saveBtn = btnRow.createEl("button", { text: "Save", cls: "mod-cta" });
+    saveBtn.addEventListener("click", () => {
+      void (async () => {
+        const val = folderInput.value.trim();
+        if (val) {
+          this.settings.storageFolder = val;
+          this.settings.tutorialShown = true;
+          await this.saveSettings();
+          void this.store.importNotesFromFolderToSettings(val, true);
+        }
+        modal.close();
+      })();
+    });
+    modal.open();
+    setTimeout(() => folderInput.focus(), 50);
+  }
   async fetchAllReleases() {
     const allReleases = [];
     let page = 1;
@@ -4947,6 +5077,7 @@ var SideCardsSettingTab = class extends import_obsidian10.PluginSettingTab {
       this.plugin.settings.buttonPaddingBottom = paddingPx;
       this.plugin.applyButtonPadding();
     };
+    const refreshHomepage = () => this.plugin.refreshHomepageViews();
     const refreshSidebarHeader = () => {
       var _a2;
       try {
@@ -4970,6 +5101,7 @@ var SideCardsSettingTab = class extends import_obsidian10.PluginSettingTab {
         }
       } catch (e) {
       }
+      refreshHomepage();
     };
     const refreshSidebarCards = () => {
       var _a2;
@@ -5031,7 +5163,6 @@ var SideCardsSettingTab = class extends import_obsidian10.PluginSettingTab {
       refreshSidebarCards();
     }));
     new import_obsidian10.Setting(containerEl).setName("Homepage").setDesc("Configure the SideCards homepage tab.").setHeading();
-    const refreshHomepage = () => this.plugin.refreshHomepageViews();
     new import_obsidian10.Setting(containerEl).setName("Replace default tab with homepage").setDesc("Open the SideCards homepage instead of the default new tab.").addToggle((toggle) => toggle.setValue(!!this.plugin.settings.replaceHomepageWithSidecards).onChange(async (value) => {
       this.plugin.settings.replaceHomepageWithSidecards = value;
       await this.plugin.saveSettings();
@@ -5163,6 +5294,15 @@ var SideCardsSettingTab = class extends import_obsidian10.PluginSettingTab {
       updatePreview();
       refreshSidebarCards();
     }));
+    new import_obsidian10.Setting(containerEl).setName("Card border and shadow opacity").setDesc("Set the opacity of the card border and shadow color").addSlider((slider) => {
+      var _a2;
+      return slider.setLimits(0, 1, 0.05).setValue((_a2 = this.plugin.settings.cardBorderShadowOpacity) != null ? _a2 : 1).setDynamicTooltip().onChange(async (value) => {
+        this.plugin.settings.cardBorderShadowOpacity = value;
+        await this.plugin.saveSettings();
+        updatePreview();
+        refreshSidebarCards();
+      });
+    });
     new import_obsidian10.Setting(containerEl).setName("Card border radius").setDesc("Set the corner rounding of the card").addSlider((slider) => slider.setLimits(0, 30, 1).setValue(this.plugin.settings.borderRadius || 0).setDynamicTooltip().onChange(async (value) => {
       this.plugin.settings.borderRadius = value;
       await this.plugin.saveSettings();

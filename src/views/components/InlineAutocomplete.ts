@@ -206,8 +206,10 @@ export class InlineAutocomplete {
       this.selectedIndex = (this.selectedIndex - 1 + this.items.length) % this.items.length;
       this.highlightSelected();
     } else if (e.key === 'Enter') {
+      // Always prevent default and stop propagation when dropdown is open
+      // so Enter never submits the card while autocomplete is active
+      e.preventDefault(); e.stopImmediatePropagation();
       if (this.selectedIndex >= 0) {
-        e.preventDefault(); e.stopImmediatePropagation();
         this.selectItem(this.selectedIndex);
       } else {
         this.hide();

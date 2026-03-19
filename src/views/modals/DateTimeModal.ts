@@ -7,6 +7,7 @@ interface DurationSlot {
   value: number;
   unit: 'seconds' | 'minutes' | 'hours' | 'days' | 'weeks';
   el: HTMLElement;
+  numInput: HTMLInputElement;
 }
 
 export class DateTimeModal extends Modal {
@@ -157,10 +158,11 @@ export class DateTimeModal extends Modal {
           }
         } else {
           // Sum all slots into total milliseconds from now
+          // Read numInput.value directly at save time to avoid stale slot.value
           let totalMs = 0;
           for (const slot of this.slots) {
-            const v = slot.value;
-            if (!v || v <= 0) continue;
+            const v = parseFloat(slot.numInput.value) || 0;
+            if (v <= 0) continue;
             if (slot.unit === 'seconds') totalMs += v * 1000;
             else if (slot.unit === 'minutes') totalMs += v * 60 * 1000;
             else if (slot.unit === 'hours') totalMs += v * 3600 * 1000;
@@ -195,6 +197,7 @@ export class DateTimeModal extends Modal {
       value: defaultValue,
       unit: defaultUnit,
       el: row,
+      numInput,
     };
     this.slots.push(slot);
 

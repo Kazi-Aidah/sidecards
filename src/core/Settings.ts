@@ -15,6 +15,7 @@ export interface SideCardsSettings {
   cards: any[]; // Raw card data
   cardStyle: number;
   cardBgOpacity: number;
+  cardBorderShadowOpacity?: number; // 0–1, applied to border and shadow color alpha
   borderThickness: number;
   disableFilterButtons: boolean;
   disableTimeBasedFiltering: boolean;
@@ -86,10 +87,11 @@ export interface SideCardsSettings {
 }
 
 export const DEFAULT_SETTINGS: SideCardsSettings = {
-  storageFolder: '/',
+  storageFolder: '',
   cards: [],
   cardStyle: 2,
   cardBgOpacity: 0.08,
+  cardBorderShadowOpacity: 1,
   borderThickness: 2,
   disableFilterButtons: false,
   disableTimeBasedFiltering: false,

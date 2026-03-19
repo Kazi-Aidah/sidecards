@@ -664,12 +664,15 @@ export class CardSidebarView extends ItemView {
         const catMatch = catRegex.exec(content);
         const category = catMatch ? catMatch[1] : (this.activeFilters.category || undefined);
 
+        // Strip @category and #tag tokens from the saved content
+        const cleanContent = content.replace(/@[^\s#@,.]+/g, '').replace(/#[^\s#@,.]+/g, '').replace(/\s{2,}/g, ' ').trim();
+
         // Auto color
         const autoColor = resolveAutoColor(content, tags, this.plugin.settings);
         const color = autoColor || 'var(--card-color-1)';
         
         const card = new Card({ 
-          content, 
+          content: cleanContent, 
           tags,
           color,
           category: category === 'all' ? undefined : category 

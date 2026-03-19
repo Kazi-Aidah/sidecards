@@ -489,19 +489,14 @@ export class SideCardsHomeView extends ItemView {
       });
 
       if (type === 'pinned') {
-        const isFromSettings = this.plugin.settings.pinnedNotes?.includes(file.path);
         item.addEventListener('contextmenu', (e) => {
           e.preventDefault();
           const menu = new Menu();
-          if (isFromSettings) {
-            menu.addItem(i => i.setTitle('Unpin from SideCards').setIcon('pin-off').onClick(async () => { // eslint-disable-line obsidianmd/ui/sentence-case
-              this.plugin.settings.pinnedNotes = (this.plugin.settings.pinnedNotes || []).filter(p => p !== file.path);
-              await this.plugin.saveSettings();
-              await this.renderFileList(container, 'pinned');
-            }));
-          } else {
-            menu.addItem(i => i.setTitle('Managed by Bookmarks plugin').setDisabled(true)); // eslint-disable-line obsidianmd/ui/sentence-case
-          }
+          menu.addItem(i => i.setTitle('Unpin from SideCards').setIcon('pin-off').onClick(async () => { // eslint-disable-line obsidianmd/ui/sentence-case
+            this.plugin.settings.pinnedNotes = (this.plugin.settings.pinnedNotes || []).filter(p => p !== file.path);
+            await this.plugin.saveSettings();
+            await this.renderFileList(container, 'pinned');
+          }));
           menu.showAtMouseEvent(e);
         });
       }
@@ -547,7 +542,22 @@ export class SideCardsHomeView extends ItemView {
     }
 
     if (iconInfo.color) {
-      iconEl.style.color = iconInfo.color;
+      // Map Iconic color names to Obsidian CSS variables
+      const colorNameToVar: Record<string, string> = {
+        red: 'var(--color-red)',
+        orange: 'var(--color-orange)',
+        yellow: 'var(--color-yellow)',
+        green: 'var(--color-green)',
+        cyan: 'var(--color-cyan)',
+        blue: 'var(--color-blue)',
+        purple: 'var(--color-purple)',
+        pink: 'var(--color-pink)',
+        magenta: 'var(--color-pink)',
+        gray: 'var(--color-base-70)',
+        grey: 'var(--color-base-70)',
+      };
+      const normalized = iconInfo.color.trim().toLowerCase();
+      iconEl.style.color = colorNameToVar[normalized] ?? iconInfo.color;
     }
   }
 
@@ -632,29 +642,13 @@ export class SideCardsHomeView extends ItemView {
 
   private async getPinnedFiles(): Promise<TFile[]> {
     const pinned: TFile[] = [];
-    
-    // 1. Get from settings
     if (this.plugin.settings.pinnedNotes) {
       this.plugin.settings.pinnedNotes.forEach(path => {
         const file = this.app.vault.getAbstractFileByPath(path);
         if (file instanceof TFile) pinned.push(file);
       });
     }
-
-    // 2. Get from bookmarks plugin if available
-    try {
-      const bookmarks = (this.app as any).internalPlugins?.getPluginById("bookmarks")?.instance;
-      if (bookmarks && bookmarks.items) {
-        bookmarks.items.forEach((item: any) => {
-          if (item.type === 'file') {
-            const file = this.app.vault.getAbstractFileByPath(item.path);
-            if (file instanceof TFile && !pinned.includes(file)) pinned.push(file);
-          }
-        });
-      }
-    } catch { /* bookmarks plugin not available */ }
-    
-    return pinned.slice(0, 10); // Limit to 10 pinned notes
+    return pinned;
   }
 
   public async refreshPinnedNotes() {
@@ -662,6 +656,32 @@ export class SideCardsHomeView extends ItemView {
     if (pinnedList) {
       await this.renderFileList(pinnedList as HTMLElement, 'pinned');
     }
+  }
+
+  public async refresh() {
+    const main = this.containerEl.querySelector('.sc-home-main') as HTMLElement;
+    if (!main) return;
+
+    // Refresh title and max width
+    const titleEl = main.querySelector('.sc-home-title');
+    if (titleEl) titleEl.textContent = this.plugin.settings.homepageName || 'SideCards';
+    const maxW = this.plugin.settings.homepageMaxWidth ?? 1000;
+    this.containerEl.style.setProperty('--sc-home-max-width', `${maxW}px`);
+
+    // Refresh category bar
+    const categoryBar = main.querySelector('.sc-home-category-bar') as HTMLElement;
+    if (categoryBar) {
+      this.renderCategoryBar(categoryBar, this.cardListEl!);
+    }
+
+    // Refresh file lists
+    const pinnedList = main.querySelector('.sc-home-file-list.pinned') as HTMLElement;
+    if (pinnedList) await this.renderFileList(pinnedList, 'pinned');
+    const recentList = main.querySelector('.sc-home-file-list:not(.pinned)') as HTMLElement;
+    if (recentList) await this.renderFileList(recentList, 'recent');
+
+    // Refresh cards
+    if (this.cardListEl) await this.renderCards(this.cardListEl);
   }
 
   private async refreshHomeContent(cardList: HTMLElement, pinnedList: HTMLElement, recentList: HTMLElement): Promise<void> {
@@ -926,12 +946,15 @@ export class SideCardsHomeView extends ItemView {
     const catMatch = catRegex.exec(content);
     const category = catMatch ? catMatch[1] : (this.filterValue === 'all' ? undefined : this.filterValue);
 
+    // Strip @category and #tag tokens from the saved content
+    const cleanContent = content.replace(/@[^\s#@,.]+/g, '').replace(/#[^\s#@,.]+/g, '').replace(/\s{2,}/g, ' ').trim();
+
     const allTags = [...new Set([...tags, ...this.selectedTags])];
     const autoColor = resolveAutoColor(content, allTags, this.plugin.settings);
     const effectiveColor = autoColor || this.selectedColor;
 
     const card = new Card({ 
-      content, 
+      content: cleanContent, 
       color: effectiveColor, 
       tags: allTags,
       category 

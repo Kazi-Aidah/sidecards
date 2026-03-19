@@ -229,8 +229,14 @@ export default class SideCardsPlugin extends Plugin {
     this.injectStatusColors();
     this.applyButtonPadding();
 
-    // Auto-open sidebar on startup
+    // Auto-open sidebar on startup; show setup modal if no storage folder set
     this.app.workspace.onLayoutReady(() => {
+      if (!this.settings.storageFolder) {
+        this.showStorageFolderSetupModal();
+      } else {
+        // Auto-import notes from storage folder silently
+        void this.store.importNotesFromFolderToSettings(this.settings.storageFolder, true);
+      }
       if (this.settings.autoOpen) {
         void this.activateView();
       }
@@ -396,6 +402,84 @@ export default class SideCardsPlugin extends Plugin {
     } catch { /* leaf may have been detached */ }
   }
 
+  showStorageFolderSetupModal(): void {
+    const modal = new Modal(this.app);
+    modal.modalEl.addClass('sc-setup-modal');
+    modal.titleEl.setText('Welcome to SideCards'); // eslint-disable-line obsidianmd/ui/sentence-case
+    const content = modal.contentEl;
+
+    content.createEl('p', { text: 'Set a storage folder to save your cards as notes.' });
+
+    const folderRow = content.createDiv({ cls: 'sc-setup-folder-row' });
+    const folderInput = folderRow.createEl('input', {
+      type: 'text',
+      placeholder: 'e.g. Cards',
+      cls: 'sc-setup-folder-input',
+    });
+
+    // Folder suggestions dropdown
+    const suggestEl = folderRow.createDiv({ cls: 'sc-setup-folder-suggest' });
+
+    // Collect all unique folder paths from the vault
+    const folderSet = new Set<string>();
+    this.app.vault.getAllLoadedFiles().forEach((f: any) => {
+      if (f.children) {
+        // It's a TFolder
+        if (f.path && f.path !== '/') folderSet.add(f.path);
+      } else if (f.parent && f.parent.path && f.parent.path !== '/') {
+        folderSet.add(f.parent.path);
+      }
+    });
+    const allFolders = Array.from(folderSet).sort();
+
+    const renderSuggestions = (query: string) => {
+      suggestEl.empty();
+      const matches = query
+        ? allFolders.filter(p => p.toLowerCase().includes(query.toLowerCase()))
+        : allFolders;
+      if (matches.length === 0) { suggestEl.removeClass('is-visible'); return; }
+      matches.slice(0, 10).forEach(path => {
+        const item = suggestEl.createDiv({ cls: 'sc-setup-folder-item', text: path });
+        item.addEventListener('mousedown', (e) => {
+          e.preventDefault();
+          folderInput.value = path;
+          suggestEl.removeClass('is-visible');
+        });
+      });
+      suggestEl.addClass('is-visible');
+    };
+
+    folderInput.addEventListener('focus', () => renderSuggestions(folderInput.value));
+    folderInput.addEventListener('input', () => renderSuggestions(folderInput.value));
+    folderInput.addEventListener('blur', () => setTimeout(() => suggestEl.removeClass('is-visible'), 150));
+
+    const btnRow = content.createDiv({ cls: 'sc-setup-btn-row' });
+
+    const cancelBtn = btnRow.createEl('button', { text: 'Cancel' });
+    cancelBtn.addEventListener('click', () => {
+      this.settings.tutorialShown = true;
+      void this.saveSettings();
+      modal.close();
+    });
+
+    const saveBtn = btnRow.createEl('button', { text: 'Save', cls: 'mod-cta' });
+    saveBtn.addEventListener('click', () => {
+      void (async () => {
+        const val = folderInput.value.trim();
+        if (val) {
+          this.settings.storageFolder = val;
+          this.settings.tutorialShown = true;
+          await this.saveSettings();
+          void this.store.importNotesFromFolderToSettings(val, true);
+        }
+        modal.close();
+      })();
+    });
+
+    modal.open();
+    setTimeout(() => folderInput.focus(), 50);
+  }
+
   async fetchAllReleases() {
     const allReleases: any[] = [];
     let page = 1;
@@ -496,6 +580,9 @@ class SideCardsSettingTab extends PluginSettingTab {
       this.plugin.settings.buttonPaddingBottom = paddingPx;
       this.plugin.applyButtonPadding();
     };
+
+    const refreshHomepage = () => this.plugin.refreshHomepageViews();
+
     const refreshSidebarHeader = () => {
       try {
         const view: any = this.app.workspace.getLeavesOfType('card-sidebar')[0]?.view;
@@ -510,6 +597,7 @@ class SideCardsSettingTab extends PluginSettingTab {
         }
         try { if (typeof view.applyFilters === 'function') view.applyFilters(); } catch { /* applyFilters may not exist */ }
       } catch { /* sidebar may not be open */ }
+      refreshHomepage();
     };
     const refreshSidebarCards = () => {
       try {
@@ -606,8 +694,6 @@ class SideCardsSettingTab extends PluginSettingTab {
 
     // ── Homepage ──────────────────────────────────────────────────────────────
     new Setting(containerEl).setName('Homepage').setDesc('Configure the SideCards homepage tab.').setHeading(); // eslint-disable-line obsidianmd/ui/sentence-case
-
-    const refreshHomepage = () => this.plugin.refreshHomepageViews();
 
     new Setting(containerEl)
       .setName('Replace default tab with homepage')
@@ -786,6 +872,12 @@ class SideCardsSettingTab extends PluginSettingTab {
     }));
     new Setting(containerEl).setName('Card border thickness').setDesc('Set the thickness of the card border').addSlider(slider => slider.setLimits(1, 20, 1).setValue(this.plugin.settings.borderThickness || 2).setDynamicTooltip().onChange(async (value) => {
       this.plugin.settings.borderThickness = value;
+      await this.plugin.saveSettings();
+      updatePreview();
+      refreshSidebarCards();
+    }));
+    new Setting(containerEl).setName('Card border and shadow opacity').setDesc('Set the opacity of the card border and shadow color').addSlider(slider => slider.setLimits(0, 1, 0.05).setValue(this.plugin.settings.cardBorderShadowOpacity ?? 1).setDynamicTooltip().onChange(async (value) => {
+      this.plugin.settings.cardBorderShadowOpacity = value;
       await this.plugin.saveSettings();
       updatePreview();
       refreshSidebarCards();
