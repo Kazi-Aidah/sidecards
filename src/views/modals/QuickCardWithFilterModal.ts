@@ -1,6 +1,7 @@
 
 import { App, Editor, Modal, Notice, Plugin, Scope } from "obsidian";
 import { getWordRangeAtCaret, handleKeyWrap, isWordChar } from "../../utils/editor-utils";
+import { resolveAutoColor } from "../../utils/dom";
 import { CardStore } from "../../services/CardStore";
 import { Card } from "../../models/Card";
 
@@ -219,12 +220,11 @@ export class QuickCardWithFilterModal extends Modal {
       { type: 'all', label: 'All', value: 'all' }
     ];
 
-    const showTimeBasedChips = !this.store.settings.disableTimeBasedFiltering;
-    if (showTimeBasedChips) {
-      filters.push(
-        { type: 'category', label: 'Today', value: 'today' },
-        { type: 'category', label: 'Tomorrow', value: 'tomorrow' }
-      );
+    if (!this.store.settings.hideTodayFilter) {
+      filters.push({ type: 'category', label: 'Today', value: 'today' });
+    }
+    if (!this.store.settings.hideTomorrowFilter) {
+      filters.push({ type: 'category', label: 'Tomorrow', value: 'tomorrow' });
     }
 
     if (this.store.settings.enableCustomCategories) {
@@ -407,7 +407,9 @@ export class QuickCardWithFilterModal extends Modal {
       const tags = tagsInput.value.split(',').map(t => t.trim()).filter(t => !!t);
       const category = select.value === 'all' ? null : select.value;
       
-      const card = new Card({ content, color: selectedColor, tags, category });
+      const autoColor = resolveAutoColor(content, tags, this.store.settings);
+      const effectiveColor = autoColor || selectedColor;
+      const card = new Card({ content, color: effectiveColor, tags, category });
       await this.store.add(card);
       
       // If we chose a specific category, try to filter the sidebar to it

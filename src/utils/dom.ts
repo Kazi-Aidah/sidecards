@@ -74,3 +74,29 @@ export function applyCardColorToElement(cardEl: HTMLElement, colorVar: string, s
 
   cardEl.style.setProperty('border-radius', `${borderRadius}px`, 'important');
 }
+
+export function resolveAutoColor(
+  content: string,
+  tags: string[],
+  settings: { autoColorRules?: Array<{ type: 'text' | 'tag'; match: string; colorIndex: number }> }
+): string | null {
+  const rules = settings.autoColorRules;
+  if (!rules || rules.length === 0) return null;
+  const lowerContent = content.toLowerCase();
+  // Normalize tags: strip leading # if present
+  const lowerTags = tags.map(t => t.toLowerCase().replace(/^#/, ''));
+  for (const rule of rules) {
+    if (!rule.match) continue;
+    const match = rule.match.toLowerCase().replace(/^#/, '');
+    if (rule.type === 'tag') {
+      if (lowerTags.some(t => t === match || t.includes(match))) {
+        return `var(--card-color-${rule.colorIndex})`;
+      }
+    } else {
+      if (lowerContent.includes(match)) {
+        return `var(--card-color-${rule.colorIndex})`;
+      }
+    }
+  }
+  return null;
+}

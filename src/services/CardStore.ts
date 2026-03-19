@@ -165,7 +165,14 @@ export class CardStore {
 
   async setStatus(id: string, status: Card['status']): Promise<void> {
     const card = await this.update(id, { status });
-    await this.syncCardToFrontmatter(card, { status });
+    // If status uses a preset card color, update card color too
+    if (status && status.colorIndex) {
+      const colorVar = `var(--card-color-${status.colorIndex})`;
+      await this.update(id, { color: colorVar });
+      await this.syncCardToFrontmatter(card, { status, color: colorVar });
+    } else {
+      await this.syncCardToFrontmatter(card, { status });
+    }
   }
 
   async setExpiry(id: string, expiresAt: number | null): Promise<void> {

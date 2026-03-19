@@ -220,7 +220,21 @@ export class CardComponent {
     this.el.draggable = !this.isEditing; // Disable dragging while editing
     
     // Apply styling
-    applyCardColorToElement(this.el, this.card.color, this.store.settings);
+    const statusDef = this.card.status
+      ? (this.store.settings.cardStatuses || []).find(s => s.name === this.card.status!.name)
+      : null;
+    const useStatusColor = this.store.settings.inheritStatusColor && statusDef;
+    const effectiveColor = useStatusColor
+      ? (statusDef!.colorIndex ? `var(--card-color-${statusDef!.colorIndex})` : statusDef!.color)
+      : this.card.color;
+    applyCardColorToElement(this.el, effectiveColor, this.store.settings);
+
+    // Set data-status for CSS-based custom color targeting
+    if (this.card.status?.name) {
+      this.el.dataset.status = this.card.status.name;
+    } else {
+      delete this.el.dataset.status;
+    }
 
     // Apply max card height
     const maxH = this.store.settings.maxCardHeight;
@@ -298,8 +312,14 @@ export class CardComponent {
     if (this.card.status) {
       const pill = container.createDiv('sc-status-pill');
       pill.textContent = this.card.status.name;
-      pill.style.backgroundColor = this.card.status.color;
-      pill.style.color = this.card.status.textColor || '#000';
+      const statusDef = (this.store.settings.cardStatuses || []).find(s => s.name === this.card.status!.name);
+      if (statusDef?.colorIndex) {
+        pill.style.backgroundColor = `var(--card-color-${statusDef.colorIndex})`;
+        pill.style.color = statusDef.textColor || '#000';
+      } else {
+        pill.style.backgroundColor = this.card.status.color || 'transparent';
+        pill.style.color = this.card.status.textColor || '#000';
+      }
     }
   }
 
@@ -625,13 +645,36 @@ export class CardComponent {
         ((item as any).titleEl as HTMLElement)?.appendChild(container);
       });
 
-      const categories = this.store.settings.enableCustomCategories ? (this.store.settings.customCategories || []) : [];
-      if (categories.length > 0) {
+      const s = this.store.settings;
+      const todayVisible = !s.hideTodayFilter;
+      const tomorrowVisible = !s.hideTomorrowFilter;
+      const customCategories = s.enableCustomCategories ? (s.customCategories || []).filter(c => c.showInMenu !== false) : [];
+      const hasCategoryItems = todayVisible || tomorrowVisible || customCategories.length > 0;
+
+      if (hasCategoryItems) {
         menu.addSeparator();
-        categories.forEach(cat => {
+        if (todayVisible) {
+          menu.addItem(item => {
+            item.setTitle('Add to Today')
+              .setIcon(s.builtinCategoryIcons?.['today'] ?? 'calendar-check')
+              .onClick(async () => {
+                await this.store.setCategory(this.card.id, 'today');
+              });
+          });
+        }
+        if (tomorrowVisible) {
+          menu.addItem(item => {
+            item.setTitle('Add to Tomorrow')
+              .setIcon(s.builtinCategoryIcons?.['tomorrow'] ?? 'calendar-plus')
+              .onClick(async () => {
+                await this.store.setCategory(this.card.id, 'tomorrow');
+              });
+          });
+        }
+        customCategories.forEach(cat => {
           menu.addItem(item => {
             item.setTitle(`Add to ${cat.label}`)
-              .setIcon('plus-square')
+              .setIcon(cat.icon || 'plus-square')
               .onClick(async () => {
                 await this.store.setCategory(this.card.id, cat.label || cat.id);
               });
@@ -659,7 +702,12 @@ export class CardComponent {
                 menu2.addItem(i => {
                   i.setTitle(st.name || '')
                     .onClick(async () => {
-                      await this.store.setStatus(this.card.id, { name: st.name || '', color: st.color || '', textColor: st.textColor || '#000' });
+                      await this.store.setStatus(this.card.id, {
+                        name: st.name || '',
+                        color: st.color || '',
+                        textColor: st.textColor || '#000',
+                        colorIndex: st.colorIndex
+                      });
                     });
                 });
               });
@@ -719,7 +767,7 @@ export class CardComponent {
       });
       menu.addItem(item => {
         item.setTitle(this.card.archived ? 'Unarchive' : 'Archive')
-          .setIcon('archive')
+          .setIcon(this.store.settings.builtinCategoryIcons?.['archived'] ?? 'archive')
           .onClick(async () => {
             await this.store.toggleArchive(this.card.id, !this.card.archived);
           });

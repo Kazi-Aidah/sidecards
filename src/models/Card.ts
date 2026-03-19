@@ -9,6 +9,7 @@ export interface CardStatus {
   name: string;
   color: string;
   textColor?: string;
+  colorIndex?: number; // 1-10 = preset card color, absent = custom hex
 }
 
 export class Card {

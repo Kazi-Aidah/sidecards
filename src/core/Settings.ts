@@ -7,6 +7,7 @@ export interface CustomCategory {
   showInMenu?: boolean;
   textColor?: string;
   bgColor?: string;
+  icon?: string;
 }
 
 export interface SideCardsSettings {
@@ -17,6 +18,8 @@ export interface SideCardsSettings {
   borderThickness: number;
   disableFilterButtons: boolean;
   disableTimeBasedFiltering: boolean;
+  hideTodayFilter?: boolean;
+  hideTomorrowFilter?: boolean;
   enableCustomCategories: boolean;
   customCategories: CustomCategory[];
   hideArchivedFilterButton: boolean;
@@ -62,9 +65,9 @@ export interface SideCardsSettings {
   hideScrollbar?: boolean;
   autoOpen?: boolean;
   allItemsOrder?: string[];
+  builtinCategoryIcons?: Record<string, string>; // e.g. { today: 'calendar-check', tomorrow: 'calendar-plus', archived: 'archive' }
   autoColorRules?: Array<{ type: 'text' | 'tag'; match: string; colorIndex: number }>;
   inheritStatusColor?: boolean;
-  statusPillOpacity?: number;
   replaceHomepageWithSidecards?: boolean;
   searchBarVisible?: boolean;
   pinnedNotes?: string[];
@@ -73,6 +76,7 @@ export interface SideCardsSettings {
   hideColorSwatches?: boolean;
   showPinnedNotes?: boolean;
   showRecentNotes?: boolean;
+  recentNotesLimit?: number;
   notesPlacement?: 'left' | 'right';
 }
 
@@ -129,9 +133,9 @@ export const DEFAULT_SETTINGS: SideCardsSettings = {
   hideScrollbar: false,
   autoOpen: false,
   allItemsOrder: [],
+  builtinCategoryIcons: { today: 'calendar-check', tomorrow: 'calendar-plus', archived: 'archive' },
   autoColorRules: [],
   inheritStatusColor: false,
-  statusPillOpacity: 1,
   replaceHomepageWithSidecards: false,
   searchBarVisible: false,
   pinnedNotes: [],
@@ -140,5 +144,6 @@ export const DEFAULT_SETTINGS: SideCardsSettings = {
   hideColorSwatches: false,
   showPinnedNotes: true,
   showRecentNotes: true,
+  recentNotesLimit: 5,
   notesPlacement: 'left',
 };

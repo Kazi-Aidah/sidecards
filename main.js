@@ -30,6 +30,7 @@ var dom_exports = {};
 __export(dom_exports, {
   applyCardColorToElement: () => applyCardColorToElement,
   hexToRgba: () => hexToRgba,
+  resolveAutoColor: () => resolveAutoColor,
   resolveColorVarToHex: () => resolveColorVarToHex
 });
 function hexToRgba(hex, alpha = 1) {
@@ -105,6 +106,28 @@ function applyCardColorToElement(cardEl, colorVar, settings) {
     cardEl.style.setProperty("box-shadow", `2px 2px 0 0 ${colorVar}`, "important");
   }
   cardEl.style.setProperty("border-radius", `${borderRadius}px`, "important");
+}
+function resolveAutoColor(content, tags, settings) {
+  const rules = settings.autoColorRules;
+  if (!rules || rules.length === 0)
+    return null;
+  const lowerContent = content.toLowerCase();
+  const lowerTags = tags.map((t) => t.toLowerCase().replace(/^#/, ""));
+  for (const rule of rules) {
+    if (!rule.match)
+      continue;
+    const match = rule.match.toLowerCase().replace(/^#/, "");
+    if (rule.type === "tag") {
+      if (lowerTags.some((t) => t === match || t.includes(match))) {
+        return `var(--card-color-${rule.colorIndex})`;
+      }
+    } else {
+      if (lowerContent.includes(match)) {
+        return `var(--card-color-${rule.colorIndex})`;
+      }
+    }
+  }
+  return null;
 }
 var init_dom = __esm({
   "src/utils/dom.ts"() {
@@ -456,11 +479,20 @@ var _CardComponent = class {
     return false;
   }
   async render() {
+    var _a;
     const currentRender = ++this.renderCount;
     this.el.empty();
     this.el.dataset.id = this.card.id;
     this.el.draggable = !this.isEditing;
-    applyCardColorToElement(this.el, this.card.color, this.store.settings);
+    const statusDef = this.card.status ? (this.store.settings.cardStatuses || []).find((s) => s.name === this.card.status.name) : null;
+    const useStatusColor = this.store.settings.inheritStatusColor && statusDef;
+    const effectiveColor = useStatusColor ? statusDef.colorIndex ? `var(--card-color-${statusDef.colorIndex})` : statusDef.color : this.card.color;
+    applyCardColorToElement(this.el, effectiveColor, this.store.settings);
+    if ((_a = this.card.status) == null ? void 0 : _a.name) {
+      this.el.dataset.status = this.card.status.name;
+    } else {
+      delete this.el.dataset.status;
+    }
     const maxH = this.store.settings.maxCardHeight;
     if (maxH && maxH > 0) {
       this.el.style.setProperty("max-height", `${maxH}px`, "important");
@@ -516,8 +548,14 @@ var _CardComponent = class {
     if (this.card.status) {
       const pill = container.createDiv("sc-status-pill");
       pill.textContent = this.card.status.name;
-      pill.style.backgroundColor = this.card.status.color;
-      pill.style.color = this.card.status.textColor || "#000";
+      const statusDef = (this.store.settings.cardStatuses || []).find((s) => s.name === this.card.status.name);
+      if (statusDef == null ? void 0 : statusDef.colorIndex) {
+        pill.style.backgroundColor = `var(--card-color-${statusDef.colorIndex})`;
+        pill.style.color = statusDef.textColor || "#000";
+      } else {
+        pill.style.backgroundColor = this.card.status.color || "transparent";
+        pill.style.color = this.card.status.textColor || "#000";
+      }
     }
   }
   async renderContent(container) {
@@ -799,12 +837,32 @@ var _CardComponent = class {
         });
         (_a = item.titleEl) == null ? void 0 : _a.appendChild(container);
       });
-      const categories = this.store.settings.enableCustomCategories ? this.store.settings.customCategories || [] : [];
-      if (categories.length > 0) {
+      const s = this.store.settings;
+      const todayVisible = !s.hideTodayFilter;
+      const tomorrowVisible = !s.hideTomorrowFilter;
+      const customCategories = s.enableCustomCategories ? (s.customCategories || []).filter((c) => c.showInMenu !== false) : [];
+      const hasCategoryItems = todayVisible || tomorrowVisible || customCategories.length > 0;
+      if (hasCategoryItems) {
         menu.addSeparator();
-        categories.forEach((cat) => {
+        if (todayVisible) {
           menu.addItem((item) => {
-            item.setTitle(`Add to ${cat.label}`).setIcon("plus-square").onClick(async () => {
+            var _a, _b;
+            item.setTitle("Add to Today").setIcon((_b = (_a = s.builtinCategoryIcons) == null ? void 0 : _a["today"]) != null ? _b : "calendar-check").onClick(async () => {
+              await this.store.setCategory(this.card.id, "today");
+            });
+          });
+        }
+        if (tomorrowVisible) {
+          menu.addItem((item) => {
+            var _a, _b;
+            item.setTitle("Add to Tomorrow").setIcon((_b = (_a = s.builtinCategoryIcons) == null ? void 0 : _a["tomorrow"]) != null ? _b : "calendar-plus").onClick(async () => {
+              await this.store.setCategory(this.card.id, "tomorrow");
+            });
+          });
+        }
+        customCategories.forEach((cat) => {
+          menu.addItem((item) => {
+            item.setTitle(`Add to ${cat.label}`).setIcon(cat.icon || "plus-square").onClick(async () => {
               await this.store.setCategory(this.card.id, cat.label || cat.id);
             });
           });
@@ -826,7 +884,12 @@ var _CardComponent = class {
             (_a = this.store.settings.cardStatuses) == null ? void 0 : _a.forEach((st) => {
               menu2.addItem((i) => {
                 i.setTitle(st.name || "").onClick(async () => {
-                  await this.store.setStatus(this.card.id, { name: st.name || "", color: st.color || "", textColor: st.textColor || "#000" });
+                  await this.store.setStatus(this.card.id, {
+                    name: st.name || "",
+                    color: st.color || "",
+                    textColor: st.textColor || "#000",
+                    colorIndex: st.colorIndex
+                  });
                 });
               });
             });
@@ -876,7 +939,8 @@ var _CardComponent = class {
         });
       });
       menu.addItem((item) => {
-        item.setTitle(this.card.archived ? "Unarchive" : "Archive").setIcon("archive").onClick(async () => {
+        var _a, _b;
+        item.setTitle(this.card.archived ? "Unarchive" : "Archive").setIcon((_b = (_a = this.store.settings.builtinCategoryIcons) == null ? void 0 : _a["archived"]) != null ? _b : "archive").onClick(async () => {
           await this.store.toggleArchive(this.card.id, !this.card.archived);
         });
       });
@@ -1036,6 +1100,47 @@ async function flipAnimateAsync(container, asyncDomChange, opts = {}, settings) 
     });
   }, duration + ids.length * stagger + 50);
 }
+function animateCardsEntrance(container, opts = {}, settings) {
+  var _a, _b, _c;
+  if (!settings.animatedCards)
+    return;
+  if (window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches)
+    return;
+  const els = Array.from(container.querySelectorAll(".sc-card")).filter((el) => el.style.display !== "none");
+  if (els.length === 0)
+    return;
+  const duration = (_a = opts.duration) != null ? _a : 360;
+  const stagger = (_b = opts.stagger) != null ? _b : 34;
+  const offsetPx = (_c = opts.offset) != null ? _c : 28;
+  els.forEach((el) => {
+    el.style.transition = "none";
+    el.style.transform = `translateY(${offsetPx}px)`;
+    el.style.opacity = settings.disableCardFadeIn ? "1" : "0";
+    el.style.willChange = "transform, opacity";
+  });
+  void container.offsetHeight;
+  els.forEach((el, i) => {
+    const delay = i * stagger;
+    setTimeout(() => {
+      const transitions = [`transform ${duration}ms ease-out`];
+      if (!settings.disableCardFadeIn) {
+        transitions.push(`opacity ${duration}ms ease-out`);
+      }
+      el.style.transition = transitions.join(", ");
+      el.style.transform = "";
+      el.style.opacity = "1";
+    }, delay);
+  });
+  const total = duration + els.length * stagger + 50;
+  setTimeout(() => {
+    els.forEach((el) => {
+      el.style.transition = "";
+      el.style.willChange = "";
+      el.style.transform = "";
+      el.style.opacity = "";
+    });
+  }, total);
+}
 
 // src/models/Card.ts
 var Card = class {
@@ -1079,6 +1184,7 @@ var Card = class {
 };
 
 // src/views/CardSidebarView.ts
+init_dom();
 var CardSidebarView = class extends import_obsidian3.ItemView {
   constructor(leaf, plugin, store, eventBus, filterService, sortService) {
     super(leaf);
@@ -1330,6 +1436,10 @@ var CardSidebarView = class extends import_obsidian3.ItemView {
     this.setupPositionDetection();
     this.setupLayoutObservers();
     this.registerVaultEvents();
+    const openOn = this.plugin.settings.openCategoryOnLoad || "all";
+    const btn = mainContainer.querySelector(`.sc-category-btn[data-filter-value="${openOn}"]`);
+    if (btn)
+      btn.click();
     this.showLoadingOverlay();
     try {
       await this.renderCards();
@@ -1434,7 +1544,7 @@ var CardSidebarView = class extends import_obsidian3.ItemView {
     filterGroup.style.whiteSpace = "nowrap";
     const settings = this.plugin.settings;
     const cats = Array.isArray(settings.customCategories) ? settings.customCategories : [];
-    const defaultOrder = ["filter-all"].concat(!settings.disableTimeBasedFiltering ? ["filter-today", "filter-tomorrow"] : []).concat(!settings.hideArchivedFilterButton ? ["filter-archived"] : []).concat(cats.map((c) => String(c.id || "")));
+    const defaultOrder = ["filter-all"].concat(!settings.hideTodayFilter ? ["filter-today"] : []).concat(!settings.hideTomorrowFilter ? ["filter-tomorrow"] : []).concat(!settings.hideArchivedFilterButton ? ["filter-archived"] : []).concat(cats.map((c) => String(c.id || "")));
     const combinedOrder = Array.isArray(settings.allItemsOrder) && settings.allItemsOrder.length > 0 ? settings.allItemsOrder : defaultOrder;
     const chips = [];
     combinedOrder.forEach((itemId) => {
@@ -1445,12 +1555,12 @@ var CardSidebarView = class extends import_obsidian3.ItemView {
         return;
       }
       if (itemId === "filter-today") {
-        if (!settings.disableTimeBasedFiltering)
+        if (!settings.hideTodayFilter)
           chips.push({ type: "category", label: "Today", value: "today" });
         return;
       }
       if (itemId === "filter-tomorrow") {
-        if (!settings.disableTimeBasedFiltering)
+        if (!settings.hideTomorrowFilter)
           chips.push({ type: "category", label: "Tomorrow", value: "tomorrow" });
         return;
       }
@@ -1599,6 +1709,21 @@ var CardSidebarView = class extends import_obsidian3.ItemView {
       if (this.applyFormattingHotkey(e, editorEl))
         return;
       this.applySelectionWrapShortcut(e, editorEl);
+      const normalizeKey = (v) => String(v || "").toLowerCase().replace(/[\s\+_]+/g, "-").replace(/[^a-z0-9\-]/g, "").replace(/-+/g, "-").replace(/^-|-$/g, "");
+      const saveKey = normalizeKey(this.plugin.settings.saveKey || "enter");
+      let pressed = "";
+      if (e.ctrlKey)
+        pressed += "ctrl-";
+      if (e.shiftKey)
+        pressed += "shift-";
+      if (e.altKey)
+        pressed += "alt-";
+      if (e.key && e.key.toLowerCase() === "enter")
+        pressed += "enter";
+      if (pressed === saveKey || e.key === "Enter" && !e.shiftKey && !e.ctrlKey && !e.altKey) {
+        e.preventDefault();
+        addButton.click();
+      }
     });
     const buttonContainer = inputContainer.createDiv("sc-sidebar-button-container");
     buttonContainer.style.display = "flex";
@@ -1721,9 +1846,12 @@ var CardSidebarView = class extends import_obsidian3.ItemView {
       const catRegex = /@([^\s#@,.]+)/g;
       const catMatch = catRegex.exec(content);
       const category = catMatch ? catMatch[1] : this.activeFilters.category || void 0;
+      const autoColor = resolveAutoColor(content, tags, this.plugin.settings);
+      const color = autoColor || "var(--card-color-1)";
       const card = new Card({
         content,
         tags,
+        color,
         category: category === "all" ? void 0 : category
       });
       await this.store.add(card);
@@ -1763,10 +1891,6 @@ var CardSidebarView = class extends import_obsidian3.ItemView {
   async renderCards(isManualReload = false) {
     var _a;
     const settings = { ...this.store.settings };
-    if (isManualReload) {
-      settings.animatedCards = false;
-      settings.disableCardFadeIn = true;
-    }
     const scrollTop = ((_a = this.cardsContainer) == null ? void 0 : _a.scrollTop) || 0;
     await flipAnimateAsync(this.cardsContainer, async () => {
       this.cardComponents.forEach((comp) => comp.destroy());
@@ -2116,7 +2240,13 @@ var CardStore = class {
   }
   async setStatus(id, status) {
     const card = await this.update(id, { status });
-    await this.syncCardToFrontmatter(card, { status });
+    if (status && status.colorIndex) {
+      const colorVar = `var(--card-color-${status.colorIndex})`;
+      await this.update(id, { color: colorVar });
+      await this.syncCardToFrontmatter(card, { status, color: colorVar });
+    } else {
+      await this.syncCardToFrontmatter(card, { status });
+    }
   }
   async setExpiry(id, expiresAt) {
     const card = await this.update(id, { expiresAt });
@@ -2584,9 +2714,9 @@ var DEFAULT_SETTINGS = {
   hideScrollbar: false,
   autoOpen: false,
   allItemsOrder: [],
+  builtinCategoryIcons: { today: "calendar-check", tomorrow: "calendar-plus", archived: "archive" },
   autoColorRules: [],
   inheritStatusColor: false,
-  statusPillOpacity: 1,
   replaceHomepageWithSidecards: false,
   searchBarVisible: false,
   pinnedNotes: [],
@@ -2595,11 +2725,13 @@ var DEFAULT_SETTINGS = {
   hideColorSwatches: false,
   showPinnedNotes: true,
   showRecentNotes: true,
+  recentNotesLimit: 5,
   notesPlacement: "left"
 };
 
 // src/views/modals/QuickCardWithFilterModal.ts
 var import_obsidian6 = require("obsidian");
+init_dom();
 var QuickCardWithFilterModal = class extends import_obsidian6.Modal {
   constructor(app, plugin, store) {
     super(app);
@@ -2814,12 +2946,11 @@ var QuickCardWithFilterModal = class extends import_obsidian6.Modal {
     const filters = [
       { type: "all", label: "All", value: "all" }
     ];
-    const showTimeBasedChips = !this.store.settings.disableTimeBasedFiltering;
-    if (showTimeBasedChips) {
-      filters.push(
-        { type: "category", label: "Today", value: "today" },
-        { type: "category", label: "Tomorrow", value: "tomorrow" }
-      );
+    if (!this.store.settings.hideTodayFilter) {
+      filters.push({ type: "category", label: "Today", value: "today" });
+    }
+    if (!this.store.settings.hideTomorrowFilter) {
+      filters.push({ type: "category", label: "Tomorrow", value: "tomorrow" });
     }
     if (this.store.settings.enableCustomCategories) {
       const cats = this.store.settings.customCategories || [];
@@ -2966,7 +3097,9 @@ var QuickCardWithFilterModal = class extends import_obsidian6.Modal {
       }
       const tags = tagsInput.value.split(",").map((t) => t.trim()).filter((t) => !!t);
       const category = select.value === "all" ? null : select.value;
-      const card = new Card({ content, color: selectedColor, tags, category });
+      const autoColor = resolveAutoColor(content, tags, this.store.settings);
+      const effectiveColor = autoColor || selectedColor;
+      const card = new Card({ content, color: effectiveColor, tags, category });
       await this.store.add(card);
       if (category) {
         const view = (_b = this.app.workspace.getLeavesOfType("card-sidebar")[0]) == null ? void 0 : _b.view;
@@ -3102,6 +3235,7 @@ var SearchModal = class extends import_obsidian7.Modal {
 
 // src/views/HomeView.ts
 var import_obsidian8 = require("obsidian");
+init_dom();
 var SideCardsHomeView = class extends import_obsidian8.ItemView {
   constructor(leaf, plugin, store, sortService) {
     super(leaf);
@@ -3499,10 +3633,18 @@ var SideCardsHomeView = class extends import_obsidian8.ItemView {
     const categoryBar = rightCol.createDiv({ cls: "sc-home-category-bar" });
     rightCol.insertBefore(categoryBar, cardList);
     this.renderToolbar(toolbar, editorEl, cardList, pinnedList != null ? pinnedList : leftCol, recentList != null ? recentList : leftCol);
+    const openOn = this.plugin.settings.openCategoryOnLoad || "all";
+    const availableFilters = this.getAvailableFilters();
+    const matchedFilter = availableFilters.find((f) => f.value === openOn);
+    if (matchedFilter) {
+      this.filterType = matchedFilter.type;
+      this.filterValue = matchedFilter.value;
+    }
     this.renderCategoryBar(categoryBar, cardList);
     await this.renderCards(cardList);
   }
   async renderFileList(container, type) {
+    var _a;
     container.empty();
     const files = type === "recent" ? await this.getRecentFiles() : await this.getPinnedFiles();
     if (files.length === 0) {
@@ -3517,6 +3659,23 @@ var SideCardsHomeView = class extends import_obsidian8.ItemView {
       item.addEventListener("click", () => {
         this.app.workspace.getLeaf(false).openFile(file);
       });
+      if (type === "pinned") {
+        const isFromSettings = (_a = this.plugin.settings.pinnedNotes) == null ? void 0 : _a.includes(file.path);
+        item.addEventListener("contextmenu", async (e) => {
+          e.preventDefault();
+          const menu = new import_obsidian8.Menu();
+          if (isFromSettings) {
+            menu.addItem((i) => i.setTitle("Unpin from Sidecards").setIcon("pin-off").onClick(async () => {
+              this.plugin.settings.pinnedNotes = (this.plugin.settings.pinnedNotes || []).filter((p) => p !== file.path);
+              await this.plugin.saveSettings();
+              await this.renderFileList(container, "pinned");
+            }));
+          } else {
+            menu.addItem((i) => i.setTitle("Managed by Bookmarks plugin").setDisabled(true));
+          }
+          menu.showAtMouseEvent(e);
+        });
+      }
     }
   }
   async renderCustomFileIcon(iconEl, file) {
@@ -3626,7 +3785,9 @@ var SideCardsHomeView = class extends import_obsidian8.ItemView {
     return this.resolveIconicIconEntry(cache[path]);
   }
   async getRecentFiles() {
-    return this.app.vault.getMarkdownFiles().sort((a, b) => b.stat.mtime - a.stat.mtime).slice(0, 5);
+    var _a;
+    const limit = (_a = this.plugin.settings.recentNotesLimit) != null ? _a : 5;
+    return this.app.vault.getMarkdownFiles().sort((a, b) => b.stat.mtime - a.stat.mtime).slice(0, limit);
   }
   async getPinnedFiles() {
     var _a, _b;
@@ -3834,12 +3995,14 @@ var SideCardsHomeView = class extends import_obsidian8.ItemView {
       }
     };
     renderChunk(0);
+    requestAnimationFrame(() => animateCardsEntrance(container, {}, this.plugin.settings));
   }
   getAvailableFilters() {
     const filters = [{ type: "all", label: "All", value: "all" }];
-    const showTimeBasedChips = !this.plugin.settings.disableTimeBasedFiltering;
-    if (showTimeBasedChips) {
+    if (!this.plugin.settings.hideTodayFilter) {
       filters.push({ type: "category", label: "Today", value: "today" });
+    }
+    if (!this.plugin.settings.hideTomorrowFilter) {
       filters.push({ type: "category", label: "Tomorrow", value: "tomorrow" });
     }
     if (this.plugin.settings.enableCustomCategories) {
@@ -3878,10 +4041,13 @@ var SideCardsHomeView = class extends import_obsidian8.ItemView {
     const catRegex = /@([^\s#@,.]+)/g;
     const catMatch = catRegex.exec(content);
     const category = catMatch ? catMatch[1] : this.filterValue === "all" ? void 0 : this.filterValue;
+    const allTags = [.../* @__PURE__ */ new Set([...tags, ...this.selectedTags])];
+    const autoColor = resolveAutoColor(content, allTags, this.plugin.settings);
+    const effectiveColor = autoColor || this.selectedColor;
     const card = new Card({
       content,
-      color: this.selectedColor,
-      tags: [.../* @__PURE__ */ new Set([...tags, ...this.selectedTags])],
+      color: effectiveColor,
+      tags: allTags,
       category
     });
     await this.store.add(card);
@@ -3937,7 +4103,7 @@ var SideCardsPlugin = class extends import_obsidian9.Plugin {
     );
     this.addCommand({
       id: "open-card-sidebar",
-      name: "Open Card Sidebar",
+      name: "Open Sidebar",
       callback: () => this.activateView()
     });
     this.addCommand({
@@ -4089,8 +4255,50 @@ var SideCardsPlugin = class extends import_obsidian9.Plugin {
         }
       })
     );
+    this.injectStatusColors();
+    this.applyButtonPadding();
+    this.app.workspace.onLayoutReady(() => {
+      if (this.settings.autoOpen) {
+        this.activateView();
+      }
+    });
   }
   onunload() {
+    const el = document.getElementById("sc-status-colors");
+    if (el)
+      el.remove();
+  }
+  applyButtonPadding() {
+    var _a;
+    const paddingPx = (_a = this.settings.buttonPaddingBottom) != null ? _a : 26;
+    let styleEl = document.getElementById("card-button-padding");
+    if (!styleEl) {
+      styleEl = document.createElement("style");
+      styleEl.id = "card-button-padding";
+      document.head.appendChild(styleEl);
+    }
+    styleEl.textContent = `.sc-sidebar-button-container { padding-bottom: ${paddingPx}px !important; }`;
+  }
+  injectStatusColors() {
+    let styleEl = document.getElementById("sc-status-colors");
+    if (!styleEl) {
+      styleEl = document.createElement("style");
+      styleEl.id = "sc-status-colors";
+      document.head.appendChild(styleEl);
+    }
+    const statuses = this.settings.cardStatuses || [];
+    const rules = statuses.filter((s) => s.name && !s.colorIndex).map((s) => {
+      const name = s.name.replace(/"/g, '\\"');
+      const color = s.color || "transparent";
+      const textColor = s.textColor || "#000";
+      const lines = [];
+      if (this.settings.inheritStatusColor) {
+        lines.push(`.sc-card[data-status="${name}"] { --sc-status-color: ${color}; }`);
+      }
+      lines.push(`.sc-card[data-status="${name}"] .sc-status-pill { background-color: ${color} !important; color: ${textColor} !important; }`);
+      return lines.join("\n");
+    });
+    styleEl.textContent = rules.join("\n");
   }
   async activateView() {
     const { workspace } = this.app;
@@ -4288,12 +4496,8 @@ var SideCardsSettingTab = class extends import_obsidian9.PluginSettingTab {
     const { containerEl } = this;
     containerEl.empty();
     const updateButtonPadding = (paddingPx) => {
-      var _a2;
-      const styleEl = document.createElement("style");
-      styleEl.id = "card-button-padding";
-      styleEl.textContent = `.sc-sidebar-button-container { padding-bottom: ${paddingPx}px !important; }`;
-      (_a2 = document.getElementById("card-button-padding")) == null ? void 0 : _a2.remove();
-      document.head.appendChild(styleEl);
+      this.plugin.settings.buttonPaddingBottom = paddingPx;
+      this.plugin.applyButtonPadding();
     };
     const refreshSidebarHeader = () => {
       var _a2;
@@ -4347,40 +4551,79 @@ var SideCardsSettingTab = class extends import_obsidian9.PluginSettingTab {
       });
       new FolderSuggest(this.app, cb.inputEl, folders);
     });
-    new import_obsidian9.Setting(containerEl).setName("Colors").setDesc("Card colors used for tagging. Names are written to notes.").setHeading();
-    new import_obsidian9.Setting(containerEl).setName("Two row color swatches in menu").setDesc("Show colors in 2 rows of 5 in the card menu.").addToggle((toggle) => toggle.setValue(!!this.plugin.settings.twoRowSwatches).onChange(async (value) => {
-      this.plugin.settings.twoRowSwatches = value;
+    new import_obsidian9.Setting(containerEl).setName("Behaviour").setDesc("Configure how you interact with cards and the sidebar.").setHeading();
+    new import_obsidian9.Setting(containerEl).setName("Auto-open sidebar").setDesc("Automatically open the sidebar when Obsidian starts").addToggle((toggle) => toggle.setValue(!!this.plugin.settings.autoOpen).onChange(async (value) => {
+      this.plugin.settings.autoOpen = value;
       await this.plugin.saveSettings();
     }));
-    const colorVars = [
-      { name: "Color 1", key: "color1", default: "#8392a4" },
-      { name: "Color 2", key: "color2", default: "#eb3b5a" },
-      { name: "Color 3", key: "color3", default: "#fa8231" },
-      { name: "Color 4", key: "color4", default: "#e5a216" },
-      { name: "Color 5", key: "color5", default: "#20bf6b" },
-      { name: "Color 6", key: "color6", default: "#2d98da" },
-      { name: "Color 7", key: "color7", default: "#8854d0" },
-      { name: "Color 8", key: "color8", default: "#e832c1" },
-      { name: "Color 9", key: "color9", default: "#e83289" },
-      { name: "Color 10", key: "color10", default: "#965b3b" }
-    ];
-    colorVars.forEach((color, i) => {
-      const row = new import_obsidian9.Setting(containerEl).setName(color.name);
-      row.addText((txt) => txt.setPlaceholder("e.g. red").setValue(this.plugin.settings.colorNames && this.plugin.settings.colorNames[i] || "").onChange(async (v) => {
-        if (!this.plugin.settings.colorNames)
-          this.plugin.settings.colorNames = [];
-        this.plugin.settings.colorNames[i] = v || "";
+    new import_obsidian9.Setting(containerEl).setName("Save key").setDesc("Choose which key combo saves/submits a card").addDropdown((dropdown) => dropdown.addOption("enter", "Enter").addOption("shift-enter", "Shift+Enter").addOption("ctrl-enter", "Ctrl+Enter").addOption("alt-enter", "Alt+Enter").addOption("ctrl-shift-enter", "Ctrl+Shift+Enter").setValue(this.plugin.settings.saveKey || "enter").onChange(async (value) => {
+      this.plugin.settings.saveKey = value;
+      await this.plugin.saveSettings();
+    }));
+    new import_obsidian9.Setting(containerEl).setName("Next line key").setDesc("Choose which key combo inserts a new line inside a card (does not save)").addDropdown((dropdown) => dropdown.addOption("enter", "Enter").addOption("shift-enter", "Shift+Enter").addOption("ctrl-enter", "Ctrl+Enter").addOption("alt-enter", "Alt+Enter").addOption("ctrl-shift-enter", "Ctrl+Shift+Enter").setValue(this.plugin.settings.nextLineKey || "shift-enter").onChange(async (value) => {
+      this.plugin.settings.nextLineKey = value;
+      await this.plugin.saveSettings();
+    }));
+    new import_obsidian9.Setting(containerEl).setName("Auto-archive on expiry").setDesc("Automatically archive cards when their expiry time passes").addToggle((toggle) => toggle.setValue(!!this.plugin.settings.autoArchiveOnExpiry).onChange(async (value) => {
+      this.plugin.settings.autoArchiveOnExpiry = value;
+      await this.plugin.saveSettings();
+    }));
+    new import_obsidian9.Setting(containerEl).setName("Homepage").setDesc("Configure the Sidecards homepage tab.").setHeading();
+    const refreshHomepage = () => this.plugin.refreshHomepageViews();
+    new import_obsidian9.Setting(containerEl).setName("Replace default tab with homepage").setDesc("Open the Sidecards homepage instead of the default new tab.").addToggle((toggle) => toggle.setValue(!!this.plugin.settings.replaceHomepageWithSidecards).onChange(async (value) => {
+      this.plugin.settings.replaceHomepageWithSidecards = value;
+      await this.plugin.saveSettings();
+    }));
+    new import_obsidian9.Setting(containerEl).setName('Replace "SideCards" name').setDesc("Title shown in the homepage.").addText((text) => {
+      text.setPlaceholder("SideCards").setValue(this.plugin.settings.homepageName || "SideCards").onChange(async (value) => {
+        this.plugin.settings.homepageName = value || "SideCards";
         await this.plugin.saveSettings();
-      }));
-      row.addColorPicker((cp) => cp.setValue(this.plugin.settings[color.key] || color.default).onChange(async (value) => {
-        this.plugin.settings[color.key] = value;
+        refreshHomepage();
+      });
+      text.inputEl.style.width = "100%";
+    }).addExtraButton((btn) => {
+      btn.setIcon("rotate-ccw").setTooltip("Reset to default").onClick(async () => {
+        this.plugin.settings.homepageName = "SideCards";
         await this.plugin.saveSettings();
-        this.updateCSSVariables();
-        if (color.key === "color1")
-          updatePreview();
-        refreshSidebarCards();
-      }));
+        refreshHomepage();
+        this.display();
+      });
     });
+    new import_obsidian9.Setting(containerEl).setName("Hide category dropdown").setDesc("Hides the category button and separator in the homepage palette row.").addToggle((toggle) => toggle.setValue(!!this.plugin.settings.hideCategoryDropdown).onChange(async (value) => {
+      this.plugin.settings.hideCategoryDropdown = value;
+      await this.plugin.saveSettings();
+      refreshHomepage();
+    }));
+    new import_obsidian9.Setting(containerEl).setName("Hide color swatches").setDesc("Hides the color dots from the homepage.").addToggle((toggle) => toggle.setValue(!!this.plugin.settings.hideColorSwatches).onChange(async (value) => {
+      this.plugin.settings.hideColorSwatches = value;
+      await this.plugin.saveSettings();
+      refreshHomepage();
+    }));
+    new import_obsidian9.Setting(containerEl).setName("Show pinned notes").setDesc("Show pinned notes in the homepage notes column.").addToggle((toggle) => toggle.setValue(this.plugin.settings.showPinnedNotes !== false).onChange(async (value) => {
+      this.plugin.settings.showPinnedNotes = value;
+      await this.plugin.saveSettings();
+      refreshHomepage();
+    }));
+    new import_obsidian9.Setting(containerEl).setName("Show recent notes").setDesc("Show recently opened notes in the homepage notes column.").addToggle((toggle) => toggle.setValue(this.plugin.settings.showRecentNotes !== false).onChange(async (value) => {
+      this.plugin.settings.showRecentNotes = value;
+      await this.plugin.saveSettings();
+      refreshHomepage();
+    }));
+    new import_obsidian9.Setting(containerEl).setName("Recent notes limit").setDesc("How many recent notes to show.").addDropdown((dd) => {
+      var _a2;
+      [3, 5, 10, 15, 20, 25].forEach((n) => dd.addOption(String(n), String(n)));
+      dd.setValue(String((_a2 = this.plugin.settings.recentNotesLimit) != null ? _a2 : 5));
+      dd.onChange(async (value) => {
+        this.plugin.settings.recentNotesLimit = Number(value);
+        await this.plugin.saveSettings();
+        refreshHomepage();
+      });
+    });
+    new import_obsidian9.Setting(containerEl).setName("Notes column placement").setDesc("Place the pinned/recent notes column on the left or right.").addDropdown((dd) => dd.addOption("left", "Left").addOption("right", "Right").setValue(this.plugin.settings.notesPlacement || "left").onChange(async (value) => {
+      this.plugin.settings.notesPlacement = value;
+      await this.plugin.saveSettings();
+      refreshHomepage();
+    }));
     new import_obsidian9.Setting(containerEl).setName("Appearance").setDesc("Customize how cards and the sidebar look.").setHeading();
     const previewContainer = containerEl.createDiv({ cls: "sc-preview-wrapper" });
     previewContainer.style.marginBottom = "24px";
@@ -4456,6 +4699,24 @@ var SideCardsSettingTab = class extends import_obsidian9.PluginSettingTab {
       updatePreview();
       refreshSidebarCards();
     }));
+    new import_obsidian9.Setting(containerEl).setName("Maximum Card Height").setDesc("Limit card height in pixels (0 = no limit)").addSlider((slider) => slider.setLimits(0, 800, 10).setValue(this.plugin.settings.maxCardHeight || 0).setDynamicTooltip().onChange(async (value) => {
+      var _a2;
+      this.plugin.settings.maxCardHeight = Number(value) || 0;
+      await this.plugin.saveSettings();
+      const styleId2 = "card-max-height-style";
+      (_a2 = document.getElementById(styleId2)) == null ? void 0 : _a2.remove();
+      if (this.plugin.settings.maxCardHeight && this.plugin.settings.maxCardHeight > 0) {
+        const s = document.createElement("style");
+        s.id = styleId2;
+        s.textContent = `.sc-card { max-height: ${this.plugin.settings.maxCardHeight}px !important; overflow: hidden !important; }`;
+        document.head.appendChild(s);
+      }
+    }));
+    new import_obsidian9.Setting(containerEl).setName("Bottom space under input row").setDesc("Padding to accommodate the status bar").addSlider((slider) => slider.setLimits(0, 100, 1).setValue(this.plugin.settings.buttonPaddingBottom || 26).onChange(async (value) => {
+      this.plugin.settings.buttonPaddingBottom = Number(value) || 0;
+      await this.plugin.saveSettings();
+      updateButtonPadding(this.plugin.settings.buttonPaddingBottom || 0);
+    }));
     new import_obsidian9.Setting(containerEl).setName("Group tags under content").setDesc("Show tags grouped below card content.").addToggle((toggle) => toggle.setValue(!!this.plugin.settings.groupTags).onChange(async (value) => {
       this.plugin.settings.groupTags = value;
       await this.plugin.saveSettings();
@@ -4493,8 +4754,7 @@ var SideCardsSettingTab = class extends import_obsidian9.PluginSettingTab {
       await this.plugin.saveSettings();
       updatePreview();
     }));
-    new import_obsidian9.Setting(containerEl).setName("Animation").setHeading();
-    new import_obsidian9.Setting(containerEl).setName("Animated Cards").setDesc("Cards slide and fade.").addToggle((toggle) => toggle.setValue(!!this.plugin.settings.animatedCards).onChange(async (value) => {
+    new import_obsidian9.Setting(containerEl).setName("Animate cards").setDesc("Cards slide and fade.").addToggle((toggle) => toggle.setValue(!!this.plugin.settings.animatedCards).onChange(async (value) => {
       this.plugin.settings.animatedCards = value;
       await this.plugin.saveSettings();
     }));
@@ -4505,15 +4765,6 @@ var SideCardsSettingTab = class extends import_obsidian9.PluginSettingTab {
         await this.plugin.saveSettings();
       });
     });
-    new import_obsidian9.Setting(containerEl).setName("Visibility").setHeading();
-    new import_obsidian9.Setting(containerEl).setName("Disable Card Markdown rendering").setDesc("Show raw text only.").addToggle((toggle) => toggle.setValue(!!this.plugin.settings.disableCardRendering).onChange(async (value) => {
-      this.plugin.settings.disableCardRendering = value;
-      await this.plugin.saveSettings();
-    }));
-    new import_obsidian9.Setting(containerEl).setName("Enable copy card content").setDesc("Show a copy icon on hover.").addToggle((toggle) => toggle.setValue(!!this.plugin.settings.enableCopyCardContent).onChange(async (value) => {
-      this.plugin.settings.enableCopyCardContent = value;
-      await this.plugin.saveSettings();
-    }));
     new import_obsidian9.Setting(containerEl).setName("Hide card container scrollbar").setDesc("Hides the scrollbar visually.").addToggle((toggle) => toggle.setValue(!!this.plugin.settings.hideScrollbar).onChange(async (value) => {
       var _a2;
       this.plugin.settings.hideScrollbar = value;
@@ -4530,6 +4781,10 @@ var SideCardsSettingTab = class extends import_obsidian9.PluginSettingTab {
       await this.plugin.saveSettings();
       refreshSidebarHeader();
     }));
+    new import_obsidian9.Setting(containerEl).setName("Enable copy card content").setDesc("Show a copy icon on card hover.").addToggle((toggle) => toggle.setValue(!!this.plugin.settings.enableCopyCardContent).onChange(async (value) => {
+      this.plugin.settings.enableCopyCardContent = value;
+      await this.plugin.saveSettings();
+    }));
     this.updateCSSVariables();
     updateButtonPadding(this.plugin.settings.buttonPaddingBottom || 26);
     const styleId = "card-max-height-style";
@@ -4540,26 +4795,41 @@ var SideCardsSettingTab = class extends import_obsidian9.PluginSettingTab {
       s.textContent = `.sc-card { max-height: ${this.plugin.settings.maxCardHeight}px !important; overflow: hidden !important; }`;
       document.head.appendChild(s);
     }
-    new import_obsidian9.Setting(containerEl).setName("Layout").setHeading();
-    new import_obsidian9.Setting(containerEl).setName("Maximum Card Height").setDesc("Limit card height in pixels (0 = no limit)").addSlider((slider) => slider.setLimits(0, 800, 10).setValue(this.plugin.settings.maxCardHeight || 0).setDynamicTooltip().onChange(async (value) => {
-      var _a2;
-      this.plugin.settings.maxCardHeight = Number(value) || 0;
+    new import_obsidian9.Setting(containerEl).setName("Colors").setDesc("Card colors used for tagging. Names are written to notes.").setHeading();
+    new import_obsidian9.Setting(containerEl).setName("Two row color swatches in menu").setDesc("Show colors in 2 rows of 5 in the card menu.").addToggle((toggle) => toggle.setValue(!!this.plugin.settings.twoRowSwatches).onChange(async (value) => {
+      this.plugin.settings.twoRowSwatches = value;
       await this.plugin.saveSettings();
-      const styleId2 = "card-max-height-style";
-      (_a2 = document.getElementById(styleId2)) == null ? void 0 : _a2.remove();
-      if (this.plugin.settings.maxCardHeight && this.plugin.settings.maxCardHeight > 0) {
-        const s = document.createElement("style");
-        s.id = styleId2;
-        s.textContent = `.sc-card { max-height: ${this.plugin.settings.maxCardHeight}px !important; overflow: hidden !important; }`;
-        document.head.appendChild(s);
-      }
     }));
-    new import_obsidian9.Setting(containerEl).setName("Bottom Space under Input/Button Row").setDesc("Padding to accommodate the status bar").addSlider((slider) => slider.setLimits(0, 100, 1).setValue(this.plugin.settings.buttonPaddingBottom || 26).onChange(async (value) => {
-      this.plugin.settings.buttonPaddingBottom = Number(value) || 0;
-      await this.plugin.saveSettings();
-      updateButtonPadding(this.plugin.settings.buttonPaddingBottom || 0);
-    }));
-    new import_obsidian9.Setting(containerEl).setName("Category Management").setDesc("Configure category display and reordering.").setHeading();
+    const colorVars = [
+      { name: "Color 1", key: "color1", default: "#8392a4" },
+      { name: "Color 2", key: "color2", default: "#eb3b5a" },
+      { name: "Color 3", key: "color3", default: "#fa8231" },
+      { name: "Color 4", key: "color4", default: "#e5a216" },
+      { name: "Color 5", key: "color5", default: "#20bf6b" },
+      { name: "Color 6", key: "color6", default: "#2d98da" },
+      { name: "Color 7", key: "color7", default: "#8854d0" },
+      { name: "Color 8", key: "color8", default: "#e832c1" },
+      { name: "Color 9", key: "color9", default: "#e83289" },
+      { name: "Color 10", key: "color10", default: "#965b3b" }
+    ];
+    colorVars.forEach((color, i) => {
+      const row = new import_obsidian9.Setting(containerEl).setName(color.name);
+      row.addText((txt) => txt.setPlaceholder("e.g. red").setValue(this.plugin.settings.colorNames && this.plugin.settings.colorNames[i] || "").onChange(async (v) => {
+        if (!this.plugin.settings.colorNames)
+          this.plugin.settings.colorNames = [];
+        this.plugin.settings.colorNames[i] = v || "";
+        await this.plugin.saveSettings();
+      }));
+      row.addColorPicker((cp) => cp.setValue(this.plugin.settings[color.key] || color.default).onChange(async (value) => {
+        this.plugin.settings[color.key] = value;
+        await this.plugin.saveSettings();
+        this.updateCSSVariables();
+        if (color.key === "color1")
+          updatePreview();
+        refreshSidebarCards();
+      }));
+    });
+    new import_obsidian9.Setting(containerEl).setName("Categories").setDesc("Configure category display and reordering.").setHeading();
     new import_obsidian9.Setting(containerEl).setName("Enable Custom Categories").setDesc("Allow custom categories in the right-click menu.").addToggle((toggle) => toggle.setValue(!!this.plugin.settings.enableCustomCategories).onChange(async (value) => {
       this.plugin.settings.enableCustomCategories = value;
       await this.plugin.saveSettings();
@@ -4573,9 +4843,9 @@ var SideCardsSettingTab = class extends import_obsidian9.PluginSettingTab {
       const customList = Array.isArray(this.plugin.settings.customCategories) ? this.plugin.settings.customCategories : [];
       const builtinItems = [
         { id: "filter-all", label: "All", canHide: false, canRemove: false },
-        { id: "filter-today", label: "Today", canHide: true, canRemove: false, settingKey: "disableTimeBasedFiltering" },
-        { id: "filter-tomorrow", label: "Tomorrow", canHide: true, canRemove: false, settingKey: "disableTimeBasedFiltering" },
-        { id: "filter-archived", label: "Archived", canHide: true, canRemove: false, settingKey: "hideArchivedFilterButton" }
+        { id: "filter-today", label: "Today", canHide: true, canRemove: false, settingKey: "hideTodayFilter", defaultIcon: "calendar-check", builtinKey: "today" },
+        { id: "filter-tomorrow", label: "Tomorrow", canHide: true, canRemove: false, settingKey: "hideTomorrowFilter", defaultIcon: "calendar-plus", builtinKey: "tomorrow" },
+        { id: "filter-archived", label: "Archived", canHide: true, canRemove: false, settingKey: "hideArchivedFilterButton", defaultIcon: "archive", builtinKey: "archived" }
       ];
       const customItems = customList.map((c) => ({
         id: c.id,
@@ -4609,8 +4879,10 @@ var SideCardsSettingTab = class extends import_obsidian9.PluginSettingTab {
         let isVisible = true;
         if (isBuiltin) {
           const sKey = itemInfo.settingKey;
-          if (sKey === "disableTimeBasedFiltering") {
-            isVisible = !this.plugin.settings.disableTimeBasedFiltering;
+          if (sKey === "hideTodayFilter") {
+            isVisible = !this.plugin.settings.hideTodayFilter;
+          } else if (sKey === "hideTomorrowFilter") {
+            isVisible = !this.plugin.settings.hideTomorrowFilter;
           } else if (sKey === "hideArchivedFilterButton") {
             isVisible = !this.plugin.settings.hideArchivedFilterButton;
           }
@@ -4731,8 +5003,10 @@ var SideCardsSettingTab = class extends import_obsidian9.PluginSettingTab {
             isVisible = !isVisible;
             if (isBuiltin) {
               const sKey = itemInfo.settingKey;
-              if (sKey === "disableTimeBasedFiltering") {
-                this.plugin.settings.disableTimeBasedFiltering = !isVisible;
+              if (sKey === "hideTodayFilter") {
+                this.plugin.settings.hideTodayFilter = !isVisible;
+              } else if (sKey === "hideTomorrowFilter") {
+                this.plugin.settings.hideTomorrowFilter = !isVisible;
               } else if (sKey === "hideArchivedFilterButton") {
                 this.plugin.settings.hideArchivedFilterButton = !isVisible;
               }
@@ -4751,6 +5025,75 @@ var SideCardsSettingTab = class extends import_obsidian9.PluginSettingTab {
           updateEye();
           eyeBtn.style.opacity = "0.5";
           eyeBtn.style.cursor = "default";
+        }
+        if (itemInfo.isCustom || itemInfo.builtinKey) {
+          const iconBtn = row.createEl("button", { cls: "clickable-icon sc-cat-icon-btn" });
+          iconBtn.style.borderRadius = "50%";
+          iconBtn.style.width = "32px";
+          iconBtn.style.minWidth = "32px";
+          iconBtn.style.height = "32px";
+          iconBtn.style.display = "flex";
+          iconBtn.style.alignItems = "center";
+          iconBtn.style.justifyContent = "center";
+          iconBtn.style.padding = "0";
+          iconBtn.style.border = "none";
+          iconBtn.style.marginRight = "10px";
+          const getCurrentIcon = () => {
+            var _a3, _b2, _c2;
+            if (itemInfo.builtinKey) {
+              return (_b2 = (_a3 = this.plugin.settings.builtinCategoryIcons) == null ? void 0 : _a3[itemInfo.builtinKey]) != null ? _b2 : itemInfo.defaultIcon;
+            }
+            return (_c2 = itemInfo.data) == null ? void 0 : _c2.icon;
+          };
+          const updateIconBtn = () => {
+            iconBtn.empty();
+            const currentIcon = getCurrentIcon();
+            if (currentIcon) {
+              try {
+                (0, import_obsidian9.setIcon)(iconBtn, currentIcon);
+              } catch (e) {
+                iconBtn.textContent = "+";
+              }
+              iconBtn.style.fontSize = "";
+            } else {
+              iconBtn.textContent = "+";
+              iconBtn.style.fontSize = "20px";
+            }
+            iconBtn.title = "Icon in context menu";
+          };
+          updateIconBtn();
+          iconBtn.addEventListener("click", () => {
+            const modal = new SideCardsIconPickerModal(
+              this.plugin.app,
+              async (pickedIcon) => {
+                if (itemInfo.builtinKey) {
+                  if (!this.plugin.settings.builtinCategoryIcons)
+                    this.plugin.settings.builtinCategoryIcons = {};
+                  this.plugin.settings.builtinCategoryIcons[itemInfo.builtinKey] = pickedIcon;
+                } else {
+                  const idx = customList.findIndex((c) => c.id === itemId);
+                  if (idx >= 0) {
+                    this.plugin.settings.customCategories[idx].icon = pickedIcon;
+                    if (itemInfo.data)
+                      itemInfo.data.icon = pickedIcon;
+                  }
+                }
+                await this.plugin.saveSettings();
+                updateIconBtn();
+              },
+              itemInfo.isCustom ? async () => {
+                const idx = customList.findIndex((c) => c.id === itemId);
+                if (idx >= 0) {
+                  this.plugin.settings.customCategories[idx].icon = void 0;
+                  if (itemInfo.data)
+                    itemInfo.data.icon = void 0;
+                }
+                await this.plugin.saveSettings();
+                updateIconBtn();
+              } : void 0
+            );
+            modal.open();
+          });
         }
         const textColorPicker = row.createEl("input");
         textColorPicker.type = "color";
@@ -4850,6 +5193,40 @@ var SideCardsSettingTab = class extends import_obsidian9.PluginSettingTab {
             refreshSidebarHeader();
           }
         });
+        if (itemInfo.builtinKey) {
+          const resetIconBtn = row.createEl("button", { cls: "clickable-icon" });
+          resetIconBtn.style.borderRadius = "50%";
+          resetIconBtn.style.width = "32px";
+          resetIconBtn.style.minWidth = "32px";
+          resetIconBtn.style.height = "32px";
+          resetIconBtn.style.display = "flex";
+          resetIconBtn.style.alignItems = "center";
+          resetIconBtn.style.justifyContent = "center";
+          resetIconBtn.style.padding = "0";
+          resetIconBtn.style.border = "none";
+          resetIconBtn.title = "Reset to default icon";
+          try {
+            (0, import_obsidian9.setIcon)(resetIconBtn, "rotate-ccw");
+          } catch (e) {
+            resetIconBtn.textContent = "\u21BA";
+          }
+          resetIconBtn.addEventListener("click", async () => {
+            if (!this.plugin.settings.builtinCategoryIcons)
+              this.plugin.settings.builtinCategoryIcons = {};
+            this.plugin.settings.builtinCategoryIcons[itemInfo.builtinKey] = itemInfo.defaultIcon;
+            await this.plugin.saveSettings();
+            const iconBtnEl = row.querySelector(".sc-cat-icon-btn");
+            if (iconBtnEl) {
+              iconBtnEl.empty();
+              try {
+                (0, import_obsidian9.setIcon)(iconBtnEl, itemInfo.defaultIcon);
+              } catch (e) {
+                iconBtnEl.textContent = "+";
+              }
+              iconBtnEl.style.fontSize = "";
+            }
+          });
+        }
         if (itemInfo.canRemove) {
           const removeBtn = row.createEl("button", { cls: "clickable-icon" });
           (0, import_obsidian9.setIcon)(removeBtn, "trash");
@@ -4895,8 +5272,11 @@ var SideCardsSettingTab = class extends import_obsidian9.PluginSettingTab {
     renderCategories();
     new import_obsidian9.Setting(containerEl).setName("Open category on load").setDesc("Which category opens when the sidebar loads.").addDropdown((dropdown) => {
       const opts = [{ value: "all", label: "All" }];
-      if (!this.plugin.settings.disableTimeBasedFiltering) {
-        opts.push({ value: "today", label: "Today" }, { value: "tomorrow", label: "Tomorrow" });
+      if (!this.plugin.settings.hideTodayFilter) {
+        opts.push({ value: "today", label: "Today" });
+      }
+      if (!this.plugin.settings.hideTomorrowFilter) {
+        opts.push({ value: "tomorrow", label: "Tomorrow" });
       }
       if (!this.plugin.settings.hideArchivedFilterButton) {
         opts.push({ value: "archived", label: "Archived" });
@@ -4909,25 +5289,7 @@ var SideCardsSettingTab = class extends import_obsidian9.PluginSettingTab {
         await this.plugin.saveSettings();
       });
     });
-    new import_obsidian9.Setting(containerEl).setName("Behaviour").setDesc("Configure how you interact with cards and the sidebar.").setHeading();
-    new import_obsidian9.Setting(containerEl).setName("Next line key").setDesc("Choose which key combo inserts a new line inside a card (does not save)").addDropdown((dropdown) => dropdown.addOption("enter", "Enter").addOption("shift-enter", "Shift+Enter").addOption("ctrl-enter", "Ctrl+Enter").addOption("alt-enter", "Alt+Enter").addOption("ctrl-shift-enter", "Ctrl+Shift+Enter").setValue(this.plugin.settings.nextLineKey || "shift-enter").onChange(async (value) => {
-      this.plugin.settings.nextLineKey = value;
-      await this.plugin.saveSettings();
-    }));
-    new import_obsidian9.Setting(containerEl).setName("Save key").setDesc("Choose which key combo saves the card (submission / commit)").addDropdown((dropdown) => dropdown.addOption("enter", "Enter").addOption("shift-enter", "Shift+Enter").addOption("ctrl-enter", "Ctrl+Enter").addOption("alt-enter", "Alt+Enter").addOption("ctrl-shift-enter", "Ctrl+Shift+Enter").setValue(this.plugin.settings.saveKey || "enter").onChange(async (value) => {
-      this.plugin.settings.saveKey = value;
-      await this.plugin.saveSettings();
-    }));
-    new import_obsidian9.Setting(containerEl).setName("Auto-open sidebar").setDesc("Automatically open the sidebar when Obsidian starts").addToggle((toggle) => toggle.setValue(!!this.plugin.settings.autoOpen).onChange(async (value) => {
-      this.plugin.settings.autoOpen = value;
-      await this.plugin.saveSettings();
-    }));
-    new import_obsidian9.Setting(containerEl).setName("Automation").setDesc("Settings for automated card handling.").setHeading();
-    new import_obsidian9.Setting(containerEl).setName("Auto-archive on expiry").setDesc("Automatically archive cards when expiry time passes").addToggle((toggle) => toggle.setValue(!!this.plugin.settings.autoArchiveOnExpiry).onChange(async (value) => {
-      this.plugin.settings.autoArchiveOnExpiry = value;
-      await this.plugin.saveSettings();
-    }));
-    new import_obsidian9.Setting(containerEl).setName("Auto Color").setDesc("Cards can inherit a color based on text or tags. Choose rules below; names are used when card-color frontmatter is absent.").setHeading();
+    new import_obsidian9.Setting(containerEl).setName("Auto Color").setDesc("Cards inherit a color based on text or tag rules when no color is manually set.").setHeading();
     const rulesContainer = containerEl.createDiv();
     const renderRules = () => {
       rulesContainer.empty();
@@ -5040,10 +5402,6 @@ var SideCardsSettingTab = class extends import_obsidian9.PluginSettingTab {
       this.plugin.settings.inheritStatusColor = value;
       await this.plugin.saveSettings();
     }));
-    new import_obsidian9.Setting(statusSection).setName("Status pill opacity").setDesc("Controls the background opacity of status pills").addSlider((sl) => sl.setLimits(0, 1, 0.05).setValue(typeof this.plugin.settings.statusPillOpacity !== "undefined" ? this.plugin.settings.statusPillOpacity : 1).onChange(async (v) => {
-      this.plugin.settings.statusPillOpacity = v;
-      await this.plugin.saveSettings();
-    }));
     const statusConfigContainer = statusSection.createDiv();
     const renderStatusConfig = () => {
       statusConfigContainer.empty();
@@ -5081,6 +5439,7 @@ var SideCardsSettingTab = class extends import_obsidian9.PluginSettingTab {
         colorPicker.addColorPicker((cp) => cp.setValue(s.color || "#20bf6b").onChange(async (value) => {
           this.plugin.settings.cardStatuses[idx].color = value;
           await this.plugin.saveSettings();
+          this.plugin.injectStatusColors();
         }));
         colorPicker.controlEl.style.padding = "0";
         colorPicker.infoEl.remove();
@@ -5097,11 +5456,15 @@ var SideCardsSettingTab = class extends import_obsidian9.PluginSettingTab {
             dropdown.addOption(String(i), colorName);
           }
           let currentVal = "custom";
-          for (let i = 1; i <= 10; i++) {
-            const colorKey = `color${i}`;
-            if (this.plugin.settings[colorKey] === s.color) {
-              currentVal = String(i);
-              break;
+          if (s.colorIndex) {
+            currentVal = String(s.colorIndex);
+          } else {
+            for (let i = 1; i <= 10; i++) {
+              const colorKey = `color${i}`;
+              if (this.plugin.settings[colorKey] === s.color) {
+                currentVal = String(i);
+                break;
+              }
             }
           }
           dropdown.setValue(currentVal);
@@ -5134,8 +5497,12 @@ var SideCardsSettingTab = class extends import_obsidian9.PluginSettingTab {
               const colorKey = `color${value}`;
               const color = this.plugin.settings[colorKey];
               this.plugin.settings.cardStatuses[idx].color = color;
+              this.plugin.settings.cardStatuses[idx].colorIndex = Number(value);
+            } else {
+              this.plugin.settings.cardStatuses[idx].colorIndex = void 0;
             }
             await this.plugin.saveSettings();
+            this.plugin.injectStatusColors();
             applyDropdownColors(value);
             updatePickersVisibility(value);
           });
@@ -5203,52 +5570,6 @@ var SideCardsSettingTab = class extends import_obsidian9.PluginSettingTab {
       });
     };
     renderStatusConfig();
-    new import_obsidian9.Setting(containerEl).setName("Homepage").setDesc("Configure the Sidecards homepage tab.").setHeading();
-    const refreshHomepage = () => this.plugin.refreshHomepageViews();
-    new import_obsidian9.Setting(containerEl).setName("Replace default tab with homepage").setDesc("Open the Sidecards homepage instead of the default new tab.").addToggle((toggle) => toggle.setValue(!!this.plugin.settings.replaceHomepageWithSidecards).onChange(async (value) => {
-      this.plugin.settings.replaceHomepageWithSidecards = value;
-      await this.plugin.saveSettings();
-    }));
-    new import_obsidian9.Setting(containerEl).setName('Replace "SideCards" name').setDesc("Title shown in the homepage.").addText((text) => {
-      text.setPlaceholder("SideCards").setValue(this.plugin.settings.homepageName || "SideCards").onChange(async (value) => {
-        this.plugin.settings.homepageName = value || "SideCards";
-        await this.plugin.saveSettings();
-        refreshHomepage();
-      });
-      text.inputEl.style.width = "100%";
-    }).addExtraButton((btn) => {
-      btn.setIcon("rotate-ccw").setTooltip("Reset to default").onClick(async () => {
-        this.plugin.settings.homepageName = "SideCards";
-        await this.plugin.saveSettings();
-        refreshHomepage();
-        this.display();
-      });
-    });
-    new import_obsidian9.Setting(containerEl).setName("Hide category dropdown").setDesc("Hides the category button and separator in the homepage palette row.").addToggle((toggle) => toggle.setValue(!!this.plugin.settings.hideCategoryDropdown).onChange(async (value) => {
-      this.plugin.settings.hideCategoryDropdown = value;
-      await this.plugin.saveSettings();
-      refreshHomepage();
-    }));
-    new import_obsidian9.Setting(containerEl).setName("Hide color swatches").setDesc("Hides the color dots from the homepage.").addToggle((toggle) => toggle.setValue(!!this.plugin.settings.hideColorSwatches).onChange(async (value) => {
-      this.plugin.settings.hideColorSwatches = value;
-      await this.plugin.saveSettings();
-      refreshHomepage();
-    }));
-    new import_obsidian9.Setting(containerEl).setName("Show pinned notes").setDesc("Show pinned notes in the homepage notes column.").addToggle((toggle) => toggle.setValue(this.plugin.settings.showPinnedNotes !== false).onChange(async (value) => {
-      this.plugin.settings.showPinnedNotes = value;
-      await this.plugin.saveSettings();
-      refreshHomepage();
-    }));
-    new import_obsidian9.Setting(containerEl).setName("Show recent notes").setDesc("Show recently opened notes in the homepage notes column.").addToggle((toggle) => toggle.setValue(this.plugin.settings.showRecentNotes !== false).onChange(async (value) => {
-      this.plugin.settings.showRecentNotes = value;
-      await this.plugin.saveSettings();
-      refreshHomepage();
-    }));
-    new import_obsidian9.Setting(containerEl).setName("Notes column placement").setDesc("Place the pinned/recent notes column on the left or right.").addDropdown((dd) => dd.addOption("left", "Left").addOption("right", "Right").setValue(this.plugin.settings.notesPlacement || "left").onChange(async (value) => {
-      this.plugin.settings.notesPlacement = value;
-      await this.plugin.saveSettings();
-      refreshHomepage();
-    }));
   }
 };
 var ConfirmDeleteModal = class extends import_obsidian9.Modal {
@@ -5458,5 +5779,85 @@ var FolderSuggest = class {
       });
       this.suggestEl.appendChild(item);
     });
+  }
+};
+var SideCardsIconPickerModal = class extends import_obsidian9.Modal {
+  constructor(app, onPick, onRemove) {
+    super(app);
+    this.allIcons = [];
+    this.onPick = onPick;
+    this.onRemove = onRemove;
+  }
+  onOpen() {
+    const c = this.contentEl;
+    c.empty();
+    c.style.display = "flex";
+    c.style.flexDirection = "column";
+    c.style.gap = "8px";
+    const searchInput = c.createEl("input", { type: "text", attr: { placeholder: "Search icons..." } });
+    searchInput.style.width = "100%";
+    searchInput.style.marginBottom = "8px";
+    const list = c.createDiv();
+    list.style.display = "grid";
+    list.style.gridTemplateColumns = "repeat(auto-fill, 32px)";
+    list.style.gap = "4px";
+    list.style.maxHeight = "300px";
+    list.style.overflowY = "auto";
+    const footer = c.createDiv();
+    footer.style.display = "flex";
+    footer.style.justifyContent = "flex-end";
+    footer.style.marginTop = "8px";
+    const removeBtn = footer.createEl("button", { text: "Remove icon" });
+    removeBtn.addEventListener("click", () => {
+      if (this.onRemove)
+        this.onRemove();
+      this.close();
+    });
+    if (!this.allIcons.length) {
+      try {
+        const ids = (0, import_obsidian9.getIconIds)();
+        this.allIcons = ids && ids.length > 0 ? ids : [];
+      } catch (e) {
+        this.allIcons = [];
+      }
+    }
+    const renderList = (icons, limit = 98) => {
+      list.empty();
+      const toShow = limit > 0 ? icons.slice(0, limit) : icons;
+      toShow.forEach((id) => {
+        const btn = list.createEl("button");
+        btn.style.width = "32px";
+        btn.style.height = "32px";
+        btn.style.display = "flex";
+        btn.style.alignItems = "center";
+        btn.style.justifyContent = "center";
+        btn.style.padding = "0";
+        btn.style.border = "1px solid var(--background-modifier-border)";
+        btn.style.borderRadius = "4px";
+        btn.style.cursor = "pointer";
+        btn.title = id;
+        try {
+          (0, import_obsidian9.setIcon)(btn, id);
+        } catch (e) {
+          btn.textContent = id.slice(0, 2);
+        }
+        btn.addEventListener("click", () => {
+          this.onPick(id);
+          this.close();
+        });
+      });
+    };
+    const applyFilter = () => {
+      const q = (searchInput.value || "").toLowerCase();
+      if (!q)
+        renderList(this.allIcons, 98);
+      else
+        renderList(this.allIcons.filter((id) => id.toLowerCase().includes(q)), 500);
+    };
+    searchInput.addEventListener("input", applyFilter);
+    renderList(this.allIcons, 98);
+  }
+  onClose() {
+    this.contentEl.empty();
   }
 };

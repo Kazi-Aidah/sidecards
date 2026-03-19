@@ -6,6 +6,8 @@ import { CardComponent } from "./components/Card";
 import { SortService, SortMode } from "../services/SortService";
 import { handleKeyWrap } from "../utils/editor-utils";
 import { getWordRangeAtCaret, isWordChar } from "../utils/editor-utils";
+import { resolveAutoColor } from "../utils/dom";
+import { animateCardsEntrance } from "../utils/animations";
 
 export class SideCardsHomeView extends ItemView {
   private selectedColor = 'var(--card-color-1)';
@@ -442,6 +444,16 @@ export class SideCardsHomeView extends ItemView {
     rightCol.insertBefore(categoryBar, cardList);
     
     this.renderToolbar(toolbar, editorEl, cardList, pinnedList ?? leftCol, recentList ?? leftCol);
+
+    // Apply openCategoryOnLoad
+    const openOn = this.plugin.settings.openCategoryOnLoad || 'all';
+    const availableFilters = this.getAvailableFilters();
+    const matchedFilter = availableFilters.find(f => f.value === openOn);
+    if (matchedFilter) {
+      this.filterType = matchedFilter.type;
+      this.filterValue = matchedFilter.value;
+    }
+
     this.renderCategoryBar(categoryBar, cardList);
 
     await this.renderCards(cardList);
@@ -465,6 +477,24 @@ export class SideCardsHomeView extends ItemView {
       item.addEventListener('click', () => {
         this.app.workspace.getLeaf(false).openFile(file);
       });
+
+      if (type === 'pinned') {
+        const isFromSettings = this.plugin.settings.pinnedNotes?.includes(file.path);
+        item.addEventListener('contextmenu', async (e) => {
+          e.preventDefault();
+          const menu = new Menu();
+          if (isFromSettings) {
+            menu.addItem(i => i.setTitle('Unpin from Sidecards').setIcon('pin-off').onClick(async () => {
+              this.plugin.settings.pinnedNotes = (this.plugin.settings.pinnedNotes || []).filter(p => p !== file.path);
+              await this.plugin.saveSettings();
+              await this.renderFileList(container, 'pinned');
+            }));
+          } else {
+            menu.addItem(i => i.setTitle('Managed by Bookmarks plugin').setDisabled(true));
+          }
+          menu.showAtMouseEvent(e);
+        });
+      }
     }
   }
 
@@ -583,9 +613,10 @@ export class SideCardsHomeView extends ItemView {
   }
 
   private async getRecentFiles(): Promise<TFile[]> {
+    const limit = this.plugin.settings.recentNotesLimit ?? 5;
     return this.app.vault.getMarkdownFiles()
       .sort((a, b) => b.stat.mtime - a.stat.mtime)
-      .slice(0, 5);
+      .slice(0, limit);
   }
 
   private async getPinnedFiles(): Promise<TFile[]> {
@@ -829,13 +860,16 @@ export class SideCardsHomeView extends ItemView {
     };
 
     renderChunk(0);
+    // Trigger entrance animation after first chunk is painted
+    requestAnimationFrame(() => animateCardsEntrance(container, {}, this.plugin.settings));
   }
 
   private getAvailableFilters(): Array<{ type: string; label: string; value: string }> {
     const filters = [{ type: 'all', label: 'All', value: 'all' }];
-    const showTimeBasedChips = !this.plugin.settings.disableTimeBasedFiltering;
-    if (showTimeBasedChips) {
+    if (!this.plugin.settings.hideTodayFilter) {
       filters.push({ type: 'category', label: 'Today', value: 'today' });
+    }
+    if (!this.plugin.settings.hideTomorrowFilter) {
       filters.push({ type: 'category', label: 'Tomorrow', value: 'tomorrow' });
     }
     if (this.plugin.settings.enableCustomCategories) {
@@ -877,10 +911,14 @@ export class SideCardsHomeView extends ItemView {
     const catMatch = catRegex.exec(content);
     const category = catMatch ? catMatch[1] : (this.filterValue === 'all' ? undefined : this.filterValue);
 
+    const allTags = [...new Set([...tags, ...this.selectedTags])];
+    const autoColor = resolveAutoColor(content, allTags, this.plugin.settings);
+    const effectiveColor = autoColor || this.selectedColor;
+
     const card = new Card({ 
       content, 
-      color: this.selectedColor, 
-      tags: [...new Set([...tags, ...this.selectedTags])],
+      color: effectiveColor, 
+      tags: allTags,
       category 
     });
     await this.store.add(card);

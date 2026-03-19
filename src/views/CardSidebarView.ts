@@ -9,6 +9,7 @@ import { TagAutocomplete } from "./components/TagAutocomplete";
 import { flipAnimateAsync, animateCardsEntrance } from "../utils/animations";
 import { Card } from "../models/Card";
 import SideCardsPlugin from "../core/Plugin";
+import { resolveAutoColor } from "../utils/dom";
 
 import { SearchModal } from "./modals/SearchModal";
 import { QuickCardWithFilterModal } from "./modals/QuickCardWithFilterModal";
@@ -278,6 +279,11 @@ export class CardSidebarView extends ItemView {
     this.setupLayoutObservers();
     this.registerVaultEvents();
 
+    // Apply openCategoryOnLoad
+    const openOn = this.plugin.settings.openCategoryOnLoad || 'all';
+    const btn = mainContainer.querySelector(`.sc-category-btn[data-filter-value="${openOn}"]`) as HTMLElement | null;
+    if (btn) btn.click();
+
     this.showLoadingOverlay();
     try {
       await this.renderCards();
@@ -397,7 +403,8 @@ export class CardSidebarView extends ItemView {
 
     // Build ordered chip list using allItemsOrder if available
     const defaultOrder = ['filter-all']
-      .concat(!settings.disableTimeBasedFiltering ? ['filter-today', 'filter-tomorrow'] : [])
+      .concat(!settings.hideTodayFilter ? ['filter-today'] : [])
+      .concat(!settings.hideTomorrowFilter ? ['filter-tomorrow'] : [])
       .concat(!settings.hideArchivedFilterButton ? ['filter-archived'] : [])
       .concat(cats.map(c => String(c.id || '')));
 
@@ -414,11 +421,11 @@ export class CardSidebarView extends ItemView {
         return;
       }
       if (itemId === 'filter-today') {
-        if (!settings.disableTimeBasedFiltering) chips.push({ type: 'category', label: 'Today', value: 'today' });
+        if (!settings.hideTodayFilter) chips.push({ type: 'category', label: 'Today', value: 'today' });
         return;
       }
       if (itemId === 'filter-tomorrow') {
-        if (!settings.disableTimeBasedFiltering) chips.push({ type: 'category', label: 'Tomorrow', value: 'tomorrow' });
+        if (!settings.hideTomorrowFilter) chips.push({ type: 'category', label: 'Tomorrow', value: 'tomorrow' });
         return;
       }
       if (itemId === 'filter-archived') {
@@ -583,6 +590,19 @@ export class CardSidebarView extends ItemView {
     editorEl.addEventListener('keydown', (e) => {
       if (this.applyFormattingHotkey(e, editorEl)) return;
       this.applySelectionWrapShortcut(e, editorEl);
+
+      // Save key handling
+      const normalizeKey = (v: string) => String(v || '').toLowerCase().replace(/[\s\+_]+/g, '-').replace(/[^a-z0-9\-]/g, '').replace(/-+/g, '-').replace(/^-|-$/g, '');
+      const saveKey = normalizeKey(this.plugin.settings.saveKey || 'enter');
+      let pressed = '';
+      if (e.ctrlKey) pressed += 'ctrl-';
+      if (e.shiftKey) pressed += 'shift-';
+      if (e.altKey) pressed += 'alt-';
+      if (e.key && e.key.toLowerCase() === 'enter') pressed += 'enter';
+      if (pressed === saveKey || (e.key === 'Enter' && !e.shiftKey && !e.ctrlKey && !e.altKey)) {
+        e.preventDefault();
+        addButton.click();
+      }
     });
 
     const buttonContainer = inputContainer.createDiv('sc-sidebar-button-container');
@@ -693,12 +713,14 @@ export class CardSidebarView extends ItemView {
       const catMatch = catRegex.exec(content);
       const category = catMatch ? catMatch[1] : (this.activeFilters.category || undefined);
 
-      // Clean content (optional: user might want to keep them)
-      // For now, keep them in content but also add to metadata
+      // Auto color
+      const autoColor = resolveAutoColor(content, tags, this.plugin.settings);
+      const color = autoColor || 'var(--card-color-1)';
       
       const card = new Card({ 
         content, 
         tags,
+        color,
         category: category === 'all' ? undefined : category 
       });
       await this.store.add(card);
@@ -745,14 +767,6 @@ export class CardSidebarView extends ItemView {
 
   private async renderCards(isManualReload = false): Promise<void> {
     const settings = { ...this.store.settings };
-    if (isManualReload) {
-      // If manually reloading, we might want to skip animation or use a faster one
-      // But user said "reload cards makes the cards come in with the fade in" as if it's an issue
-      // Let's make reload NOT fade in if they prefer instant
-      settings.animatedCards = false;
-      settings.disableCardFadeIn = true;
-    }
-    
     const scrollTop = this.cardsContainer?.scrollTop || 0;
 
     await flipAnimateAsync(this.cardsContainer, async () => {
