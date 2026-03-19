@@ -68,6 +68,12 @@ export interface SideCardsSettings {
   replaceHomepageWithSidecards?: boolean;
   searchBarVisible?: boolean;
   pinnedNotes?: string[];
+  homepageName?: string;
+  hideCategoryDropdown?: boolean;
+  hideColorSwatches?: boolean;
+  showPinnedNotes?: boolean;
+  showRecentNotes?: boolean;
+  notesPlacement?: 'left' | 'right';
 }
 
 export const DEFAULT_SETTINGS: SideCardsSettings = {
@@ -129,4 +135,10 @@ export const DEFAULT_SETTINGS: SideCardsSettings = {
   replaceHomepageWithSidecards: false,
   searchBarVisible: false,
   pinnedNotes: [],
+  homepageName: 'SideCards',
+  hideCategoryDropdown: false,
+  hideColorSwatches: false,
+  showPinnedNotes: true,
+  showRecentNotes: true,
+  notesPlacement: 'left',
 };

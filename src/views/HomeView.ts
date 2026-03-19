@@ -288,24 +288,34 @@ export class SideCardsHomeView extends ItemView {
     
     // Top Section
     const topSection = main.createDiv({ cls: 'sc-home-top' });
-    topSection.createEl('h2', { text: 'SideCards', cls: 'sc-home-title' });
+    topSection.createEl('h2', { text: this.plugin.settings.homepageName || 'SideCards', cls: 'sc-home-title' });
 
     const paletteRow = topSection.createDiv({ cls: 'sc-home-palette-row' });
-    const categoryBtn = paletteRow.createEl('button', { text: 'category', cls: 'sc-home-category-btn' });
-    categoryBtn.addEventListener('click', (e) => {
-      const menu = new Menu();
-      this.getAvailableFilters().forEach((f) => {
-        menu.addItem(item => item.setTitle(f.label).onClick(() => {
-          this.filterType = f.type;
-          this.filterValue = f.value;
-          categoryBtn.textContent = f.label;
-        }));
-      });
-      menu.showAtMouseEvent(e);
-    });
 
-    const separator = paletteRow.createDiv({ cls: 'sc-home-separator' });
-    separator.textContent = '|';
+    // Hide palette row entirely if both category and swatches are hidden
+    if (this.plugin.settings.hideCategoryDropdown && this.plugin.settings.hideColorSwatches) {
+      paletteRow.style.display = 'none';
+    }
+
+    if (!this.plugin.settings.hideCategoryDropdown) {
+      const categoryBtn = paletteRow.createEl('button', { text: 'category', cls: 'sc-home-category-btn' });
+      categoryBtn.addEventListener('click', (e) => {
+        const menu = new Menu();
+        this.getAvailableFilters().forEach((f) => {
+          menu.addItem(item => item.setTitle(f.label).onClick(() => {
+            this.filterType = f.type;
+            this.filterValue = f.value;
+            categoryBtn.textContent = f.label;
+          }));
+        });
+        menu.showAtMouseEvent(e);
+      });
+
+      const separator = paletteRow.createDiv({ cls: 'sc-home-separator' });
+      separator.textContent = '|';
+    }
+
+    if (!this.plugin.settings.hideColorSwatches) {
 
     const colors = [
       { name: 'gray', var: 'var(--card-color-1)' },
@@ -334,6 +344,7 @@ export class SideCardsHomeView extends ItemView {
       });
       swatches.push(swatch);
     });
+    } // end hideColorSwatches check
 
     const editorEl = topSection.createDiv({ cls: 'sc-home-editor' });
     editorEl.setAttribute('contenteditable', 'true');
@@ -385,19 +396,43 @@ export class SideCardsHomeView extends ItemView {
     // Content Section (Two Columns)
     const contentGrid = main.createDiv({ cls: 'sc-home-grid' });
     
+    const bothNotesHidden = this.plugin.settings.showPinnedNotes === false && this.plugin.settings.showRecentNotes === false;
+    const notesOnRight = this.plugin.settings.notesPlacement === 'right';
+
+    if (notesOnRight) contentGrid.addClass('notes-right');
+
     // Left Column: Notes
     const leftCol = contentGrid.createDiv({ cls: 'sc-home-left' });
-    
-    leftCol.createEl('h3', { text: 'Pinned Notes', cls: 'sc-home-section-title' });
-    const pinnedList = leftCol.createDiv({ cls: 'sc-home-file-list pinned' });
-    await this.renderFileList(pinnedList, 'pinned');
-
-    leftCol.createEl('h3', { text: 'Recent Notes', cls: 'sc-home-section-title' });
-    const recentList = leftCol.createDiv({ cls: 'sc-home-file-list' });
-    await this.renderFileList(recentList, 'recent');
-
     // Right Column: Cards
     const rightCol = contentGrid.createDiv({ cls: 'sc-home-right' });
+
+    // Swap visual order via CSS order property (avoids grid width issues)
+    if (notesOnRight) {
+      leftCol.style.order = '2';
+      rightCol.style.order = '1';
+    }
+
+    if (bothNotesHidden) {
+      leftCol.style.display = 'none';
+      contentGrid.style.gridTemplateColumns = '1fr';
+    } else if (notesOnRight) {
+      contentGrid.addClass('notes-right');
+    }
+
+    let pinnedList: HTMLElement | null = null;
+    let recentList: HTMLElement | null = null;
+
+    if (this.plugin.settings.showPinnedNotes !== false) {
+      leftCol.createEl('h3', { text: 'Pinned Notes', cls: 'sc-home-section-title' });
+      pinnedList = leftCol.createDiv({ cls: 'sc-home-file-list pinned' });
+      await this.renderFileList(pinnedList, 'pinned');
+    }
+
+    if (this.plugin.settings.showRecentNotes !== false) {
+      leftCol.createEl('h3', { text: 'Recent Notes', cls: 'sc-home-section-title' });
+      recentList = leftCol.createDiv({ cls: 'sc-home-file-list' });
+      await this.renderFileList(recentList, 'recent');
+    }
     
     const toolbar = rightCol.createDiv({ cls: 'sc-home-toolbar' });
     const cardList = rightCol.createDiv({ cls: 'sc-home-card-list' });
@@ -406,7 +441,7 @@ export class SideCardsHomeView extends ItemView {
     const categoryBar = rightCol.createDiv({ cls: 'sc-home-category-bar' });
     rightCol.insertBefore(categoryBar, cardList);
     
-    this.renderToolbar(toolbar, editorEl, cardList, pinnedList, recentList);
+    this.renderToolbar(toolbar, editorEl, cardList, pinnedList ?? leftCol, recentList ?? leftCol);
     this.renderCategoryBar(categoryBar, cardList);
 
     await this.renderCards(cardList);
@@ -655,6 +690,7 @@ export class SideCardsHomeView extends ItemView {
     const searchIcon = searchWrap.createSpan({ cls: 'sc-home-search-icon' });
     setIcon(searchIcon, 'search');
     const searchInput = searchWrap.createEl('input', { cls: 'sc-home-search-input', placeholder: 'Search card...' });
+    searchInput.style.fontFamily = 'var(--font-interface)';
     searchInput.addEventListener('input', () => {
       this.currentSearchQuery = searchInput.value;
       this.renderCards(cardList);
@@ -742,7 +778,10 @@ export class SideCardsHomeView extends ItemView {
     });
   }
 
+  private cardRenderGen = 0;
+
   private async renderCards(container: HTMLElement) {
+    const gen = ++this.cardRenderGen;
     container.empty();
     this.cardComponents.forEach(c => c.destroy());
     this.cardComponents.clear();
@@ -772,12 +811,24 @@ export class SideCardsHomeView extends ItemView {
       }
     }
 
-    cards = this.sortService.sort(cards, this.currentSortMode, this.sortAscending);
-    
-    cards.slice(0, 10).forEach(card => {
-      const comp = new CardComponent(container, card, this.store, this.app, this.plugin);
-      this.cardComponents.set(card.id, comp);
-    });
+    cards = this.sortService.sort(cards, this.currentSortMode, this.sortAscending, this.app);
+
+    // Render in chunks — bail out if a newer renderCards call has started
+    const CHUNK_SIZE = 10;
+    const renderChunk = (startIdx: number) => {
+      if (gen !== this.cardRenderGen) return; // stale, abort
+      const chunk = cards.slice(startIdx, startIdx + CHUNK_SIZE);
+      if (chunk.length === 0) return;
+      chunk.forEach(card => {
+        const comp = new CardComponent(container, card, this.store, this.app, this.plugin);
+        this.cardComponents.set(card.id, comp);
+      });
+      if (startIdx + CHUNK_SIZE < cards.length) {
+        requestAnimationFrame(() => renderChunk(startIdx + CHUNK_SIZE));
+      }
+    };
+
+    renderChunk(0);
   }
 
   private getAvailableFilters(): Array<{ type: string; label: string; value: string }> {

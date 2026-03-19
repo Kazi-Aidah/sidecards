@@ -1,5 +1,5 @@
 
-import { Plugin, PluginSettingTab, App, Setting, WorkspaceLeaf, setIcon, Notice, TFile } from "obsidian";
+import { Plugin, PluginSettingTab, App, Setting, WorkspaceLeaf, setIcon, Notice, TFile, Platform, requestUrl, Component, MarkdownRenderer, Modal } from "obsidian";
 import { CardSidebarView } from "../views/CardSidebarView";
 import { CardStore } from "../services/CardStore";
 import { FilterService } from "../services/FilterService";
@@ -81,6 +81,36 @@ export default class SideCardsPlugin extends Plugin {
       id: 'search-cards',
       name: 'Search Cards',
       callback: () => new SearchModal(this.app, this, this.store).open()
+    });
+
+    this.addCommand({
+      id: 'pin-to-homepage',
+      name: 'Pin to Sidecards Homepage',
+      checkCallback: (checking: boolean) => {
+        const file = this.app.workspace.getActiveFile();
+        if (!file) return false;
+        if (!checking) {
+          const isPinned = this.settings.pinnedNotes?.includes(file.path);
+          if (!this.settings.pinnedNotes) this.settings.pinnedNotes = [];
+          if (isPinned) {
+            this.settings.pinnedNotes = this.settings.pinnedNotes.filter(p => p !== file.path);
+            new Notice(`Unpinned ${file.name} from Sidecards Homepage.`);
+          } else {
+            if (this.settings.showPinnedNotes !== false) {
+              this.settings.pinnedNotes.push(file.path);
+              new Notice(`Pinned ${file.name} to Sidecards Homepage.`);
+            }
+          }
+          this.saveSettings();
+          const leaves = this.app.workspace.getLeavesOfType('sidecards-home');
+          leaves.forEach((leaf) => {
+            if (leaf.view && typeof (leaf.view as any).refreshPinnedNotes === 'function') {
+              (leaf.view as any).refreshPinnedNotes();
+            }
+          });
+        }
+        return this.settings.showPinnedNotes !== false;
+      }
     });
 
     this.addCommand({
@@ -172,6 +202,22 @@ export default class SideCardsPlugin extends Plugin {
               });
           });
         }
+      })
+    );
+
+    // Replace new tab with homepage when enabled
+    this.registerEvent(
+      this.app.workspace.on('active-leaf-change', (leaf: any) => {
+        if (!this.settings.replaceHomepageWithSidecards) return;
+        if (!leaf) return;
+        try {
+          const viewType = leaf.view?.getViewType?.();
+          if (viewType === 'sidecards-home') return;
+          const state = leaf.getViewState?.();
+          if (state?.type === 'empty' && !state?.state?.file) {
+            void this.replaceWithHomepage(leaf);
+          }
+        } catch {}
       })
     );
   }
@@ -280,6 +326,50 @@ export default class SideCardsPlugin extends Plugin {
       this.app.workspace.revealLeaf(leaf);
     }
   }
+
+  refreshHomepageViews() {
+    this.app.workspace.getLeavesOfType('sidecards-home').forEach(leaf => {
+      const view = leaf.view as any;
+      if (typeof view.onOpen === 'function') {
+        try { view.onOpen(); } catch {}
+      }
+    });
+  }
+
+  private async replaceWithHomepage(leaf: any) {
+    try {
+      await leaf.setViewState({ type: 'sidecards-home', active: true });
+    } catch {}
+  }
+
+  async fetchAllReleases() {
+    const allReleases: any[] = [];
+    let page = 1;
+    let hasMorePages = true;
+    while (hasMorePages) {
+      const url = `https://api.github.com/repos/Kazi-Aidah/sidecards/releases?page=${page}&per_page=100`;
+      try {
+        const res = await requestUrl({
+          url,
+          headers: {
+            'Accept': 'application/vnd.github.v3+json',
+            'User-Agent': 'Obsidian-SideCards'
+          }
+        });
+        const data = res.json;
+        if (!Array.isArray(data) || data.length === 0) {
+          hasMorePages = false;
+        } else {
+          allReleases.push(...data);
+          if (data.length < 100) hasMorePages = false;
+          else page++;
+        }
+      } catch {
+        hasMorePages = false;
+      }
+    }
+    return allReleases;
+  }
 }
 
 class SideCardsSettingTab extends PluginSettingTab {
@@ -302,6 +392,45 @@ class SideCardsSettingTab extends PluginSettingTab {
     root.style.setProperty('--card-color-8', this.plugin.settings.color8 || '#e832c1');
     root.style.setProperty('--card-color-9', this.plugin.settings.color9 || '#e83289');
     root.style.setProperty('--card-color-10', this.plugin.settings.color10 || '#965b3b');
+  }
+
+  private applyColorToDropdown(selectEl: HTMLSelectElement, colorIndex: string) {
+    const colorKey = `color${colorIndex}` as keyof SideCardsSettings;
+    const color = this.plugin.settings[colorKey] as string || '#ffffff';
+    selectEl.style.backgroundColor = color;
+    selectEl.style.color = this.getContrastColor(color);
+
+    Array.from(selectEl.options).forEach((option, i) => {
+      const idx = i + 1;
+      const cKey = `color${idx}` as keyof SideCardsSettings;
+      const c = this.plugin.settings[cKey] as string || '#ffffff';
+      option.style.backgroundColor = c;
+      option.style.color = this.getContrastColor(c);
+    });
+  }
+
+  private getContrastColor(hex: string): string {
+    if (hex && hex.startsWith('var')) {
+      const varName = hex.match(/--[a-zA-Z0-9-]+/)?.[0];
+      if (varName) {
+        hex = getComputedStyle(document.documentElement).getPropertyValue(varName).trim();
+      }
+    }
+
+    if (typeof hex !== 'string' || !hex.startsWith('#')) {
+      return '#000000'; // Return black for invalid input
+    }
+
+    const r = parseInt(hex.slice(1, 3), 16);
+    const g = parseInt(hex.slice(3, 5), 16);
+    const b = parseInt(hex.slice(5, 7), 16);
+
+    if (isNaN(r) || isNaN(g) || isNaN(b)) {
+        return '#000000';
+    }
+
+    const yiq = ((r * 299) + (g * 587) + (b * 114)) / 1000;
+    return (yiq >= 128) ? '#000000' : '#ffffff';
   }
 
   display(): void {
@@ -338,6 +467,16 @@ class SideCardsSettingTab extends PluginSettingTab {
         }
       } catch {}
     };
+
+    new Setting(containerEl)
+      .setName('Latest release notes')
+      .setDesc('View the most recent plugin release notes.')
+      .addButton(b => {
+        b.setButtonText('Open changelog')
+          .onClick(() => {
+            new ChangelogModal(this.app, this.plugin).open();
+          });
+      });
 
     new Setting(containerEl)
       .setName('Storage folder')
@@ -443,17 +582,25 @@ class SideCardsSettingTab extends PluginSettingTab {
       // Clear and re-render preview content
       previewCard.empty();
       previewCard.createDiv({ text: 'This is how yours cards will look!', cls: 'sc-content' });
-      
-      const tagsEl = previewCard.createDiv({ cls: 'sc-tags' });
-      ['ideas', 'project'].forEach(t => {
-        const tag = tagsEl.createSpan({ cls: 'sc-tag', text: settings.omitTagHash ? t : `#${t}` });
-      });
-      
-      if (settings.showTimestamps) {
-        const ts = previewCard.createDiv({ cls: 'sc-timestamp', text: (window as any).moment ? (window as any).moment().format(settings.datetimeFormat || 'ddd D') : 'Today 12:00' });
-        if (settings.groupTags && settings.timestampBelowTags) {
-          ts.style.display = 'block';
-          ts.style.marginTop = '4px';
+
+      if (settings.groupTags) {
+        if (settings.showTimestamps && settings.timestampBelowTags) {
+          // timestamp ABOVE tags
+          previewCard.createDiv({ cls: 'sc-timestamp', text: (window as any).moment ? (window as any).moment().format(settings.datetimeFormat || 'ddd D') : 'Today 12:00' });
+        }
+        const tagsEl = previewCard.createDiv({ cls: 'sc-tags' });
+        ['ideas', 'project'].forEach(t => {
+          tagsEl.createSpan({ cls: 'sc-tag', text: settings.omitTagHash ? t : `#${t}` });
+        });
+        if (settings.showTimestamps && !settings.timestampBelowTags) {
+          // timestamp inline after tags
+          const ts = previewCard.createDiv({ cls: 'sc-timestamp', text: (window as any).moment ? (window as any).moment().format(settings.datetimeFormat || 'ddd D') : 'Today 12:00' });
+          ts.style.display = 'inline-block';
+          ts.style.marginLeft = '8px';
+        }
+      } else {
+        if (settings.showTimestamps) {
+          previewCard.createDiv({ cls: 'sc-timestamp', text: (window as any).moment ? (window as any).moment().format(settings.datetimeFormat || 'ddd D') : 'Today 12:00' });
         }
       }
     };
@@ -483,6 +630,46 @@ class SideCardsSettingTab extends PluginSettingTab {
       document.documentElement.style.setProperty('--card-border-radius', `${value}px`);
       updatePreview();
       refreshSidebarCards();
+    }));
+
+    new Setting(containerEl).setName('Group tags under content').setDesc('Show tags grouped below card content.').addToggle(toggle => toggle.setValue(!!this.plugin.settings.groupTags).onChange(async (value) => {
+      this.plugin.settings.groupTags = value;
+      await this.plugin.saveSettings();
+      updatePreview();
+    }));
+    new Setting(containerEl).setName('Omit # prefix for tags').setDesc('Display tags without the leading #').addToggle(toggle => toggle.setValue(this.plugin.settings.omitTagHash ?? true).onChange(async (value) => {
+      this.plugin.settings.omitTagHash = value;
+      await this.plugin.saveSettings();
+      updatePreview();
+    }));
+    new Setting(containerEl).setName('Show timestamps').setDesc('Show creation timestamps on cards').addToggle(toggle => toggle.setValue(!!this.plugin.settings.showTimestamps).onChange(async (value) => {
+      this.plugin.settings.showTimestamps = value;
+      await this.plugin.saveSettings();
+      updatePreview();
+    }));
+
+    const timestampSetting = new Setting(containerEl)
+      .setName('Timestamp date & time format')
+      .addText(text => text.setPlaceholder('YYYY-MM-DD hh:mma').setValue(this.plugin.settings.datetimeFormat || 'YYYY-MM-DD hh:mma').onChange(async (value) => {
+        this.plugin.settings.datetimeFormat = value;
+        await this.plugin.saveSettings();
+        updateTimestampPreview(value);
+        updatePreview();
+      }));
+
+    const updateTimestampPreview = (val: string) => {
+      timestampSetting.descEl.empty();
+      timestampSetting.descEl.createSpan({ text: 'Your current format: ' });
+      const m = (window as any).moment;
+      const span = timestampSetting.descEl.createSpan({ text: m ? m().format(val || 'ddd D') : new Date().toLocaleString() });
+      span.setCssStyles({ fontWeight: 'bold', color: 'var(--color-accent)' });
+    };
+    updateTimestampPreview(this.plugin.settings.datetimeFormat || 'YYYY-MM-DD hh:mma');
+
+    new Setting(containerEl).setName('Bring timestamp above tags').setDesc('Render timestamp above grouped tags.').addToggle(toggle => toggle.setValue(!!this.plugin.settings.timestampBelowTags).onChange(async (value) => {
+      this.plugin.settings.timestampBelowTags = value;
+      await this.plugin.saveSettings();
+      updatePreview();
     }));
 
     new Setting(containerEl).setName('Animation').setHeading();
@@ -548,70 +735,16 @@ class SideCardsSettingTab extends PluginSettingTab {
       await this.plugin.saveSettings();
       updateButtonPadding(this.plugin.settings.buttonPaddingBottom || 0);
     }));
-    new Setting(containerEl).setName('Group tags under content').setDesc('Show tags grouped below card content.').addToggle(toggle => toggle.setValue(!!this.plugin.settings.groupTags).onChange(async (value) => {
-      this.plugin.settings.groupTags = value;
-      await this.plugin.saveSettings();
-      updatePreview();
-    }));
-    new Setting(containerEl).setName('Omit # prefix for tags').setDesc('Display tags without the leading #').addToggle(toggle => toggle.setValue(this.plugin.settings.omitTagHash ?? true).onChange(async (value) => {
-      this.plugin.settings.omitTagHash = value;
-      await this.plugin.saveSettings();
-      updatePreview();
-    }));
-    new Setting(containerEl).setName('Show timestamps').setDesc('Show creation timestamps on cards').addToggle(toggle => toggle.setValue(!!this.plugin.settings.showTimestamps).onChange(async (value) => {
-      this.plugin.settings.showTimestamps = value;
-      await this.plugin.saveSettings();
-      updatePreview();
-    }));
-    
-    const timestampSetting = new Setting(containerEl)
-      .setName('Timestamp date & time format')
-      .addText(text => text.setPlaceholder('YYYY-MM-DD hh:mma').setValue(this.plugin.settings.datetimeFormat || 'YYYY-MM-DD hh:mma').onChange(async (value) => {
-        this.plugin.settings.datetimeFormat = value;
-        await this.plugin.saveSettings();
-        updateTimestampPreview(value);
-        updatePreview();
-      }));
-    
-    const updateTimestampPreview = (val: string) => {
-      timestampSetting.descEl.empty();
-      timestampSetting.descEl.createSpan({ text: 'Your current format: ' });
-      const m = (window as any).moment;
-      const span = timestampSetting.descEl.createSpan({ text: m ? m().format(val || 'ddd D') : new Date().toLocaleString() });
-      span.setCssStyles({
-        fontWeight: 'bold',
-        color: 'var(--color-accent)'
-      });
-    };
-    updateTimestampPreview(this.plugin.settings.datetimeFormat || 'YYYY-MM-DD hh:mma');
-    
-    new Setting(containerEl).setName('Bring timestamp below tags').setDesc('Render timestamp below grouped tags.').addToggle(toggle => toggle.setValue(!!this.plugin.settings.timestampBelowTags).onChange(async (value) => {
-      this.plugin.settings.timestampBelowTags = value;
-      await this.plugin.saveSettings();
-      updatePreview();
-    }));
 
-    new Setting(containerEl).setName('Categories').setDesc('Configure category display and reordering.').setHeading();
+    new Setting(containerEl).setName('Category Management').setDesc('Configure category display and reordering.').setHeading();
     new Setting(containerEl).setName('Enable Custom Categories').setDesc('Allow custom categories in the right-click menu.').addToggle(toggle => toggle.setValue(!!this.plugin.settings.enableCustomCategories).onChange(async (value) => {
       this.plugin.settings.enableCustomCategories = value;
       await this.plugin.saveSettings();
       this.display();
       refreshSidebarHeader();
     }));
-    new Setting(containerEl).setName('Disable time-based categories').setDesc('Hide Today/Tomorrow from the topbar.').addToggle(toggle => toggle.setValue(!!this.plugin.settings.disableTimeBasedFiltering).onChange(async (value) => {
-      this.plugin.settings.disableTimeBasedFiltering = value;
-      await this.plugin.saveSettings();
-      this.display();
-      refreshSidebarHeader();
-    }));
-    new Setting(containerEl).setName('Disable archived category').setDesc('Hide Archived from the topbar.').addToggle(toggle => toggle.setValue(!!this.plugin.settings.hideArchivedFilterButton).onChange(async (value) => {
-      this.plugin.settings.hideArchivedFilterButton = value;
-      await this.plugin.saveSettings();
-      this.display();
-      refreshSidebarHeader();
-    }));
-    
-    new Setting(containerEl).setName('Category order').setDesc('Drag to reorder. Colors apply to topbar buttons.').setHeading();
+
+
     
     const catsContainer = containerEl.createDiv({ cls: 'categories-list' });
     catsContainer.style.marginTop = '8px';
@@ -660,7 +793,7 @@ class SideCardsSettingTab extends PluginSettingTab {
       });
 
       const saveOrder = async () => {
-        const ids = Array.from(catsContainer.querySelectorAll('.category-row[data-cat-id]'))
+        const ids = Array.from(catsContainer.querySelectorAll('.setting-item[data-cat-id]'))
           .map(r => (r as HTMLElement).dataset.catId)
           .filter(Boolean) as string[];
         this.plugin.settings.allItemsOrder = ids;
@@ -689,134 +822,127 @@ class SideCardsSettingTab extends PluginSettingTab {
           isVisible = itemInfo.data?.showInMenu !== false;
         }
 
-        const row = catsContainer.createDiv({ cls: 'category-row' });
-        row.dataset.catId = itemId;
-        row.style.display = 'flex';
-        row.style.gap = '8px';
-        row.style.alignItems = 'center';
-        row.style.padding = '8px';
-        row.style.marginBottom = '6px';
-        row.style.backgroundColor = 'var(--background-secondary)';
-        row.style.borderRadius = '6px';
-        row.style.border = '1px solid var(--background-modifier-border)';
-        row.draggable = true;
+        const setting = new Setting(catsContainer);
 
-        // Drag events
-        row.addEventListener('dragstart', (e) => {
+        setting.settingEl.setAttr('data-cat-id', itemId);
+        setting.settingEl.setAttr('draggable', 'true');
+
+        setting.settingEl.addEventListener('dragstart', (e) => {
           dragSrcId = itemId;
-          row.style.opacity = '0.5';
           e.dataTransfer?.setData('text/plain', itemId);
+          if (e.dataTransfer) {
+            e.dataTransfer.effectAllowed = 'move';
+          }
+          setTimeout(() => {
+            setting.settingEl.addClass('sc-dragging');
+          }, 0);
         });
-        row.addEventListener('dragend', () => {
-          row.style.opacity = '1';
+
+        setting.settingEl.addEventListener('dragend', () => {
+          catsContainer.querySelectorAll('.sc-dragging').forEach(el => el.removeClass('sc-dragging'));
           dragSrcId = null;
-          saveOrder();
         });
-        row.addEventListener('dragover', (e) => {
+
+        setting.settingEl.addEventListener('dragover', (e) => {
           e.preventDefault();
-          if (dragSrcId && dragSrcId !== itemId) {
-            const rows = Array.from(catsContainer.querySelectorAll('.category-row[data-cat-id]'));
-            const srcRow = rows.find(r => (r as HTMLElement).dataset.catId === dragSrcId);
-            if (srcRow) {
-              const rect = row.getBoundingClientRect();
-              const midpoint = rect.top + rect.height / 2;
-              if (e.clientY < midpoint) {
-                catsContainer.insertBefore(srcRow, row);
-              } else {
-                catsContainer.insertBefore(srcRow, row.nextSibling);
-              }
-            }
+          if (dragSrcId === itemId) return;
+          const target = setting.settingEl;
+          const rect = target.getBoundingClientRect();
+          const midY = rect.top + rect.height / 2;
+          if (e.clientY < midY) {
+            target.removeClass('sc-drag-over-bottom');
+            target.addClass('sc-drag-over-top');
+          } else {
+            target.removeClass('sc-drag-over-top');
+            target.addClass('sc-drag-over-bottom');
           }
         });
+
+        setting.settingEl.addEventListener('dragleave', () => {
+          setting.settingEl.removeClass('sc-drag-over-top', 'sc-drag-over-bottom');
+        });
+
+        setting.settingEl.addEventListener('drop', async (e) => {
+          e.preventDefault();
+          if (!dragSrcId || dragSrcId === itemId) return;
+
+          const target = setting.settingEl;
+          target.removeClass('sc-drag-over-top', 'sc-drag-over-bottom');
+
+          const allIds = Array.from(catsContainer.querySelectorAll('.setting-item[data-cat-id]'))
+            .map(el => (el as HTMLElement).dataset.catId as string);
+          
+          const srcIndex = allIds.indexOf(dragSrcId);
+          const destIndex = allIds.indexOf(itemId);
+
+          if (srcIndex === -1 || destIndex === -1) return;
+
+          const rect = target.getBoundingClientRect();
+          const midY = rect.top + rect.height / 2;
+          const insertBefore = e.clientY < midY;
+
+          const newOrder = allIds.filter(id => id !== dragSrcId);
+          let finalIndex = destIndex;
+          if (srcIndex < destIndex && !insertBefore) {
+            finalIndex = destIndex;
+          } else if (srcIndex > destIndex && insertBefore) {
+            finalIndex = destIndex;
+          } else if (srcIndex < destIndex && insertBefore) {
+            finalIndex = destIndex -1;
+          } else if (srcIndex > destIndex && !insertBefore) {
+            finalIndex = destIndex + 1;
+          }
+
+          newOrder.splice(finalIndex, 0, dragSrcId);
+
+          this.plugin.settings.allItemsOrder = newOrder;
+          await this.plugin.saveSettings();
+          renderCategories();
+          refreshSidebarHeader();
+        });
+
+        setting.infoEl.remove();
+
+        const row = setting.controlEl;
+        row.style.flex = '1';
+        row.style.justifyContent = 'flex-start';
 
         // Drag handle
         const handle = row.createEl('div', { cls: 'drag-handle' });
         try { setIcon(handle as any, 'grip-vertical'); } catch { handle.textContent = '⋮⋮'; }
         handle.style.cursor = 'grab';
         handle.style.color = 'var(--text-muted)';
+        handle.style.marginRight = '10px';
 
-        // Text color picker
-        const textColorPicker = row.createEl('input');
-        textColorPicker.type = 'color';
-        textColorPicker.value = this.plugin.settings.filterColors?.[colorKey]?.textColor || '#c0c3c7';
-        textColorPicker.title = 'Text color';
-        textColorPicker.style.width = '24px';
-        textColorPicker.style.height = '24px';
-        textColorPicker.style.padding = '0';
-        textColorPicker.style.border = 'none';
-        textColorPicker.style.background = 'none';
-        textColorPicker.style.cursor = 'pointer';
-        textColorPicker.addEventListener('change', async (e: any) => {
-          if (!this.plugin.settings.filterColors) this.plugin.settings.filterColors = {};
-          if (!this.plugin.settings.filterColors[colorKey]) this.plugin.settings.filterColors[colorKey] = {};
-          this.plugin.settings.filterColors[colorKey].textColor = e.target.value;
-          await this.plugin.saveSettings();
-          refreshSidebarHeader();
-        });
+        // Eye icon (Round button)
+        const eyeBtn = row.createEl('button', { cls: 'clickable-icon sc-eye' });
+        eyeBtn.style.borderRadius = '50%';
+        eyeBtn.style.width = '32px';
+        eyeBtn.style.minWidth = '32px';
+        eyeBtn.style.height = '32px';
+        eyeBtn.style.display = 'flex';
+        eyeBtn.style.alignItems = 'center';
+        eyeBtn.style.justifyContent = 'center';
+        eyeBtn.style.padding = '0';
+        eyeBtn.style.border = 'none';
+        eyeBtn.style.marginRight = '10px';
 
-        // BG color picker
-        const bgColorPicker = row.createEl('input');
-        bgColorPicker.type = 'color';
-        bgColorPicker.value = this.plugin.settings.filterColors?.[colorKey]?.bgColor || '#1a1a1a';
-        bgColorPicker.title = 'Background color';
-        bgColorPicker.style.width = '24px';
-        bgColorPicker.style.height = '24px';
-        bgColorPicker.style.padding = '0';
-        bgColorPicker.style.border = 'none';
-        bgColorPicker.style.background = 'none';
-        bgColorPicker.style.cursor = 'pointer';
-        bgColorPicker.addEventListener('change', async (e: any) => {
-          if (!this.plugin.settings.filterColors) this.plugin.settings.filterColors = {};
-          if (!this.plugin.settings.filterColors[colorKey]) this.plugin.settings.filterColors[colorKey] = {};
-          this.plugin.settings.filterColors[colorKey].bgColor = e.target.value;
-          await this.plugin.saveSettings();
-          refreshSidebarHeader();
-        });
-
-        // Reset button
-        const resetBtn = row.createEl('button', { text: 'Reset' });
-        resetBtn.style.padding = '2px 8px';
-        resetBtn.style.fontSize = '11px';
-        resetBtn.addEventListener('click', async () => {
-          if (this.plugin.settings.filterColors?.[colorKey]) {
-            delete this.plugin.settings.filterColors[colorKey];
-            await this.plugin.saveSettings();
-            renderCategories();
-            refreshSidebarHeader();
+        const updateEye = () => {
+          eyeBtn.empty();
+          const iconName = isVisible ? 'eye' : 'eye-off';
+          try { setIcon(eyeBtn as any, iconName); } catch { eyeBtn.textContent = isVisible ? '👁' : '🚫'; }
+          eyeBtn.title = isVisible ? 'Visible' : 'Hidden';
+          
+          if (isVisible) {
+            eyeBtn.style.color = 'var(--color-green)';
+            eyeBtn.style.backgroundColor = 'rgba(var(--color-green-rgb), 0.2)';
+          } else {
+            eyeBtn.style.color = 'var(--color-red)';
+            eyeBtn.style.backgroundColor = 'rgba(var(--color-red-rgb), 0.2)';
           }
-        });
+        };
 
-        // Label / Input
-        if (isBuiltin) {
-          const label = row.createEl('span', { text: itemInfo.label });
-          label.style.flex = '1';
-          label.style.fontWeight = '500';
-        } else {
-          const input = row.createEl('input', { type: 'text' });
-          input.value = itemInfo.label;
-          input.style.flex = '1';
-          input.style.background = 'transparent';
-          input.style.border = 'none';
-          input.style.borderBottom = '1px solid var(--background-modifier-border)';
-          input.addEventListener('change', async (e: any) => {
-            const idx = customList.findIndex(c => c.id === itemId);
-            if (idx >= 0) {
-              this.plugin.settings.customCategories[idx].label = e.target.value;
-              await this.plugin.saveSettings();
-              refreshSidebarHeader();
-            }
-          });
-        }
-
-        // Eye icon
         if (itemInfo.canHide) {
-          const eyeBtn = row.createEl('button', { cls: 'clickable-icon' });
-          eyeBtn.style.padding = '4px';
-          const updateEye = () => {
-            eyeBtn.empty();
-            try { setIcon(eyeBtn as any, isVisible ? 'eye' : 'eye-off'); } catch { eyeBtn.textContent = isVisible ? '👁' : '🚫'; }
-            eyeBtn.title = isVisible ? 'Visible' : 'Hidden';
-          };
           updateEye();
           eyeBtn.addEventListener('click', async () => {
             isVisible = !isVisible;
@@ -834,30 +960,130 @@ class SideCardsSettingTab extends PluginSettingTab {
             await this.plugin.saveSettings();
             updateEye();
             refreshSidebarHeader();
+            applyPreviewColors();
           });
         } else {
-          // Spacer for consistency
-          const spacer = row.createEl('div');
-          spacer.style.width = '32px';
+          isVisible = true;
+          updateEye();
+          eyeBtn.style.opacity = '0.5';
+          eyeBtn.style.cursor = 'default';
         }
 
-        // Remove button
-        if (itemInfo.canRemove) {
-          const removeBtn = row.createEl('button', { cls: 'clickable-icon mod-warning' });
-          removeBtn.style.padding = '4px';
-          try { setIcon(removeBtn as any, 'trash'); } catch { removeBtn.textContent = '×'; }
-          removeBtn.addEventListener('click', async () => {
+        // Text color picker
+        const textColorPicker = row.createEl('input');
+        textColorPicker.type = 'color';
+        textColorPicker.value = this.plugin.settings.filterColors?.[colorKey]?.textColor || '#c0c3c7';
+        textColorPicker.title = 'Text color';
+        textColorPicker.style.width = '24px';
+        textColorPicker.style.height = '24px';
+        textColorPicker.style.padding = '0';
+        textColorPicker.style.border = 'none';
+        textColorPicker.style.borderRadius = '50%';
+        textColorPicker.style.background = 'none';
+        textColorPicker.style.cursor = 'pointer';
+        textColorPicker.style.overflow = 'hidden';
+        textColorPicker.addEventListener('input', async (e: any) => {
+          if (!this.plugin.settings.filterColors) this.plugin.settings.filterColors = {};
+          if (!this.plugin.settings.filterColors[colorKey]) this.plugin.settings.filterColors[colorKey] = {};
+          this.plugin.settings.filterColors[colorKey].textColor = e.target.value;
+          await this.plugin.saveSettings();
+          refreshSidebarHeader();
+          applyPreviewColors();
+        });
+
+        // BG color picker
+        const bgColorPicker = row.createEl('input');
+        bgColorPicker.type = 'color';
+        bgColorPicker.value = this.plugin.settings.filterColors?.[colorKey]?.bgColor || '#1a1a1a';
+        bgColorPicker.title = 'Background color';
+        bgColorPicker.style.width = '24px';
+        bgColorPicker.style.height = '24px';
+        bgColorPicker.style.padding = '0';
+        bgColorPicker.style.border = 'none';
+        bgColorPicker.style.borderRadius = '50%';
+        bgColorPicker.style.background = 'none';
+        bgColorPicker.style.cursor = 'pointer';
+        bgColorPicker.style.overflow = 'hidden';
+        bgColorPicker.addEventListener('input', async (e: any) => {
+          if (!this.plugin.settings.filterColors) this.plugin.settings.filterColors = {};
+          if (!this.plugin.settings.filterColors[colorKey]) this.plugin.settings.filterColors[colorKey] = {};
+          this.plugin.settings.filterColors[colorKey].bgColor = e.target.value;
+          await this.plugin.saveSettings();
+          refreshSidebarHeader();
+          applyPreviewColors();
+        });
+
+        const previewBtn = row.createEl('button', { cls: 'sc-category-preview' });
+        previewBtn.textContent = itemInfo.label;
+        const applyPreviewColors = () => {
+          const colors = this.plugin.settings.filterColors?.[colorKey];
+          if (colors?.bgColor) previewBtn.style.setProperty('background-color', colors.bgColor, 'important');
+          else previewBtn.style.removeProperty('background-color');
+          if (colors?.textColor) previewBtn.style.setProperty('color', colors.textColor, 'important');
+          else previewBtn.style.removeProperty('color');
+        };
+        applyPreviewColors();
+
+        const nameInput = row.createEl('input');
+        nameInput.type = 'text';
+        nameInput.value = itemInfo.label;
+        nameInput.style.width = '100%';
+        nameInput.placeholder = 'Category name';
+        if (isBuiltin) {
+          nameInput.disabled = true;
+          nameInput.style.opacity = '0.6';
+        } else {
+          nameInput.addEventListener('input', async (e: any) => {
+            const newLabel = String(e.target.value || '').trim();
             const idx = customList.findIndex(c => c.id === itemId);
             if (idx >= 0) {
-              this.plugin.settings.customCategories.splice(idx, 1);
-              this.plugin.settings.allItemsOrder = (this.plugin.settings.allItemsOrder || []).filter(id => id !== itemId);
+              this.plugin.settings.customCategories[idx].label = newLabel || 'New Category';
               await this.plugin.saveSettings();
-              renderCategories();
+              previewBtn.textContent = this.plugin.settings.customCategories[idx].label;
               refreshSidebarHeader();
             }
           });
+        }
+
+        // Reset colors button
+        let resetBtn: HTMLElement;
+        if (Platform.isMobile) {
+          resetBtn = row.createEl('button', { cls: 'clickable-icon' });
+          setIcon(resetBtn, 'rotate-ccw');
+          resetBtn.title = 'reset colors';
         } else {
-          // Spacer
+          resetBtn = row.createEl('button', { text: 'Reset colors' });
+          resetBtn.style.padding = '2px 8px';
+          resetBtn.style.fontSize = '11px';
+        }
+        resetBtn.addEventListener('click', async () => {
+          if (this.plugin.settings.filterColors?.[colorKey]) {
+            delete this.plugin.settings.filterColors[colorKey];
+            await this.plugin.saveSettings();
+            renderCategories();
+            refreshSidebarHeader();
+          }
+        });
+
+        // Delete/Remove button
+        if (itemInfo.canRemove) {
+          const removeBtn = row.createEl('button', { cls: 'clickable-icon' });
+          setIcon(removeBtn, 'trash');
+          removeBtn.setAttr('title', 'Delete category');
+          removeBtn.style.padding = 'var(--size-4-1) var(--size-4-1)';
+          removeBtn.addEventListener('click', () => {
+            new ConfirmDeleteModal(this.app, `Delete category "${itemInfo.label}"?`, async () => {
+              const idx = customList.findIndex(c => c.id === itemId);
+              if (idx >= 0) {
+                this.plugin.settings.customCategories.splice(idx, 1);
+                this.plugin.settings.allItemsOrder = (this.plugin.settings.allItemsOrder || []).filter(id => id !== itemId);
+                await this.plugin.saveSettings();
+                renderCategories();
+                refreshSidebarHeader();
+              }
+            }).open();
+          });
+        } else {
           const spacer = row.createEl('div');
           spacer.style.width = '32px';
         }
@@ -870,6 +1096,7 @@ class SideCardsSettingTab extends PluginSettingTab {
       addRow.style.display = 'flex';
       addRow.style.justifyContent = 'flex-end';
       addRow.style.marginTop = '12px';
+      addRow.style.marginBottom = '24px';
       const addBtn = addRow.createEl('button', { text: '+ Add Custom Category', cls: 'mod-cta' });
       addBtn.addEventListener('click', async () => {
         if (!Array.isArray(this.plugin.settings.customCategories)) this.plugin.settings.customCategories = [];
@@ -928,40 +1155,110 @@ class SideCardsSettingTab extends PluginSettingTab {
     const renderRules = () => {
       rulesContainer.empty();
       const rules = Array.isArray(this.plugin.settings.autoColorRules) ? this.plugin.settings.autoColorRules : [];
+      let ruleDragSrcId: string | null = null;
+      
       rules.forEach((r, idx) => {
-        const row = rulesContainer.createDiv();
-        row.style.display = 'flex';
-        row.style.gap = '8px';
-        row.style.alignItems = 'center';
-        const typeSel = row.createEl('select');
-        ['text', 'tag'].forEach(t => { const opt = document.createElement('option'); opt.value = t; opt.textContent = t; typeSel.appendChild(opt); });
-        typeSel.value = String(r.type || 'text');
-        typeSel.addEventListener('change', async (e: any) => { this.plugin.settings.autoColorRules![idx].type = e.target.value; await this.plugin.saveSettings(); });
-        const matchInput = row.createEl('input');
-        matchInput.type = 'text';
-        matchInput.placeholder = 'match';
-        matchInput.value = r.match || '';
-        matchInput.style.flex = '1';
-        matchInput.addEventListener('input', async (e: any) => { this.plugin.settings.autoColorRules![idx].match = e.target.value; await this.plugin.saveSettings(); });
-        const colorSel = row.createEl('select');
-        for (let i = 1; i <= 10; i++) {
-          const opt = document.createElement('option');
-          opt.value = String(i);
-          const names = this.plugin.settings.colorNames || [];
-          const label = names[i - 1] ? String(names[i - 1]) : `Color ${i}`;
-          opt.textContent = label;
-          colorSel.appendChild(opt);
-        }
-        colorSel.value = String(r.colorIndex || 1);
-        colorSel.addEventListener('change', async (e: any) => { this.plugin.settings.autoColorRules![idx].colorIndex = Number(e.target.value); await this.plugin.saveSettings(); });
-        const delBtn = row.createEl('button', { text: 'Remove' });
-        delBtn.addEventListener('click', async () => { this.plugin.settings.autoColorRules!.splice(idx, 1); await this.plugin.saveSettings(); renderRules(); });
+        const setting = new Setting(rulesContainer)
+          .addExtraButton(btn => {
+            btn.setIcon('grip-vertical').setTooltip('Drag to reorder');
+            btn.extraSettingsEl.style.cursor = 'grab';
+          })
+          .addDropdown(dropdown => {
+            dropdown
+              .addOption('text', 'Text')
+              .addOption('tag', 'Tag')
+              .setValue(String(r.type || 'text'))
+              .onChange(async (value) => {
+                this.plugin.settings.autoColorRules![idx].type = value as 'text' | 'tag';
+                await this.plugin.saveSettings();
+              });
+            dropdown.selectEl.style.color = 'var(--text-normal)';
+          })
+          .addText(text => {
+            text
+              .setPlaceholder('match')
+              .setValue(r.match || '')
+              .onChange(async (value) => {
+                this.plugin.settings.autoColorRules![idx].match = value;
+                await this.plugin.saveSettings();
+              });
+            text.inputEl.style.width = '100%';
+            text.inputEl.style.maxWidth = 'none';
+          })
+          .addDropdown(dropdown => {
+            const colors = this.plugin.settings.colorNames || [];
+            for (let i = 1; i <= 10; i++) {
+              const colorName = colors[i - 1] || `Color ${i}`;
+              dropdown.addOption(String(i), colorName);
+            }
+            dropdown.setValue(String(r.colorIndex || 1));
+            this.applyColorToDropdown(dropdown.selectEl, String(r.colorIndex || 1));
+            dropdown.onChange(async (value) => {
+              this.plugin.settings.autoColorRules![idx].colorIndex = Number(value);
+              await this.plugin.saveSettings();
+              this.applyColorToDropdown(dropdown.selectEl, value);
+            });
+            dropdown.selectEl.style.color = 'var(--text-normal)';
+            Array.from(dropdown.selectEl.options).forEach(opt => opt.style.color = 'var(--text-normal)');
+          })
+          .addExtraButton(button => {
+            button
+              .setIcon('trash')
+              .setTooltip('Remove rule')
+              .onClick(async () => {
+                this.plugin.settings.autoColorRules!.splice(idx, 1);
+                await this.plugin.saveSettings();
+                renderRules();
+              });
+          });
+        setting.infoEl.remove();
+        setting.controlEl.style.flex = '1';
+        setting.controlEl.style.justifyContent = 'flex-start';
+
+        // Add drag events for Auto Color
+        setting.settingEl.setAttr('draggable', 'true');
+        setting.settingEl.addEventListener('dragstart', (e) => {
+          ruleDragSrcId = `rule-${idx}`;
+          e.dataTransfer?.setData('text/plain', ruleDragSrcId);
+          if (e.dataTransfer) e.dataTransfer.effectAllowed = 'move';
+          setTimeout(() => setting.settingEl.addClass('sc-dragging'), 0);
+        });
+        setting.settingEl.addEventListener('dragend', () => {
+          rulesContainer.querySelectorAll('.sc-dragging').forEach(el => el.removeClass('sc-dragging'));
+          ruleDragSrcId = null;
+        });
+        setting.settingEl.addEventListener('dragover', (e) => {
+          e.preventDefault();
+          if (ruleDragSrcId && ruleDragSrcId.startsWith('rule-')) {
+            const rect = setting.settingEl.getBoundingClientRect();
+            const midY = rect.top + rect.height / 2;
+            setting.settingEl.removeClass('sc-drag-over-top', 'sc-drag-over-bottom');
+            setting.settingEl.addClass(e.clientY < midY ? 'sc-drag-over-top' : 'sc-drag-over-bottom');
+          }
+        });
+        setting.settingEl.addEventListener('dragleave', () => {
+          setting.settingEl.removeClass('sc-drag-over-top', 'sc-drag-over-bottom');
+        });
+        setting.settingEl.addEventListener('drop', async (e) => {
+          e.preventDefault();
+          if (!ruleDragSrcId || !ruleDragSrcId.startsWith('rule-')) return;
+          const srcIdx = parseInt(ruleDragSrcId.replace('rule-', ''));
+          if (srcIdx === idx) return;
+
+          const rules = this.plugin.settings.autoColorRules || [];
+          const [moved] = rules.splice(srcIdx, 1);
+          rules.splice(idx, 0, moved);
+          await this.plugin.saveSettings();
+          renderRules();
+        });
       });
-      const addRow = rulesContainer.createDiv();
-      addRow.style.display = 'flex';
-      addRow.style.justifyContent = 'flex-end';
-      const addBtn = addRow.createEl('button', { text: 'Add Auto Color Rule' });
-      addBtn.addClass('mod-cta');
+
+      const addBtnContainer = rulesContainer.createDiv();
+      addBtnContainer.style.display = 'flex';
+      addBtnContainer.style.justifyContent = 'flex-end';
+      addBtnContainer.style.marginTop = '12px';
+      addBtnContainer.style.marginBottom = '24px';
+      const addBtn = addBtnContainer.createEl('button', { text: 'Add Auto Color Rule', cls: 'mod-cta' });
       addBtn.addEventListener('click', async () => {
         if (!Array.isArray(this.plugin.settings.autoColorRules)) this.plugin.settings.autoColorRules = [];
         this.plugin.settings.autoColorRules.push({ type: 'text', match: '', colorIndex: 1 });
@@ -971,7 +1268,7 @@ class SideCardsSettingTab extends PluginSettingTab {
     };
     renderRules();
 
-    new Setting(containerEl).setName('Status').setDesc('Dropdown colors take precedence over custom unless the dropdown is set to [custom].').setHeading();
+    new Setting(containerEl).setName('Status').setDesc('Dropdown colors take precedence over custom unless the dropdown is set to custom.').setHeading();
     const statusSection = containerEl.createDiv();
     new Setting(statusSection).setName('Enable Card Status').setDesc('Drag to reorder status pills and set their sorting priority.').addToggle(toggle => toggle.setValue(!!this.plugin.settings.enableCardStatus).onChange(async (value) => {
       this.plugin.settings.enableCardStatus = value;
@@ -991,47 +1288,173 @@ class SideCardsSettingTab extends PluginSettingTab {
       statusConfigContainer.empty();
       if (!this.plugin.settings.enableCardStatus) return;
       const list = Array.isArray(this.plugin.settings.cardStatuses) ? this.plugin.settings.cardStatuses : [];
+      let statusDragSrcId: string | null = null;
       list.forEach((s, idx) => {
-        const row = statusConfigContainer.createDiv();
-        row.style.display = 'flex';
-        row.style.gap = '8px';
-        row.style.alignItems = 'center';
-        row.style.margin = '4px 0';
-        const handle = row.createEl('span', { text: '≡' });
-        handle.style.cursor = 'grab';
-        const nameInput = row.createEl('input'); nameInput.type = 'text'; nameInput.value = s.name || ''; nameInput.style.flex = '1';
-        nameInput.addEventListener('input', async (e: any) => { this.plugin.settings.cardStatuses![idx].name = e.target.value; await this.plugin.saveSettings(); });
-        const textColorInput = row.createEl('input'); textColorInput.type = 'color'; textColorInput.value = s.textColor || '#000000';
-        textColorInput.addEventListener('change', async (e: any) => { this.plugin.settings.cardStatuses![idx].textColor = e.target.value; await this.plugin.saveSettings(); });
-        const colorInput = row.createEl('input'); colorInput.type = 'color'; colorInput.value = s.color || '#20bf6b';
-        colorInput.addEventListener('change', async (e: any) => { this.plugin.settings.cardStatuses![idx].color = e.target.value; await this.plugin.saveSettings(); });
-        const presetSel = row.createEl('select');
-        { const opt = document.createElement('option'); opt.value = 'custom'; opt.textContent = '[custom]'; presetSel.appendChild(opt); }
-        for (let i = 1; i <= 10; i++) {
-          const opt = document.createElement('option');
-          opt.value = String(i);
-          const names = this.plugin.settings.colorNames || [];
-          opt.textContent = names[i - 1] ? String(names[i - 1]) : `Color ${i}`;
-          presetSel.appendChild(opt);
-        }
-        presetSel.value = 'custom';
-        presetSel.addEventListener('change', async (e: any) => {
-          if (String(e.target.value) !== 'custom') {
-            const idxSel = Number(e.target.value);
-            const key = `color${idxSel}` as keyof SideCardsSettings;
-            const hex = (this.plugin.settings[key] as string) || '#20bf6b';
-            this.plugin.settings.cardStatuses![idx].color = hex;
+        const setting = new Setting(statusConfigContainer)
+          .addExtraButton(btn => {
+            btn.setIcon('grip-vertical').setTooltip('Drag to reorder');
+            btn.extraSettingsEl.style.cursor = 'grab';
+          })
+          .addText(text => {
+            text
+              .setValue(s.name || '')
+              .onChange(async (value) => {
+                this.plugin.settings.cardStatuses![idx].name = value;
+                await this.plugin.saveSettings();
+              });
+            text.inputEl.style.width = '100%';
+            text.inputEl.style.maxWidth = 'none';
+          });
+        setting.infoEl.remove();
+
+        const colorPickerContainer = createDiv();
+        const colorPicker = new Setting(colorPickerContainer);
+        const textColorPicker = new Setting(colorPickerContainer);
+
+        const updatePickersVisibility = (val: string) => {
+          if (val === 'custom') {
+            setting.controlEl.appendChild(colorPicker.controlEl);
+            setting.controlEl.appendChild(textColorPicker.controlEl);
+            colorPicker.controlEl.style.display = 'flex';
+            textColorPicker.controlEl.style.display = 'flex';
+          } else {
+            colorPicker.controlEl.style.display = 'none';
+            textColorPicker.controlEl.style.display = 'none';
           }
-          await this.plugin.saveSettings();
+        };
+
+        colorPicker.addColorPicker(cp => cp
+          .setValue(s.color || '#20bf6b')
+          .onChange(async (value) => {
+            this.plugin.settings.cardStatuses![idx].color = value;
+            await this.plugin.saveSettings();
+          }));
+        colorPicker.controlEl.style.padding = '0';
+        colorPicker.infoEl.remove();
+
+        textColorPicker.addColorPicker(cp => cp
+          .setValue(s.textColor || '#000000')
+          .onChange(async (value) => {
+            this.plugin.settings.cardStatuses![idx].textColor = value;
+            await this.plugin.saveSettings();
+          }));
+        textColorPicker.controlEl.style.padding = '0';
+        textColorPicker.infoEl.remove();
+
+        setting.addDropdown(dropdown => {
+          dropdown.addOption('custom', 'custom');
+          for (let i = 1; i <= 10; i++) {
+            const colorName = (this.plugin.settings.colorNames && this.plugin.settings.colorNames[i - 1]) || `Color ${i}`;
+            dropdown.addOption(String(i), colorName);
+          }
+
+          // Determine current value
+          let currentVal = 'custom';
+          for (let i = 1; i <= 10; i++) {
+            const colorKey = `color${i}` as keyof SideCardsSettings;
+            if (this.plugin.settings[colorKey] === s.color) {
+              currentVal = String(i);
+              break;
+            }
+          }
+          dropdown.setValue(currentVal);
+
+          const applyDropdownColors = (val: string) => {
+            if (val === 'custom') {
+              dropdown.selectEl.style.backgroundColor = 'var(--background-modifier-form-field)';
+              dropdown.selectEl.style.color = 'var(--text-normal)';
+            } else {
+              const colorKey = `color${val}` as keyof SideCardsSettings;
+              const color = this.plugin.settings[colorKey] as string;
+              dropdown.selectEl.style.backgroundColor = color;
+              dropdown.selectEl.style.color = this.getContrastColor(color);
+            }
+            Array.from(dropdown.selectEl.options).forEach(opt => {
+              if (opt.value === 'custom') {
+                opt.style.backgroundColor = 'var(--background-modifier-form-field)';
+                opt.style.color = 'var(--text-normal)';
+              } else {
+                const cKey = `color${opt.value}` as keyof SideCardsSettings;
+                const c = this.plugin.settings[cKey] as string;
+                opt.style.backgroundColor = c;
+                opt.style.color = 'var(--text-normal)'; // Per user request: var(--text-normal) for options
+              }
+            });
+          };
+
+          applyDropdownColors(currentVal);
+          updatePickersVisibility(currentVal);
+
+          dropdown.onChange(async (value) => {
+            if (value !== 'custom') {
+              const colorKey = `color${value}` as keyof SideCardsSettings;
+              const color = this.plugin.settings[colorKey] as string;
+              this.plugin.settings.cardStatuses![idx].color = color;
+            }
+            await this.plugin.saveSettings();
+            applyDropdownColors(value);
+            updatePickersVisibility(value);
+          });
         });
-        const delBtn = row.createEl('button', { text: 'Remove' });
-        delBtn.addEventListener('click', async () => { this.plugin.settings.cardStatuses!.splice(idx, 1); await this.plugin.saveSettings(); renderStatusConfig(); });
+
+        setting.addExtraButton(button => {
+          button
+            .setIcon('trash')
+            .setTooltip('Remove status')
+            .onClick(async () => {
+              this.plugin.settings.cardStatuses!.splice(idx, 1);
+              await this.plugin.saveSettings();
+              renderStatusConfig();
+            });
+        });
+
+        setting.controlEl.style.flex = '1';
+        setting.controlEl.style.justifyContent = 'flex-start';
+
+        // Add drag events for Status
+        setting.settingEl.setAttr('draggable', 'true');
+        setting.settingEl.addEventListener('dragstart', (e) => {
+          statusDragSrcId = `status-${idx}`;
+          e.dataTransfer?.setData('text/plain', statusDragSrcId);
+          if (e.dataTransfer) e.dataTransfer.effectAllowed = 'move';
+          setTimeout(() => setting.settingEl.addClass('sc-dragging'), 0);
+        });
+        setting.settingEl.addEventListener('dragend', () => {
+          statusConfigContainer.querySelectorAll('.sc-dragging').forEach(el => el.removeClass('sc-dragging'));
+          statusDragSrcId = null;
+        });
+        setting.settingEl.addEventListener('dragover', (e) => {
+          e.preventDefault();
+          if (statusDragSrcId && statusDragSrcId.startsWith('status-')) {
+            const rect = setting.settingEl.getBoundingClientRect();
+            const midY = rect.top + rect.height / 2;
+            setting.settingEl.removeClass('sc-drag-over-top', 'sc-drag-over-bottom');
+            setting.settingEl.addClass(e.clientY < midY ? 'sc-drag-over-top' : 'sc-drag-over-bottom');
+          }
+        });
+        setting.settingEl.addEventListener('dragleave', () => {
+          setting.settingEl.removeClass('sc-drag-over-top', 'sc-drag-over-bottom');
+        });
+        setting.settingEl.addEventListener('drop', async (e) => {
+          e.preventDefault();
+          if (!statusDragSrcId || !statusDragSrcId.startsWith('status-')) return;
+          const srcIdx = parseInt(statusDragSrcId.replace('status-', ''));
+          if (srcIdx === idx) return;
+
+          const statuses = this.plugin.settings.cardStatuses || [];
+          const [moved] = statuses.splice(srcIdx, 1);
+          statuses.splice(idx, 0, moved);
+          await this.plugin.saveSettings();
+          renderStatusConfig();
+        });
       });
-      const addRow = statusConfigContainer.createDiv();
-      addRow.style.display = 'flex';
-      addRow.style.justifyContent = 'flex-end';
-      const addBtn = addRow.createEl('button', { text: 'Add Status' });
-      addBtn.addClass('mod-cta');
+
+      const addBtnContainer = statusConfigContainer.createDiv();
+      addBtnContainer.style.display = 'flex';
+      addBtnContainer.style.justifyContent = 'flex-end';
+      addBtnContainer.style.marginTop = '12px';
+      addBtnContainer.style.marginBottom = '24px';
+      const addBtn = addBtnContainer.createEl('button', { text: 'Add Status', cls: 'mod-cta' });
       addBtn.addEventListener('click', async () => {
         if (!Array.isArray(this.plugin.settings.cardStatuses)) this.plugin.settings.cardStatuses = [];
         this.plugin.settings.cardStatuses.push({ name: 'focus', color: '#20bf6b', textColor: '#000000' });
@@ -1040,6 +1463,219 @@ class SideCardsSettingTab extends PluginSettingTab {
       });
     };
     renderStatusConfig();
+
+    new Setting(containerEl).setName('Homepage').setDesc('Configure the Sidecards homepage tab.').setHeading();
+
+    const refreshHomepage = () => this.plugin.refreshHomepageViews();
+
+    new Setting(containerEl)
+      .setName('Replace default tab with homepage')
+      .setDesc('Open the Sidecards homepage instead of the default new tab.')
+      .addToggle(toggle => toggle.setValue(!!this.plugin.settings.replaceHomepageWithSidecards).onChange(async (value) => {
+        this.plugin.settings.replaceHomepageWithSidecards = value;
+        await this.plugin.saveSettings();
+      }));
+
+    new Setting(containerEl)
+      .setName('Replace "SideCards" name')
+      .setDesc('Title shown in the homepage.')
+      .addText(text => {
+        text.setPlaceholder('SideCards')
+          .setValue(this.plugin.settings.homepageName || 'SideCards')
+          .onChange(async (value) => {
+            this.plugin.settings.homepageName = value || 'SideCards';
+            await this.plugin.saveSettings();
+            refreshHomepage();
+          });
+        text.inputEl.style.width = '100%';
+      })
+      .addExtraButton(btn => {
+        btn.setIcon('rotate-ccw').setTooltip('Reset to default').onClick(async () => {
+          this.plugin.settings.homepageName = 'SideCards';
+          await this.plugin.saveSettings();
+          refreshHomepage();
+          this.display();
+        });
+      });
+
+    new Setting(containerEl)
+      .setName('Hide category dropdown')
+      .setDesc('Hides the category button and separator in the homepage palette row.')
+      .addToggle(toggle => toggle.setValue(!!this.plugin.settings.hideCategoryDropdown).onChange(async (value) => {
+        this.plugin.settings.hideCategoryDropdown = value;
+        await this.plugin.saveSettings();
+        refreshHomepage();
+      }));
+
+    new Setting(containerEl)
+      .setName('Hide color swatches')
+      .setDesc('Hides the color dots from the homepage.')
+      .addToggle(toggle => toggle.setValue(!!this.plugin.settings.hideColorSwatches).onChange(async (value) => {
+        this.plugin.settings.hideColorSwatches = value;
+        await this.plugin.saveSettings();
+        refreshHomepage();
+      }));
+
+    new Setting(containerEl)
+      .setName('Show pinned notes')
+      .setDesc('Show pinned notes in the homepage notes column.')
+      .addToggle(toggle => toggle.setValue(this.plugin.settings.showPinnedNotes !== false).onChange(async (value) => {
+        this.plugin.settings.showPinnedNotes = value;
+        await this.plugin.saveSettings();
+        refreshHomepage();
+      }));
+
+    new Setting(containerEl)
+      .setName('Show recent notes')
+      .setDesc('Show recently opened notes in the homepage notes column.')
+      .addToggle(toggle => toggle.setValue(this.plugin.settings.showRecentNotes !== false).onChange(async (value) => {
+        this.plugin.settings.showRecentNotes = value;
+        await this.plugin.saveSettings();
+        refreshHomepage();
+      }));
+
+    new Setting(containerEl)
+      .setName('Notes column placement')
+      .setDesc('Place the pinned/recent notes column on the left or right.')
+      .addDropdown(dd => dd
+        .addOption('left', 'Left')
+        .addOption('right', 'Right')
+        .setValue(this.plugin.settings.notesPlacement || 'left')
+        .onChange(async (value) => {
+          this.plugin.settings.notesPlacement = value as 'left' | 'right';
+          await this.plugin.saveSettings();
+          refreshHomepage();
+        }));
+  }
+}
+
+class ConfirmDeleteModal extends Modal {
+  constructor(app: App, private message: string, private onConfirm: () => Promise<void>) {
+    super(app);
+  }
+  onOpen() {
+    const { contentEl } = this;
+    contentEl.createEl('p', { text: this.message });
+    const btnRow = contentEl.createDiv({ cls: 'modal-button-container' });
+    btnRow.createEl('button', { text: 'Cancel' }).addEventListener('click', () => this.close());
+    const confirmBtn = btnRow.createEl('button', { text: 'Delete', cls: 'mod-warning' });
+    confirmBtn.addEventListener('click', async () => { this.close(); await this.onConfirm(); });
+  }
+  onClose() { this.contentEl.empty(); }
+}
+
+class ChangelogModal extends Modal {
+  plugin: SideCardsPlugin;
+  _mdComp: Component | null = null;
+
+  constructor(app: App, plugin: SideCardsPlugin) {
+    super(app);
+    this.plugin = plugin;
+  }
+
+  async onOpen() {
+    const { contentEl } = this;
+    contentEl.empty();
+
+    try {
+      this.modalEl.setCssStyles({
+        maxWidth: '900px',
+        width: '900px',
+        padding: '25px'
+      });
+    } catch { /* ignore */ }
+
+    const header = contentEl.createEl('div');
+    header.setCssStyles({
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      marginBottom: '0px',
+      paddingBottom: '16px',
+      borderBottom: '1px solid var(--divider-color)'
+    });
+
+    const title = header.createEl('h2', { text: 'SideCards' });
+    title.setCssStyles({ margin: '0', fontSize: '1.5em', fontWeight: '600' });
+
+    const link = header.createEl('a', { text: 'View on GitHub' });
+    link.href = 'https://github.com/Kazi-Aidah/sidecards/releases';
+    link.target = '_blank';
+    link.setCssStyles({ fontSize: '0.9em', opacity: '0.8', transition: 'opacity 0.2s' });
+    link.addEventListener('mouseenter', () => link.setCssStyles({ opacity: '1' }));
+    link.addEventListener('mouseleave', () => link.setCssStyles({ opacity: '0.8' }));
+
+    const body = contentEl.createDiv();
+    body.setCssStyles({ maxHeight: '70vh', overflow: 'auto' });
+
+    const loading = body.createEl('div', { text: 'Loading releases...' });
+    loading.setCssStyles({ opacity: '0.7', fontSize: '0.95em', marginTop: '12px' });
+
+    try {
+      const rels = await this.plugin.fetchAllReleases();
+      body.empty();
+      if (!Array.isArray(rels) || rels.length === 0) {
+        body.createEl('div', { text: 'No release information available.' }).setCssStyles({ marginTop: '12px' });
+        return;
+      }
+
+      rels.forEach(async (rel) => {
+        const meta = body.createEl('div');
+        meta.setCssStyles({ marginBottom: '6px', borderBottom: '1px solid var(--divider-color)' });
+
+        const releaseName = meta.createEl('div', { text: rel.name || rel.tag_name || 'Release' });
+        releaseName.setCssStyles({
+          fontSize: '2em',
+          fontWeight: '900',
+          marginTop: '12px',
+          marginBottom: '12px',
+          color: 'var(--text-normal)'
+        });
+
+        try {
+          const dateRaw = rel.published_at || rel.created_at || null;
+          if (dateRaw) {
+            const dt = new Date(dateRaw);
+            const monthNames = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+            const formatted = `${dt.getFullYear()} ${monthNames[dt.getMonth()]} ${String(dt.getDate()).padStart(2, '0')}`;
+            const dateEl = meta.createEl('div', { text: formatted });
+            dateEl.setCssStyles({ display: 'block', opacity: '0.8', fontSize: '0.9em', marginTop: '-4px', marginBottom: '16px' });
+          }
+        } catch { /* ignore */ }
+
+        const notes = body.createEl('div');
+        notes.setCssStyles({ marginTop: '0px', lineHeight: '1.6', fontSize: '0.95em' });
+        notes.addClass('markdown-preview-view');
+        try { notes.setCssStyles({ padding: '0 var(--file-margin)' }); } catch { /* ignore */ }
+
+        const md = rel.body || 'No notes';
+        try {
+          if (!this._mdComp) this._mdComp = new Component();
+          await MarkdownRenderer.render(this.plugin.app, md, notes, '', this._mdComp);
+        } catch {
+          const preEl = notes.createEl('pre');
+          preEl.setCssStyles({
+            whiteSpace: 'pre-wrap',
+            overflowWrap: 'break-word',
+            backgroundColor: 'var(--background-secondary)',
+            padding: '12px',
+            borderRadius: '4px',
+            fontSize: '0.9em',
+            lineHeight: '1.5'
+          });
+          preEl.textContent = md;
+        }
+      });
+    } catch {
+      body.empty();
+      body.createEl('div', { text: 'Failed to load release notes.' }).setCssStyles({ marginTop: '12px' });
+    }
+  }
+
+  onClose() {
+    try { if (this._mdComp) this._mdComp.unload(); } catch { /* ignore */ }
+    this._mdComp = null;
+    this.contentEl.empty();
   }
 }
 

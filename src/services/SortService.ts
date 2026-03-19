@@ -1,35 +1,52 @@
 
 import { Card } from "../models/Card";
 import { SideCardsSettings } from "../core/Settings";
+import { App, TFile } from "obsidian";
 
 export type SortMode = 'manual' | 'created' | 'modified' | 'alpha' | 'status';
 
 export class SortService {
   constructor(private settings: SideCardsSettings) {}
 
-  sort(cards: Card[], mode: SortMode, ascending: boolean): Card[] {
+  sort(cards: Card[], mode: SortMode, ascending: boolean, app?: App): Card[] {
     const sorted = [...cards];
+
+    // Helper: get effective created/modified timestamps, preferring vault file stats
+    const getCreated = (c: Card): number => {
+      if (app && c.notePath) {
+        const file = app.vault.getAbstractFileByPath(c.notePath);
+        if (file instanceof TFile) return file.stat.ctime;
+      }
+      return c.created;
+    };
+    const getModified = (c: Card): number => {
+      if (app && c.notePath) {
+        const file = app.vault.getAbstractFileByPath(c.notePath);
+        if (file instanceof TFile) return file.stat.mtime;
+      }
+      return typeof c.modified === 'number' ? c.modified : c.created;
+    };
     
     switch (mode) {
       case 'manual':
         return this.sortManual(sorted, ascending);
       case 'created':
         return sorted.sort((a, b) => {
-          const primary = ascending ? a.created - b.created : b.created - a.created;
+          const ac = getCreated(a), bc = getCreated(b);
+          const primary = ascending ? ac - bc : bc - ac;
           if (primary !== 0) return primary;
-          const am = typeof a.modified === 'number' ? a.modified : a.created;
-          const bm = typeof b.modified === 'number' ? b.modified : b.created;
+          const am = getModified(a), bm = getModified(b);
           const secondary = ascending ? am - bm : bm - am;
           if (secondary !== 0) return secondary;
           return ascending ? a.content.localeCompare(b.content) : b.content.localeCompare(a.content);
         });
       case 'modified':
         return sorted.sort((a, b) => {
-          const am = typeof a.modified === 'number' ? a.modified : a.created;
-          const bm = typeof b.modified === 'number' ? b.modified : b.created;
+          const am = getModified(a), bm = getModified(b);
           const primary = ascending ? am - bm : bm - am;
           if (primary !== 0) return primary;
-          const secondary = ascending ? a.created - b.created : b.created - a.created;
+          const ac = getCreated(a), bc = getCreated(b);
+          const secondary = ascending ? ac - bc : bc - ac;
           if (secondary !== 0) return secondary;
           return ascending ? a.content.localeCompare(b.content) : b.content.localeCompare(a.content);
         });

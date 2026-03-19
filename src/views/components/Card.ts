@@ -2,7 +2,7 @@
 import { Card } from "../../models/Card";
 import { CardStore } from "../../services/CardStore";
 import { applyCardColorToElement } from "../../utils/dom";
-import { App, MarkdownRenderer, Plugin, Menu, Notice, TFile, setIcon, Scope, Editor } from "obsidian";
+import { App, MarkdownRenderer, Plugin, Menu, Notice, TFile, TFolder, setIcon, Scope, Editor } from "obsidian";
 import { DateTimeModal } from "../modals/DateTimeModal";
 import { getWordRangeAtCaret, handleKeyWrap, isWordChar } from "../../utils/editor-utils";
 
@@ -265,22 +265,7 @@ export class CardComponent {
     // If a new render has started, discard this one
     if (currentRender !== this.renderCount) return;
 
-    // Tags inline (when groupTags is off, show tags right after content)
-    if (!this.store.settings.groupTags && this.card.tags && this.card.tags.length > 0) {
-      const tagsEl = fragment.createDiv('sc-tags');
-      this.card.tags.forEach(tag => {
-        const tagEl = tagsEl.createSpan('sc-tag');
-        const cleanTag = tag.trim().replace(/^[-#\s]+/, '').trim();
-        tagEl.textContent = this.store.settings.omitTagHash ? cleanTag : `#${cleanTag}`;
-        tagEl.addEventListener('click', (e) => {
-          e.stopPropagation();
-          // @ts-ignore
-          this.store.eventBus.emit('filter:tag', cleanTag);
-        });
-      });
-    }
-    
-    // Footer (grouped tags + timestamp)
+    // Footer (grouped tags + timestamp) — tags are rendered here, not above
     const footer = fragment.createDiv('sc-footer');
     this.renderFooter(footer);
     
@@ -404,6 +389,119 @@ export class CardComponent {
         this.plugin
       );
       while (temp.firstChild) container.appendChild(temp.firstChild);
+      this.attachInternalLinkHandlers(container);
+    }
+  }
+
+  private attachInternalLinkHandlers(container: HTMLElement): void {
+    const links = container.querySelectorAll('a.internal-link, a[data-href]');
+    links.forEach((link) => {
+      if (!(link instanceof HTMLAnchorElement)) return;
+      const href = link.dataset?.href || '';
+      if (!href) return;
+      link.addEventListener('click', async (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        const openInNewLeaf = e.metaKey || e.ctrlKey;
+        await this.openOrCreateLink(href, openInNewLeaf);
+      });
+    });
+  }
+
+  private async openOrCreateLink(rawLinkText: string, openInNewLeaf: boolean): Promise<void> {
+    const sourcePath = this.card.notePath || this.app.workspace.getActiveFile()?.path || '';
+    const linkText = String(rawLinkText || '').trim();
+    if (!linkText) return;
+
+    const { filePart, fullLinkText } = this.parseLinkText(linkText);
+    const dest =
+      this.app.metadataCache.getFirstLinkpathDest(filePart, sourcePath) ||
+      (filePart.endsWith('.md')
+        ? this.app.metadataCache.getFirstLinkpathDest(filePart.slice(0, -3), sourcePath)
+        : null);
+
+    if (dest) {
+      await (this.app.workspace as any).openLinkText(fullLinkText, sourcePath, openInNewLeaf);
+      return;
+    }
+
+    const created = await this.createFileForLinkTarget(filePart, sourcePath);
+    if (!created) return;
+
+    await (this.app.workspace as any).openLinkText(fullLinkText, sourcePath, openInNewLeaf);
+  }
+
+  private parseLinkText(linkText: string): { filePart: string; fullLinkText: string } {
+    const fullLinkText = String(linkText || '').trim();
+    const noAlias = fullLinkText.split('|')[0]?.trim() || '';
+    const withoutBang = noAlias.startsWith('!') ? noAlias.slice(1).trim() : noAlias;
+    const fileOnly = withoutBang.split('#')[0]?.split('^')[0]?.trim() || '';
+    return { filePart: fileOnly, fullLinkText };
+  }
+
+  private async createFileForLinkTarget(filePartRaw: string, sourcePath: string): Promise<TFile | null> {
+    const filePart = this.sanitizePath(String(filePartRaw || '').trim());
+    if (!filePart) return null;
+
+    const pluginFolderRaw = String((this.plugin as any)?.settings?.storageFolder || '').trim();
+    const pluginFolder = pluginFolderRaw && pluginFolderRaw !== '/' ? pluginFolderRaw : '';
+
+    const sourceFolder = sourcePath.includes('/') ? sourcePath.slice(0, sourcePath.lastIndexOf('/')) : '';
+    const defaultFolder = sourceFolder || this.app.workspace.getActiveFile()?.parent?.path || pluginFolder;
+
+    const hasFolder = filePart.includes('/');
+    const basePath = (hasFolder ? filePart.replace(/^\/+/, '') : [defaultFolder, filePart].filter(Boolean).join('/')).replace(/^\/+/, '');
+    const normalizedBase = basePath.replace(/\/+/g, '/');
+
+    const { targetPath } = this.ensureExtension(normalizedBase);
+    const folderPath = targetPath.includes('/') ? targetPath.slice(0, targetPath.lastIndexOf('/')) : '';
+
+    if (folderPath) {
+      await this.ensureFolderExists(folderPath);
+    }
+
+    const existing = this.app.vault.getAbstractFileByPath(targetPath);
+    if (existing instanceof TFile) return existing;
+
+    try {
+      return await this.app.vault.create(targetPath, '');
+    } catch (e) {
+      new Notice(`Failed to create file: ${targetPath}`);
+      return null;
+    }
+  }
+
+  private ensureExtension(path: string): { targetPath: string } {
+    const lastSegment = path.split('/').pop() || '';
+    const hasExtension = /\.[A-Za-z0-9]+$/.test(lastSegment);
+    if (hasExtension) return { targetPath: path };
+    return { targetPath: `${path}.md` };
+  }
+
+  private sanitizePath(path: string): string {
+    return path
+      .replace(/[\\:*?"<>|]/g, '-')
+      .replace(/\s+/g, ' ')
+      .trim()
+      .replace(/\/+/g, '/')
+      .replace(/^\/+/, '')
+      .replace(/\/+$/, '');
+  }
+
+  private async ensureFolderExists(folderPath: string): Promise<void> {
+    const normalized = this.sanitizePath(folderPath);
+    if (!normalized) return;
+
+    const parts = normalized.split('/').filter(Boolean);
+    let current = '';
+    for (const part of parts) {
+      current = current ? `${current}/${part}` : part;
+      const existing = this.app.vault.getAbstractFileByPath(current);
+      if (existing instanceof TFolder) continue;
+      if (existing instanceof TFile) return;
+      try {
+        await this.app.vault.createFolder(current);
+      } catch {}
     }
   }
 
@@ -412,6 +510,14 @@ export class CardComponent {
     const hasTags = this.card.tags && this.card.tags.length > 0;
 
     if (settings.groupTags) {
+      if (settings.showTimestamps && settings.timestampBelowTags) {
+        // "above tags" mode — render timestamp first
+        const ts = container.createDiv('sc-timestamp');
+        ts.style.display = 'block';
+        ts.style.marginBottom = '4px';
+        ts.textContent = this.formatTimestamp(this.card.created);
+      }
+
       if (hasTags) {
         const tagsEl = container.createDiv('sc-tags');
         this.card.tags.forEach(tag => {
@@ -425,16 +531,12 @@ export class CardComponent {
           });
         });
       }
-      
-      if (settings.showTimestamps) {
+
+      if (settings.showTimestamps && !settings.timestampBelowTags) {
+        // default: inline after tags
         const ts = container.createDiv('sc-timestamp');
-        if (settings.timestampBelowTags) {
-          ts.style.display = 'block';
-          ts.style.marginTop = '4px';
-        } else {
-          ts.style.display = 'inline-block';
-          ts.style.marginLeft = hasTags ? '8px' : '0';
-        }
+        ts.style.display = 'inline-block';
+        ts.style.marginLeft = hasTags ? '8px' : '0';
         ts.textContent = this.formatTimestamp(this.card.created);
       }
     } else {

@@ -764,7 +764,7 @@ export class CardSidebarView extends ItemView {
       // Filter and sort
       let cards = this.store.getAll();
       cards = this.filterService.filter(cards, this.activeFilters);
-      cards = this.sortService.sort(cards, this.currentSortMode, this.sortAscending);
+      cards = this.sortService.sort(cards, this.currentSortMode, this.sortAscending, this.app);
 
       // Render each card
       for (const card of cards) {
