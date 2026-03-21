@@ -16,7 +16,7 @@
 }
 
 .sidecards-home, .sc-home-main {
-  margin-top: 70px !important;
+  margin-top: var(--sc-home-top-margin, 70px) !important;
   transition: all 0.2s ease;
 }
 
@@ -267,7 +267,8 @@
   gap: 10px;
   padding: 8px 12px;
   background-color: var(--background-modifier-form-field);
-  border-radius: 6px;
+  /* border-radius: 6px; */
+  border-radius: var(--input-radius);
   cursor: grab;
   transition: background-color 0.1s ease;
 }

@@ -91,6 +91,7 @@ export interface SideCardsSettings {
   showExpiryTimeLeft?: boolean;
   expiryTimeFormat?: 'human' | 'short';
   homepageMaxWidth?: number; // px, 0 = no limit
+  homepageTopMargin?: number; // px, margin-top for sc-home-main
 }
 
 export const DEFAULT_SETTINGS: SideCardsSettings = {
@@ -165,4 +166,5 @@ export const DEFAULT_SETTINGS: SideCardsSettings = {
   showExpiryTimeLeft: false,
   expiryTimeFormat: 'human',
   homepageMaxWidth: 1000,
+  homepageTopMargin: 70,
 };

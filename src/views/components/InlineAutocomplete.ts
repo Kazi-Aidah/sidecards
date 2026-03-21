@@ -1,24 +1,25 @@
 /**
  * InlineAutocomplete
  * Attaches to a contenteditable element and shows a dropdown when the user
- * types @ (categories) or # (tags) in the text.
+ * types @ (categories), # (tags), or [[ (file links) in the text.
  */
-import { setIcon } from "obsidian";
+import { App, TFile, setIcon } from "obsidian";
 import { CardStore } from "../../services/CardStore";
 
-type SuggestionItem = { label: string; value: string; prefix: '@' | '#'; icon?: string };
+type SuggestionItem = { label: string; value: string; prefix: '@' | '#' | '[['; icon?: string; iconColor?: string };
 
 export class InlineAutocomplete {
   private dropdown: HTMLElement;
   private selectedIndex = -1;
   private items: SuggestionItem[] = [];
   private triggerStart = -1;
-  private triggerChar: '@' | '#' | null = null;
+  private triggerChar: '@' | '#' | '[[' | null = null;
   public isOpen = false;
 
   constructor(
     private editorEl: HTMLElement,
-    private store: CardStore
+    private store: CardStore,
+    private app?: App
   ) {
     const parent = editorEl.parentElement!;
     parent.addClass('sc-ac-parent');
@@ -43,6 +44,29 @@ export class InlineAutocomplete {
 
   private onInput(): void {
     const { text } = this.getCaretInfo();
+
+    // Check for [[ trigger first (two-char trigger)
+    if (this.app) {
+      const doubleBracketIdx = text.lastIndexOf('[[');
+      if (doubleBracketIdx !== -1) {
+        const afterBracket = text.substring(doubleBracketIdx + 2);
+        // Only trigger if no closing ]] after the [[
+        if (!afterBracket.includes(']]')) {
+          const query = afterBracket.toLowerCase();
+          const suggestions = this.getFileSuggestions(query);
+          if (suggestions.length > 0) {
+            this.triggerStart = doubleBracketIdx;
+            this.triggerChar = '[[';
+            this.items = suggestions;
+            this.renderDropdown();
+            this.positionDropdown();
+            return;
+          }
+        }
+      }
+    }
+
+    // Check for @ or # triggers
     let triggerIdx = -1;
     let triggerChar: '@' | '#' | null = null;
     for (let i = text.length - 1; i >= 0; i--) {
@@ -66,6 +90,61 @@ export class InlineAutocomplete {
     this.items = suggestions;
     this.renderDropdown();
     this.positionDropdown();
+  }
+
+  private getFileSuggestions(query: string): SuggestionItem[] {
+    if (!this.app) return [];
+    const files = this.app.vault.getFiles()
+      .filter((f: TFile) => f.name && !f.name.startsWith('.') && f.name.toLowerCase().includes(query))
+      .slice(0, 10);
+    return files.map((f: TFile) => {
+      const iconInfo = this.resolveIconicIcon(f);
+      return {
+        label: f.name,
+        value: f.name,
+        prefix: '[[' as const,
+        icon: iconInfo?.icon || 'file-text',
+        iconColor: iconInfo?.color,
+      };
+    });
+  }
+
+  /** Synchronously resolve iconic plugin icon for a file (no async needed for sync APIs). */
+  private resolveIconicIcon(file: TFile): { icon: string; color?: string } | null {
+    if (!this.app) return null;
+    const iconicPlugin = (this.app as any).plugins?.getPlugin?.('iconic');
+    if (!iconicPlugin) return null;
+
+    const path = file.path;
+
+    try {
+      const ruled = iconicPlugin.ruleManager?.checkRuling?.('file', path);
+      if (ruled) {
+        const iconValue = ruled.icon ?? ruled.iconDefault;
+        if (iconValue) return { icon: String(iconValue), color: ruled.color ?? undefined };
+      }
+    } catch { /* ignore */ }
+
+    try {
+      const item = iconicPlugin.getFileItem?.(path);
+      if (item) {
+        const iconValue = item.icon ?? item.iconDefault;
+        if (iconValue) return { icon: String(iconValue), color: item.color ?? undefined };
+      }
+    } catch { /* ignore */ }
+
+    const entry =
+      iconicPlugin.settings?.fileIcons?.[path] ??
+      iconicPlugin.data?.fileIcons?.[path] ??
+      iconicPlugin.fileIcons?.[path];
+
+    if (!entry) return null;
+    if (typeof entry === 'string') return { icon: entry };
+    if (typeof entry === 'object') {
+      const iconValue = entry.icon ?? entry.name ?? entry.value;
+      if (iconValue) return { icon: String(iconValue), color: typeof entry.color === 'string' ? entry.color : undefined };
+    }
+    return null;
   }
 
   private getCategorySuggestions(query: string): SuggestionItem[] {
@@ -104,9 +183,20 @@ export class InlineAutocomplete {
     this.items.forEach((item, idx) => {
       const row = this.dropdown.createDiv('sc-inline-ac-item');
 
-      if (item.prefix === '@' && item.icon) {
+      if (item.prefix === '[[' || (item.prefix === '@' && item.icon)) {
         const iconEl = row.createSpan('sc-inline-ac-icon');
-        try { setIcon(iconEl, item.icon); } catch { iconEl.textContent = '@'; }
+        const iconName = item.icon || (item.prefix === '[[' ? 'file-text' : 'at-sign');
+        try { setIcon(iconEl, iconName); } catch { iconEl.textContent = item.prefix; }
+        if (item.iconColor) {
+          const colorMap: Record<string, string> = {
+            red: 'var(--color-red)', orange: 'var(--color-orange)', yellow: 'var(--color-yellow)',
+            green: 'var(--color-green)', cyan: 'var(--color-cyan)', blue: 'var(--color-blue)',
+            purple: 'var(--color-purple)', pink: 'var(--color-pink)', magenta: 'var(--color-pink)',
+            gray: 'var(--color-base-70)', grey: 'var(--color-base-70)',
+          };
+          const normalized = item.iconColor.trim().toLowerCase();
+          iconEl.style.color = colorMap[normalized] ?? item.iconColor;
+        }
       } else if (item.prefix === '@') {
         row.createSpan({ cls: 'sc-inline-ac-badge', text: '@' });
       } else {
@@ -158,8 +248,12 @@ export class InlineAutocomplete {
   }
 
   private highlightSelected(): void {
-    this.dropdown.querySelectorAll('.sc-inline-ac-item')
-      .forEach((r, i) => r.toggleClass('is-selected', i === this.selectedIndex));
+    const rows = this.dropdown.querySelectorAll('.sc-inline-ac-item');
+    rows.forEach((r, i) => r.toggleClass('is-selected', i === this.selectedIndex));
+    // Scroll selected item into view
+    if (this.selectedIndex >= 0 && rows[this.selectedIndex]) {
+      (rows[this.selectedIndex] as HTMLElement).scrollIntoView({ block: 'nearest' });
+    }
   }
 
   private selectItem(idx: number): void {
@@ -167,13 +261,26 @@ export class InlineAutocomplete {
     if (!item) return;
 
     const fullText = this.editorEl.textContent || '';
-    const before = fullText.substring(0, this.triggerStart);
     const caretOffset = this.getCaretInfo().offset;
-    const after = fullText.substring(caretOffset);
 
-    const replacement = item.prefix + item.value + ' ';
-    this.editorEl.textContent = before + replacement + after;
-    this.setCaretAt(before.length + replacement.length);
+    if (item.prefix === '[[') {
+      // The text after [[ up to the caret is the partial query.
+      // The text after the caret may contain auto-paired ]] — strip those too.
+      const before = fullText.substring(0, this.triggerStart);
+      let after = fullText.substring(caretOffset);
+      // If auto-pairing inserted ]], remove them so we don't double up
+      if (after.startsWith(']]')) after = after.substring(2);
+      const replacement = '[[' + item.value + ']]';
+      this.editorEl.textContent = before + replacement + after;
+      this.setCaretAt(before.length + replacement.length);
+    } else {
+      const before = fullText.substring(0, this.triggerStart);
+      const after = fullText.substring(caretOffset);
+      const replacement = item.prefix + item.value + ' ';
+      this.editorEl.textContent = before + replacement + after;
+      this.setCaretAt(before.length + replacement.length);
+    }
+
     this.editorEl.dispatchEvent(new Event('input'));
     this.hide();
   }
@@ -208,8 +315,6 @@ export class InlineAutocomplete {
       this.selectedIndex = (this.selectedIndex - 1 + this.items.length) % this.items.length;
       this.highlightSelected();
     } else if (e.key === 'Enter') {
-      // Always prevent default and stop propagation when dropdown is open
-      // so Enter never submits the card while autocomplete is active
       e.preventDefault(); e.stopImmediatePropagation();
       if (this.selectedIndex >= 0) {
         this.selectItem(this.selectedIndex);

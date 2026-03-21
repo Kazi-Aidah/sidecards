@@ -5,6 +5,7 @@ import { applyCardColorToElement } from "../../utils/dom";
 import { App, MarkdownRenderer, Plugin, Menu, Notice, TFile, TFolder, setIcon, Scope, Editor, Platform } from "obsidian";
 import { DateTimeModal } from "../modals/DateTimeModal";
 import { getWordRangeAtCaret, handleKeyWrap } from "../../utils/editor-utils";
+import { InlineAutocomplete } from "./InlineAutocomplete";
 
 export class CardComponent {
   public el: HTMLElement;
@@ -392,6 +393,9 @@ export class CardComponent {
       container.setAttribute('contenteditable', 'true');
       container.textContent = this.card.content;
       container.addClass('is-editing');
+
+      // [[file]] / @category / #tag inline autocomplete
+      const ac = new InlineAutocomplete(container, this.store, this.app);
       
       // Auto-focus and place cursor at the end
       setTimeout(() => {
@@ -422,6 +426,7 @@ export class CardComponent {
 
         if (this.isEditing) {
           void (async () => {
+            ac.destroy();
             const newContent = container.textContent || '';
             if (newContent !== this.card.content) {
               await this.store.update(this.card.id, { content: newContent });

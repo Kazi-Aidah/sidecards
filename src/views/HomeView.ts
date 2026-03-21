@@ -299,6 +299,8 @@ export class SideCardsHomeView extends ItemView {
     // Apply user-configured max width via CSS variable so it overrides correctly
     const maxW = this.plugin.settings.homepageMaxWidth ?? 1000;
     container.style.setProperty('--sc-home-max-width', `${maxW}px`);
+    const topMargin = this.plugin.settings.homepageTopMargin ?? 70;
+    container.style.setProperty('--sc-home-top-margin', `${topMargin}px`);
     
     // Top Section
     const topSection = main.createDiv({ cls: 'sc-home-top' });
@@ -365,8 +367,8 @@ export class SideCardsHomeView extends ItemView {
     editorEl.setAttribute('contenteditable', 'true');
     editorEl.dataset.placeholder = 'Type here... (@category, #tag)';
 
-    // @category / #tag inline autocomplete
-    new InlineAutocomplete(editorEl, this.store);
+    // @category / #tag / [[file]] inline autocomplete
+    new InlineAutocomplete(editorEl, this.store, this.app);
 
     const updatePlaceholder = () => {
       if (!editorEl.textContent?.trim()) editorEl.addClass('is-empty');
@@ -719,6 +721,8 @@ export class SideCardsHomeView extends ItemView {
     if (titleEl) titleEl.textContent = this.plugin.settings.homepageName || 'SideCards';
     const maxW = this.plugin.settings.homepageMaxWidth ?? 1000;
     this.containerEl.style.setProperty('--sc-home-max-width', `${maxW}px`);
+    const topMargin = this.plugin.settings.homepageTopMargin ?? 70;
+    this.containerEl.style.setProperty('--sc-home-top-margin', `${topMargin}px`);
 
     // Refresh category bar
     const categoryBar = main.querySelector('.sc-home-category-bar') as HTMLElement;

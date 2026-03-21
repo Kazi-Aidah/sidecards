@@ -577,8 +577,8 @@ export class CardSidebarView extends ItemView {
       }
     });
 
-    // @category / #tag inline autocomplete
-    new InlineAutocomplete(editorEl, this.store);
+    // @category / #tag / [[file]] inline autocomplete
+    new InlineAutocomplete(editorEl, this.store, this.app);
 
     editorEl.addEventListener('keydown', (e) => {
       if (this.applyFormattingHotkey(e, editorEl)) return;

@@ -899,6 +899,26 @@ class SideCardsSettingTab extends PluginSettingTab {
         slider.sliderEl.insertAdjacentElement('afterend', label);
       });
 
+    new Setting(containerEl)
+      .setName('Homepage top spacing')
+      .setDesc('Distance from the top of the homepage to the content area, in pixels.')
+      .addSlider(slider => {
+        const label = containerEl.createSpan({ text: `${this.plugin.settings.homepageTopMargin ?? 70}px`, cls: 'sc-slider-label' });
+        slider
+          .setLimits(0, 300, 5)
+          .setValue(this.plugin.settings.homepageTopMargin ?? 70)
+          .setDynamicTooltip()
+          .onChange(async (value) => {
+            this.plugin.settings.homepageTopMargin = value;
+            label.textContent = `${value}px`;
+            await this.plugin.saveSettings();
+            document.querySelectorAll('.sc-home-container').forEach((el) => {
+              (el as HTMLElement).style.setProperty('--sc-home-top-margin', `${value}px`);
+            });
+          });
+        slider.sliderEl.insertAdjacentElement('afterend', label);
+      });
+
     // ── Appearance ────────────────────────────────────────────────────────────
     new Setting(containerEl).setName('Appearance').setDesc('Customize how cards and the sidebar look.').setHeading();
 

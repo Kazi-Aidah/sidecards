@@ -263,8 +263,8 @@ export class QuickCardWithFilterModal extends Modal {
     editorEl.setAttribute('contenteditable', 'true');
     editorEl.dataset.placeholder = 'Type here... (@category, #tag)';
     
-    // @category / #tag inline autocomplete
-    new InlineAutocomplete(editorEl, this.store);
+    // @category / #tag / [[file]] inline autocomplete
+    new InlineAutocomplete(editorEl, this.store, this.app);
 
     // Simple placeholder logic for contenteditable
     editorEl.addEventListener('input', () => {

@@ -204,7 +204,7 @@ var import_obsidian4 = require("obsidian");
 
 // src/views/components/Card.ts
 init_dom();
-var import_obsidian2 = require("obsidian");
+var import_obsidian3 = require("obsidian");
 
 // src/views/modals/DateTimeModal.ts
 var import_obsidian = require("obsidian");
@@ -464,6 +464,335 @@ function getWordRangeAtCaret(selection) {
   return wordRange;
 }
 
+// src/views/components/InlineAutocomplete.ts
+var import_obsidian2 = require("obsidian");
+var InlineAutocomplete = class {
+  constructor(editorEl, store, app) {
+    this.editorEl = editorEl;
+    this.store = store;
+    this.app = app;
+    this.selectedIndex = -1;
+    this.items = [];
+    this.triggerStart = -1;
+    this.triggerChar = null;
+    this.isOpen = false;
+    const parent = editorEl.parentElement;
+    parent.addClass("sc-ac-parent");
+    this.dropdown = parent.createDiv("sc-inline-autocomplete");
+    editorEl.addEventListener("input", () => this.onInput());
+    editorEl.addEventListener("keydown", (e) => this.onKeyDown(e), true);
+    editorEl.addEventListener("blur", () => setTimeout(() => this.hide(), 150));
+  }
+  getCaretInfo() {
+    const sel = window.getSelection();
+    if (!sel || !sel.rangeCount)
+      return { text: "", offset: 0 };
+    const range = sel.getRangeAt(0);
+    const preRange = document.createRange();
+    preRange.selectNodeContents(this.editorEl);
+    preRange.setEnd(range.startContainer, range.startOffset);
+    const text = preRange.toString();
+    return { text, offset: text.length };
+  }
+  onInput() {
+    const { text } = this.getCaretInfo();
+    if (this.app) {
+      const doubleBracketIdx = text.lastIndexOf("[[");
+      if (doubleBracketIdx !== -1) {
+        const afterBracket = text.substring(doubleBracketIdx + 2);
+        if (!afterBracket.includes("]]")) {
+          const query2 = afterBracket.toLowerCase();
+          const suggestions2 = this.getFileSuggestions(query2);
+          if (suggestions2.length > 0) {
+            this.triggerStart = doubleBracketIdx;
+            this.triggerChar = "[[";
+            this.items = suggestions2;
+            this.renderDropdown();
+            this.positionDropdown();
+            return;
+          }
+        }
+      }
+    }
+    let triggerIdx = -1;
+    let triggerChar = null;
+    for (let i = text.length - 1; i >= 0; i--) {
+      const ch = text[i];
+      if (ch === " " || ch === "\n")
+        break;
+      if (ch === "@" || ch === "#") {
+        triggerIdx = i;
+        triggerChar = ch;
+        break;
+      }
+    }
+    if (triggerIdx === -1 || triggerChar === null) {
+      this.hide();
+      return;
+    }
+    const query = text.substring(triggerIdx + 1).toLowerCase();
+    this.triggerStart = triggerIdx;
+    this.triggerChar = triggerChar;
+    const suggestions = triggerChar === "@" ? this.getCategorySuggestions(query) : this.getTagSuggestions(query);
+    if (suggestions.length === 0) {
+      this.hide();
+      return;
+    }
+    this.items = suggestions;
+    this.renderDropdown();
+    this.positionDropdown();
+  }
+  getFileSuggestions(query) {
+    if (!this.app)
+      return [];
+    const files = this.app.vault.getFiles().filter((f) => f.name && !f.name.startsWith(".") && f.name.toLowerCase().includes(query)).slice(0, 10);
+    return files.map((f) => {
+      const iconInfo = this.resolveIconicIcon(f);
+      return {
+        label: f.name,
+        value: f.name,
+        prefix: "[[",
+        icon: (iconInfo == null ? void 0 : iconInfo.icon) || "file-text",
+        iconColor: iconInfo == null ? void 0 : iconInfo.color
+      };
+    });
+  }
+  /** Synchronously resolve iconic plugin icon for a file (no async needed for sync APIs). */
+  resolveIconicIcon(file) {
+    var _a, _b, _c, _d, _e, _f, _g, _h, _i, _j, _k, _l, _m, _n, _o, _p, _q, _r;
+    if (!this.app)
+      return null;
+    const iconicPlugin = (_b = (_a = this.app.plugins) == null ? void 0 : _a.getPlugin) == null ? void 0 : _b.call(_a, "iconic");
+    if (!iconicPlugin)
+      return null;
+    const path = file.path;
+    try {
+      const ruled = (_d = (_c = iconicPlugin.ruleManager) == null ? void 0 : _c.checkRuling) == null ? void 0 : _d.call(_c, "file", path);
+      if (ruled) {
+        const iconValue = (_e = ruled.icon) != null ? _e : ruled.iconDefault;
+        if (iconValue)
+          return { icon: String(iconValue), color: (_f = ruled.color) != null ? _f : void 0 };
+      }
+    } catch (e) {
+    }
+    try {
+      const item = (_g = iconicPlugin.getFileItem) == null ? void 0 : _g.call(iconicPlugin, path);
+      if (item) {
+        const iconValue = (_h = item.icon) != null ? _h : item.iconDefault;
+        if (iconValue)
+          return { icon: String(iconValue), color: (_i = item.color) != null ? _i : void 0 };
+      }
+    } catch (e) {
+    }
+    const entry = (_p = (_n = (_k = (_j = iconicPlugin.settings) == null ? void 0 : _j.fileIcons) == null ? void 0 : _k[path]) != null ? _n : (_m = (_l = iconicPlugin.data) == null ? void 0 : _l.fileIcons) == null ? void 0 : _m[path]) != null ? _p : (_o = iconicPlugin.fileIcons) == null ? void 0 : _o[path];
+    if (!entry)
+      return null;
+    if (typeof entry === "string")
+      return { icon: entry };
+    if (typeof entry === "object") {
+      const iconValue = (_r = (_q = entry.icon) != null ? _q : entry.name) != null ? _r : entry.value;
+      if (iconValue)
+        return { icon: String(iconValue), color: typeof entry.color === "string" ? entry.color : void 0 };
+    }
+    return null;
+  }
+  getCategorySuggestions(query) {
+    const settings = this.store.settings;
+    const cats = [];
+    const builtinIcons = settings.builtinCategoryIcons || {};
+    if (!settings.hideTodayFilter)
+      cats.push({ label: "Today", value: "today", prefix: "@", icon: builtinIcons["today"] || "calendar-check" });
+    if (!settings.hideTomorrowFilter)
+      cats.push({ label: "Tomorrow", value: "tomorrow", prefix: "@", icon: builtinIcons["tomorrow"] || "calendar-plus" });
+    if (settings.enableCustomCategories) {
+      (settings.customCategories || []).forEach((c) => {
+        cats.push({ label: c.label, value: c.id || c.label, prefix: "@", icon: c.icon });
+      });
+    }
+    return query ? cats.filter((c) => c.label.toLowerCase().startsWith(query) || c.value.toLowerCase().startsWith(query)) : cats.slice(0, 8);
+  }
+  getTagSuggestions(query) {
+    const tags = /* @__PURE__ */ new Set();
+    this.store.getAll().forEach((c) => (c.tags || []).forEach((t) => tags.add(t.toLowerCase())));
+    const all = Array.from(tags).sort();
+    const filtered = query ? all.filter((t) => t.startsWith(query)) : all;
+    return filtered.slice(0, 8).map((t) => ({ label: t, value: t, prefix: "#" }));
+  }
+  renderDropdown() {
+    this.dropdown.empty();
+    this.selectedIndex = -1;
+    this.isOpen = true;
+    this.items.forEach((item, idx) => {
+      var _a;
+      const row = this.dropdown.createDiv("sc-inline-ac-item");
+      if (item.prefix === "[[" || item.prefix === "@" && item.icon) {
+        const iconEl = row.createSpan("sc-inline-ac-icon");
+        const iconName = item.icon || (item.prefix === "[[" ? "file-text" : "at-sign");
+        try {
+          (0, import_obsidian2.setIcon)(iconEl, iconName);
+        } catch (e) {
+          iconEl.textContent = item.prefix;
+        }
+        if (item.iconColor) {
+          const colorMap = {
+            red: "var(--color-red)",
+            orange: "var(--color-orange)",
+            yellow: "var(--color-yellow)",
+            green: "var(--color-green)",
+            cyan: "var(--color-cyan)",
+            blue: "var(--color-blue)",
+            purple: "var(--color-purple)",
+            pink: "var(--color-pink)",
+            magenta: "var(--color-pink)",
+            gray: "var(--color-base-70)",
+            grey: "var(--color-base-70)"
+          };
+          const normalized = item.iconColor.trim().toLowerCase();
+          iconEl.style.color = (_a = colorMap[normalized]) != null ? _a : item.iconColor;
+        }
+      } else if (item.prefix === "@") {
+        row.createSpan({ cls: "sc-inline-ac-badge", text: "@" });
+      } else {
+        row.createSpan({ cls: "sc-inline-ac-badge", text: "#" });
+      }
+      row.createSpan({ text: item.label });
+      row.addEventListener("mousedown", (e) => {
+        e.preventDefault();
+        this.selectItem(idx);
+      });
+      row.addEventListener("mouseenter", () => {
+        this.selectedIndex = idx;
+        this.highlightSelected();
+      });
+    });
+    this.dropdown.addClass("is-visible");
+  }
+  positionDropdown() {
+    const editorRect = this.editorEl.getBoundingClientRect();
+    const parentRect = this.editorEl.parentElement.getBoundingClientRect();
+    let caretLeft = 0;
+    const sel = window.getSelection();
+    if (sel && sel.rangeCount) {
+      const range = sel.getRangeAt(0).cloneRange();
+      range.collapse(true);
+      const rect = range.getBoundingClientRect();
+      if (rect.width > 0 || rect.height > 0)
+        caretLeft = rect.left - parentRect.left;
+    }
+    const bottomOffset = parentRect.bottom - editorRect.top + 4;
+    const leftOffset = Math.max(0, caretLeft);
+    this.dropdown.setCssProps({
+      "--sc-ac-bottom": `${bottomOffset}px`,
+      "--sc-ac-left": `${leftOffset}px`
+    });
+    this.dropdown.removeClass("ac-below");
+    this.dropdown.addClass("ac-above");
+    requestAnimationFrame(() => {
+      const dropRect = this.dropdown.getBoundingClientRect();
+      if (dropRect.top < 0) {
+        const topOffset = editorRect.top - parentRect.top + editorRect.height + 4;
+        this.dropdown.setCssProps({ "--sc-ac-top": `${topOffset}px`, "--sc-ac-left": `${leftOffset}px` });
+        this.dropdown.removeClass("ac-above");
+        this.dropdown.addClass("ac-below");
+      }
+    });
+  }
+  highlightSelected() {
+    const rows = this.dropdown.querySelectorAll(".sc-inline-ac-item");
+    rows.forEach((r, i) => r.toggleClass("is-selected", i === this.selectedIndex));
+    if (this.selectedIndex >= 0 && rows[this.selectedIndex]) {
+      rows[this.selectedIndex].scrollIntoView({ block: "nearest" });
+    }
+  }
+  selectItem(idx) {
+    const item = this.items[idx];
+    if (!item)
+      return;
+    const fullText = this.editorEl.textContent || "";
+    const caretOffset = this.getCaretInfo().offset;
+    if (item.prefix === "[[") {
+      const before = fullText.substring(0, this.triggerStart);
+      let after = fullText.substring(caretOffset);
+      if (after.startsWith("]]"))
+        after = after.substring(2);
+      const replacement = "[[" + item.value + "]]";
+      this.editorEl.textContent = before + replacement + after;
+      this.setCaretAt(before.length + replacement.length);
+    } else {
+      const before = fullText.substring(0, this.triggerStart);
+      const after = fullText.substring(caretOffset);
+      const replacement = item.prefix + item.value + " ";
+      this.editorEl.textContent = before + replacement + after;
+      this.setCaretAt(before.length + replacement.length);
+    }
+    this.editorEl.dispatchEvent(new Event("input"));
+    this.hide();
+  }
+  setCaretAt(offset) {
+    const sel = window.getSelection();
+    if (!sel)
+      return;
+    let remaining = offset;
+    const walker = document.createTreeWalker(this.editorEl, NodeFilter.SHOW_TEXT);
+    let node = null;
+    while (walker.nextNode()) {
+      const n = walker.currentNode;
+      if (remaining <= n.length) {
+        node = n;
+        break;
+      }
+      remaining -= n.length;
+    }
+    const range = document.createRange();
+    if (node) {
+      range.setStart(node, remaining);
+    } else {
+      range.selectNodeContents(this.editorEl);
+      range.collapse(false);
+    }
+    range.collapse(true);
+    sel.removeAllRanges();
+    sel.addRange(range);
+  }
+  onKeyDown(e) {
+    if (!this.isOpen)
+      return;
+    if (e.key === "ArrowDown") {
+      e.preventDefault();
+      e.stopPropagation();
+      this.selectedIndex = (this.selectedIndex + 1) % this.items.length;
+      this.highlightSelected();
+    } else if (e.key === "ArrowUp") {
+      e.preventDefault();
+      e.stopPropagation();
+      this.selectedIndex = (this.selectedIndex - 1 + this.items.length) % this.items.length;
+      this.highlightSelected();
+    } else if (e.key === "Enter") {
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      if (this.selectedIndex >= 0) {
+        this.selectItem(this.selectedIndex);
+      } else {
+        this.hide();
+      }
+    } else if (e.key === "Escape") {
+      e.preventDefault();
+      e.stopPropagation();
+      this.hide();
+    }
+  }
+  hide() {
+    this.dropdown.removeClass("is-visible", "ac-above", "ac-below");
+    this.isOpen = false;
+    this.items = [];
+    this.selectedIndex = -1;
+    this.triggerChar = null;
+  }
+  destroy() {
+    this.dropdown.remove();
+  }
+};
+
 // src/views/components/Card.ts
 var _CardComponent = class {
   constructor(container, card, store, app, plugin, settingsOverride) {
@@ -480,7 +809,7 @@ var _CardComponent = class {
     _CardComponent.instanceCount += 1;
     this.card = card;
     this.el = container.createDiv("sc-card");
-    this.scope = new import_obsidian2.Scope(this.app.scope);
+    this.scope = new import_obsidian3.Scope(this.app.scope);
     this.setupMockEditor();
     this.ensureGlobalMouseDownHandler();
     void this.render();
@@ -603,8 +932,8 @@ var _CardComponent = class {
       return false;
     const modifierSet = new Set((hotkey.modifiers || []).map((m) => String(m).toLowerCase()));
     const hasMod = modifierSet.has("mod");
-    const expectsCtrl = modifierSet.has("ctrl") || hasMod && !import_obsidian2.Platform.isMacOS;
-    const expectsMeta = modifierSet.has("meta") || hasMod && import_obsidian2.Platform.isMacOS;
+    const expectsCtrl = modifierSet.has("ctrl") || hasMod && !import_obsidian3.Platform.isMacOS;
+    const expectsMeta = modifierSet.has("meta") || hasMod && import_obsidian3.Platform.isMacOS;
     const expectsAlt = modifierSet.has("alt");
     const expectsShift = modifierSet.has("shift");
     if (expectsCtrl !== event.ctrlKey)
@@ -743,7 +1072,7 @@ var _CardComponent = class {
     if (this.store.settings.enableCopyCardContent) {
       const copyBtn = this.el.createDiv("sc-copy-btn");
       try {
-        (0, import_obsidian2.setIcon)(copyBtn, "copy");
+        (0, import_obsidian3.setIcon)(copyBtn, "copy");
       } catch (e) {
         copyBtn.textContent = "\u{1F4CB}";
       }
@@ -772,9 +1101,9 @@ var _CardComponent = class {
       contentToCopy = contentEl.textContent || this.card.content;
     }
     navigator.clipboard.writeText(contentToCopy).then(() => {
-      new import_obsidian2.Notice("Card content copied!");
+      new import_obsidian3.Notice("Card content copied!");
     }, () => {
-      new import_obsidian2.Notice("Failed to copy card content");
+      new import_obsidian3.Notice("Failed to copy card content");
     });
   }
   renderPills(container) {
@@ -802,6 +1131,7 @@ var _CardComponent = class {
       container.setAttribute("contenteditable", "true");
       container.textContent = this.card.content;
       container.addClass("is-editing");
+      const ac = new InlineAutocomplete(container, this.store, this.app);
       setTimeout(() => {
         container.focus();
         const range = document.createRange();
@@ -822,6 +1152,7 @@ var _CardComponent = class {
         }
         if (this.isEditing) {
           void (async () => {
+            ac.destroy();
             const newContent = container.textContent || "";
             if (newContent !== this.card.content) {
               await this.store.update(this.card.id, { content: newContent });
@@ -866,7 +1197,7 @@ var _CardComponent = class {
       container.setAttribute("contenteditable", "false");
       container.removeClass("is-editing");
       const temp = document.createElement("div");
-      await import_obsidian2.MarkdownRenderer.render(this.app, this.card.content, temp, this.card.notePath || "", this.plugin);
+      await import_obsidian3.MarkdownRenderer.render(this.app, this.card.content, temp, this.card.notePath || "", this.plugin);
       temp.querySelectorAll("mark").forEach((el) => el.addClass("cm-highlight"));
       while (temp.firstChild)
         container.appendChild(temp.firstChild);
@@ -933,12 +1264,12 @@ var _CardComponent = class {
       await this.ensureFolderExists(folderPath);
     }
     const existing = this.app.vault.getAbstractFileByPath(targetPath);
-    if (existing instanceof import_obsidian2.TFile)
+    if (existing instanceof import_obsidian3.TFile)
       return existing;
     try {
       return await this.app.vault.create(targetPath, "");
     } catch (e) {
-      new import_obsidian2.Notice(`Failed to create file: ${targetPath}`);
+      new import_obsidian3.Notice(`Failed to create file: ${targetPath}`);
       return null;
     }
   }
@@ -961,9 +1292,9 @@ var _CardComponent = class {
     for (const part of parts) {
       current = current ? `${current}/${part}` : part;
       const existing = this.app.vault.getAbstractFileByPath(current);
-      if (existing instanceof import_obsidian2.TFolder)
+      if (existing instanceof import_obsidian3.TFolder)
         continue;
-      if (existing instanceof import_obsidian2.TFile)
+      if (existing instanceof import_obsidian3.TFile)
         return;
       try {
         await this.app.vault.createFolder(current);
@@ -1038,7 +1369,7 @@ var _CardComponent = class {
     });
     this.el.addEventListener("contextmenu", (e) => {
       e.preventDefault();
-      const menu = new import_obsidian2.Menu();
+      const menu = new import_obsidian3.Menu();
       const s = this.store.settings;
       menu.addItem((item) => {
         var _a;
@@ -1118,7 +1449,7 @@ var _CardComponent = class {
         menu.addItem((item) => {
           item.setTitle("Set status").setIcon("flag").onClick(() => {
             var _a;
-            const menu2 = new import_obsidian2.Menu();
+            const menu2 = new import_obsidian3.Menu();
             (_a = s.cardStatuses) == null ? void 0 : _a.forEach((st) => {
               menu2.addItem((i) => {
                 i.setTitle(st.name || "").onClick(async () => {
@@ -1155,17 +1486,17 @@ var _CardComponent = class {
         item.setTitle(this.card.notePath ? "View note" : "Create note").setIcon(this.card.notePath ? "link" : "file-plus").onClick(async () => {
           if (this.card.notePath) {
             const file = this.app.vault.getAbstractFileByPath(this.card.notePath);
-            if (file instanceof import_obsidian2.TFile) {
+            if (file instanceof import_obsidian3.TFile) {
               await this.app.workspace.getLeaf(true).openFile(file);
             } else {
-              new import_obsidian2.Notice("Note not found");
+              new import_obsidian3.Notice("Note not found");
             }
           } else {
             const path = await this.store.createNoteFromCard(this.card.id);
             if (!path)
               return;
             const file = this.app.vault.getAbstractFileByPath(path);
-            if (file instanceof import_obsidian2.TFile) {
+            if (file instanceof import_obsidian3.TFile) {
               await this.app.workspace.getLeaf(true).openFile(file);
             }
           }
@@ -1213,7 +1544,7 @@ var _CardComponent = class {
   getCreatedTime() {
     if (this.card.notePath) {
       const file = this.app.vault.getAbstractFileByPath(this.card.notePath);
-      if (file instanceof import_obsidian2.TFile)
+      if (file instanceof import_obsidian3.TFile)
         return file.stat.ctime;
     }
     return this.card.created;
@@ -1445,231 +1776,6 @@ function animateCardsEntrance(container, opts = {}, settings) {
 
 // src/views/CardSidebarView.ts
 init_Card();
-
-// src/views/components/InlineAutocomplete.ts
-var import_obsidian3 = require("obsidian");
-var InlineAutocomplete = class {
-  constructor(editorEl, store) {
-    this.editorEl = editorEl;
-    this.store = store;
-    this.selectedIndex = -1;
-    this.items = [];
-    this.triggerStart = -1;
-    this.triggerChar = null;
-    this.isOpen = false;
-    const parent = editorEl.parentElement;
-    parent.addClass("sc-ac-parent");
-    this.dropdown = parent.createDiv("sc-inline-autocomplete");
-    editorEl.addEventListener("input", () => this.onInput());
-    editorEl.addEventListener("keydown", (e) => this.onKeyDown(e), true);
-    editorEl.addEventListener("blur", () => setTimeout(() => this.hide(), 150));
-  }
-  getCaretInfo() {
-    const sel = window.getSelection();
-    if (!sel || !sel.rangeCount)
-      return { text: "", offset: 0 };
-    const range = sel.getRangeAt(0);
-    const preRange = document.createRange();
-    preRange.selectNodeContents(this.editorEl);
-    preRange.setEnd(range.startContainer, range.startOffset);
-    const text = preRange.toString();
-    return { text, offset: text.length };
-  }
-  onInput() {
-    const { text } = this.getCaretInfo();
-    let triggerIdx = -1;
-    let triggerChar = null;
-    for (let i = text.length - 1; i >= 0; i--) {
-      const ch = text[i];
-      if (ch === " " || ch === "\n")
-        break;
-      if (ch === "@" || ch === "#") {
-        triggerIdx = i;
-        triggerChar = ch;
-        break;
-      }
-    }
-    if (triggerIdx === -1 || triggerChar === null) {
-      this.hide();
-      return;
-    }
-    const query = text.substring(triggerIdx + 1).toLowerCase();
-    this.triggerStart = triggerIdx;
-    this.triggerChar = triggerChar;
-    const suggestions = triggerChar === "@" ? this.getCategorySuggestions(query) : this.getTagSuggestions(query);
-    if (suggestions.length === 0) {
-      this.hide();
-      return;
-    }
-    this.items = suggestions;
-    this.renderDropdown();
-    this.positionDropdown();
-  }
-  getCategorySuggestions(query) {
-    const settings = this.store.settings;
-    const cats = [];
-    const builtinIcons = settings.builtinCategoryIcons || {};
-    if (!settings.hideTodayFilter)
-      cats.push({ label: "Today", value: "today", prefix: "@", icon: builtinIcons["today"] || "calendar-check" });
-    if (!settings.hideTomorrowFilter)
-      cats.push({ label: "Tomorrow", value: "tomorrow", prefix: "@", icon: builtinIcons["tomorrow"] || "calendar-plus" });
-    if (settings.enableCustomCategories) {
-      (settings.customCategories || []).forEach((c) => {
-        cats.push({ label: c.label, value: c.id || c.label, prefix: "@", icon: c.icon });
-      });
-    }
-    return query ? cats.filter((c) => c.label.toLowerCase().startsWith(query) || c.value.toLowerCase().startsWith(query)) : cats.slice(0, 8);
-  }
-  getTagSuggestions(query) {
-    const tags = /* @__PURE__ */ new Set();
-    this.store.getAll().forEach((c) => (c.tags || []).forEach((t) => tags.add(t.toLowerCase())));
-    const all = Array.from(tags).sort();
-    const filtered = query ? all.filter((t) => t.startsWith(query)) : all;
-    return filtered.slice(0, 8).map((t) => ({ label: t, value: t, prefix: "#" }));
-  }
-  renderDropdown() {
-    this.dropdown.empty();
-    this.selectedIndex = -1;
-    this.isOpen = true;
-    this.items.forEach((item, idx) => {
-      const row = this.dropdown.createDiv("sc-inline-ac-item");
-      if (item.prefix === "@" && item.icon) {
-        const iconEl = row.createSpan("sc-inline-ac-icon");
-        try {
-          (0, import_obsidian3.setIcon)(iconEl, item.icon);
-        } catch (e) {
-          iconEl.textContent = "@";
-        }
-      } else if (item.prefix === "@") {
-        row.createSpan({ cls: "sc-inline-ac-badge", text: "@" });
-      } else {
-        row.createSpan({ cls: "sc-inline-ac-badge", text: "#" });
-      }
-      row.createSpan({ text: item.label });
-      row.addEventListener("mousedown", (e) => {
-        e.preventDefault();
-        this.selectItem(idx);
-      });
-      row.addEventListener("mouseenter", () => {
-        this.selectedIndex = idx;
-        this.highlightSelected();
-      });
-    });
-    this.dropdown.addClass("is-visible");
-  }
-  positionDropdown() {
-    const editorRect = this.editorEl.getBoundingClientRect();
-    const parentRect = this.editorEl.parentElement.getBoundingClientRect();
-    let caretLeft = 0;
-    const sel = window.getSelection();
-    if (sel && sel.rangeCount) {
-      const range = sel.getRangeAt(0).cloneRange();
-      range.collapse(true);
-      const rect = range.getBoundingClientRect();
-      if (rect.width > 0 || rect.height > 0)
-        caretLeft = rect.left - parentRect.left;
-    }
-    const bottomOffset = parentRect.bottom - editorRect.top + 4;
-    const leftOffset = Math.max(0, caretLeft);
-    this.dropdown.setCssProps({
-      "--sc-ac-bottom": `${bottomOffset}px`,
-      "--sc-ac-left": `${leftOffset}px`
-    });
-    this.dropdown.removeClass("ac-below");
-    this.dropdown.addClass("ac-above");
-    requestAnimationFrame(() => {
-      const dropRect = this.dropdown.getBoundingClientRect();
-      if (dropRect.top < 0) {
-        const topOffset = editorRect.top - parentRect.top + editorRect.height + 4;
-        this.dropdown.setCssProps({ "--sc-ac-top": `${topOffset}px`, "--sc-ac-left": `${leftOffset}px` });
-        this.dropdown.removeClass("ac-above");
-        this.dropdown.addClass("ac-below");
-      }
-    });
-  }
-  highlightSelected() {
-    this.dropdown.querySelectorAll(".sc-inline-ac-item").forEach((r, i) => r.toggleClass("is-selected", i === this.selectedIndex));
-  }
-  selectItem(idx) {
-    const item = this.items[idx];
-    if (!item)
-      return;
-    const fullText = this.editorEl.textContent || "";
-    const before = fullText.substring(0, this.triggerStart);
-    const caretOffset = this.getCaretInfo().offset;
-    const after = fullText.substring(caretOffset);
-    const replacement = item.prefix + item.value + " ";
-    this.editorEl.textContent = before + replacement + after;
-    this.setCaretAt(before.length + replacement.length);
-    this.editorEl.dispatchEvent(new Event("input"));
-    this.hide();
-  }
-  setCaretAt(offset) {
-    const sel = window.getSelection();
-    if (!sel)
-      return;
-    let remaining = offset;
-    const walker = document.createTreeWalker(this.editorEl, NodeFilter.SHOW_TEXT);
-    let node = null;
-    while (walker.nextNode()) {
-      const n = walker.currentNode;
-      if (remaining <= n.length) {
-        node = n;
-        break;
-      }
-      remaining -= n.length;
-    }
-    const range = document.createRange();
-    if (node) {
-      range.setStart(node, remaining);
-    } else {
-      range.selectNodeContents(this.editorEl);
-      range.collapse(false);
-    }
-    range.collapse(true);
-    sel.removeAllRanges();
-    sel.addRange(range);
-  }
-  onKeyDown(e) {
-    if (!this.isOpen)
-      return;
-    if (e.key === "ArrowDown") {
-      e.preventDefault();
-      e.stopPropagation();
-      this.selectedIndex = (this.selectedIndex + 1) % this.items.length;
-      this.highlightSelected();
-    } else if (e.key === "ArrowUp") {
-      e.preventDefault();
-      e.stopPropagation();
-      this.selectedIndex = (this.selectedIndex - 1 + this.items.length) % this.items.length;
-      this.highlightSelected();
-    } else if (e.key === "Enter") {
-      e.preventDefault();
-      e.stopImmediatePropagation();
-      if (this.selectedIndex >= 0) {
-        this.selectItem(this.selectedIndex);
-      } else {
-        this.hide();
-      }
-    } else if (e.key === "Escape") {
-      e.preventDefault();
-      e.stopPropagation();
-      this.hide();
-    }
-  }
-  hide() {
-    this.dropdown.removeClass("is-visible", "ac-above", "ac-below");
-    this.isOpen = false;
-    this.items = [];
-    this.selectedIndex = -1;
-    this.triggerChar = null;
-  }
-  destroy() {
-    this.dropdown.remove();
-  }
-};
-
-// src/views/CardSidebarView.ts
 init_dom();
 
 // src/utils/drag-drop.ts
@@ -2583,7 +2689,7 @@ var CardSidebarView = class extends import_obsidian4.ItemView {
         this.app.workspace.activeEditor = null;
       }
     });
-    new InlineAutocomplete(editorEl, this.store);
+    new InlineAutocomplete(editorEl, this.store, this.app);
     editorEl.addEventListener("keydown", (e) => {
       if (this.applyFormattingHotkey(e, editorEl))
         return;
@@ -3792,7 +3898,8 @@ var DEFAULT_SETTINGS = {
   noteTitleFormat: "words3_hhmm",
   showExpiryTimeLeft: false,
   expiryTimeFormat: "human",
-  homepageMaxWidth: 1e3
+  homepageMaxWidth: 1e3,
+  homepageTopMargin: 70
 };
 
 // src/views/modals/QuickCardWithFilterModal.ts
@@ -4045,7 +4152,7 @@ var QuickCardWithFilterModal = class extends import_obsidian7.Modal {
     });
     editorEl.setAttribute("contenteditable", "true");
     editorEl.dataset.placeholder = "Type here... (@category, #tag)";
-    new InlineAutocomplete(editorEl, this.store);
+    new InlineAutocomplete(editorEl, this.store, this.app);
     editorEl.addEventListener("input", () => {
       editorEl.toggleClass("is-empty", !editorEl.textContent);
     });
@@ -4579,7 +4686,7 @@ var SideCardsHomeView = class extends import_obsidian9.ItemView {
     return "home";
   }
   async onOpen() {
-    var _a;
+    var _a, _b;
     const container = this.containerEl;
     container.empty();
     container.addClass("sc-home-container");
@@ -4588,6 +4695,8 @@ var SideCardsHomeView = class extends import_obsidian9.ItemView {
     const main = container.createDiv({ cls: "sc-home-main" });
     const maxW = (_a = this.plugin.settings.homepageMaxWidth) != null ? _a : 1e3;
     container.style.setProperty("--sc-home-max-width", `${maxW}px`);
+    const topMargin = (_b = this.plugin.settings.homepageTopMargin) != null ? _b : 70;
+    container.style.setProperty("--sc-home-top-margin", `${topMargin}px`);
     const topSection = main.createDiv({ cls: "sc-home-top" });
     topSection.createEl("h2", { text: this.plugin.settings.homepageName || "SideCards", cls: "sc-home-title" });
     const paletteRow = topSection.createDiv({ cls: "sc-home-palette-row" });
@@ -4644,7 +4753,7 @@ var SideCardsHomeView = class extends import_obsidian9.ItemView {
     const editorEl = topSection.createDiv({ cls: "sc-home-editor" });
     editorEl.setAttribute("contenteditable", "true");
     editorEl.dataset.placeholder = "Type here... (@category, #tag)";
-    new InlineAutocomplete(editorEl, this.store);
+    new InlineAutocomplete(editorEl, this.store, this.app);
     const updatePlaceholder = () => {
       var _a2;
       if (!((_a2 = editorEl.textContent) == null ? void 0 : _a2.trim()))
@@ -4964,7 +5073,7 @@ var SideCardsHomeView = class extends import_obsidian9.ItemView {
     }
   }
   async refresh() {
-    var _a;
+    var _a, _b;
     const main = this.containerEl.querySelector(".sc-home-main");
     if (!main)
       return;
@@ -4973,6 +5082,8 @@ var SideCardsHomeView = class extends import_obsidian9.ItemView {
       titleEl.textContent = this.plugin.settings.homepageName || "SideCards";
     const maxW = (_a = this.plugin.settings.homepageMaxWidth) != null ? _a : 1e3;
     this.containerEl.style.setProperty("--sc-home-max-width", `${maxW}px`);
+    const topMargin = (_b = this.plugin.settings.homepageTopMargin) != null ? _b : 70;
+    this.containerEl.style.setProperty("--sc-home-top-margin", `${topMargin}px`);
     const categoryBar = main.querySelector(".sc-home-category-bar");
     if (categoryBar) {
       this.renderCategoryBar(categoryBar, this.cardListEl);
@@ -6040,6 +6151,19 @@ var SideCardsSettingTab = class extends import_obsidian10.PluginSettingTab {
         await this.plugin.saveSettings();
         document.querySelectorAll(".sc-home-container").forEach((el) => {
           el.style.setProperty("--sc-home-max-width", `${value}px`);
+        });
+      });
+      slider.sliderEl.insertAdjacentElement("afterend", label);
+    });
+    new import_obsidian10.Setting(containerEl).setName("Homepage top spacing").setDesc("Distance from the top of the homepage to the content area, in pixels.").addSlider((slider) => {
+      var _a2, _b;
+      const label = containerEl.createSpan({ text: `${(_a2 = this.plugin.settings.homepageTopMargin) != null ? _a2 : 70}px`, cls: "sc-slider-label" });
+      slider.setLimits(0, 300, 5).setValue((_b = this.plugin.settings.homepageTopMargin) != null ? _b : 70).setDynamicTooltip().onChange(async (value) => {
+        this.plugin.settings.homepageTopMargin = value;
+        label.textContent = `${value}px`;
+        await this.plugin.saveSettings();
+        document.querySelectorAll(".sc-home-container").forEach((el) => {
+          el.style.setProperty("--sc-home-top-margin", `${value}px`);
         });
       });
       slider.sliderEl.insertAdjacentElement("afterend", label);
