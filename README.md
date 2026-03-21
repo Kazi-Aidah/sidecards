@@ -1,92 +1,135 @@
-### Currently a mess, might mess up your vault.
-### Please do not try until this note has been removed.
-I am actively trying to fix all the issues. Thank you.
+![SideCards Downloads](https://img.shields.io/badge/dynamic/json?logo=obsidian&style=for-the-badge&label=downloads&labelColor=26233a&color=483699&query=%24%5B%22sidecards%22%5D.downloads&url=https%3A%2F%2Fraw.githubusercontent.com%2Fobsidianmd%2Fobsidian-releases%2Fmaster%2Fcommunity-plugin-stats.json) ![Stars](https://img.shields.io/github/stars/Kazi-Aidah/sidecards?style=for-the-badge&color=c4a7e7&labelColor=26233a) ![Version](https://img.shields.io/github/manifest-json/v/Kazi-Aidah/sidecards?style=for-the-badge&color=9ccfd8&labelColor=26233a) ![Last update](https://img.shields.io/github/last-commit/Kazi-Aidah/sidecards?style=for-the-badge&color=9fc387&labelColor=26233a)
+
+# SideCards
+Quickly create cards in your Obsidian sidebar; color, tag, and drag them straight into your notes.
+
+<img alt="SideCards Banner" src="assets/SideCards-banner.png" />
 
 ---
 
-# SideCards
+## Create & Manage Cards Instantly
 
-Quickly create cards in your Obsidian Sidebar;
-color, tag, and drag them straight into your notes.
+### Quick Card Creation
+Type directly into the sidebar input box to create cards instantly. Cards can also be created from the homepage or via the quick-add command.
 
-<img alt="SideCardsBanner" src="https://github.com/user-attachments/assets/503eae84-0d7d-4385-9253-7b48d7bef43e" />
+### Inline Editing
+Edit card content directly: no modals, no interruptions.
 
-<i> Theme: [Underwater](https://github.com/Seniblue/Underwater) </i>
+![Inline editing](assets/inline-editing.png)
 
-## Features
+### Drag to Editor
+Drag any card into your markdown editor to insert its content.
 
-### **Core Card System:**
+![Drag into editor](assets/drag-into-editor.gif)
 
-Quick Card Creation - Instant note-taking with a dedicated input box <img alt="image" src="https://github.com/user-attachments/assets/8a4c9ca1-e84e-40f9-8f68-21dd68a590ed" />
+### Essentials
+- Real-time Auto-save: Changes are saved automatically as you type.
 
-Visual Card Interface - Clean, card-based layout for easy scanning
-Inline Editing - Edit card content directly without opening modals <img alt="image" src="https://github.com/user-attachments/assets/9b9e85c6-97a0-4096-9cb7-caf2cb762bea" />
+- Note Conversion: Convert any card to a full markdown note with one click.
 
-Drag to Editor - Drag cards into any markdown editor to insert content <img alt="image" src="https://github.com/user-attachments/assets/d9058648-9e47-4f7a-900f-b2f5066756e6" />
+- Bidirectional Sync: Changes made in notes automatically update the cards and vice versa.
 
-* Real-time Auto-save - Changes are saved automatically as you type.
-
-### **Visual Customization:**
-
-10 Customizable Colors - Color-code your cards for visual organization <img alt="image" src="https://github.com/user-attachments/assets/323c47b3-d623-4191-a073-8782f6a38e85" />
-
-Multiple Card Styles - Choose from 3 distinct visual styles and adjust border radius, opacity, and thickness. <img alt="image" src="https://github.com/user-attachments/assets/3c8a5c77-89e9-4e6d-a434-17bce57c01e9" />
-
-Timestamp Display - Optional creation timestamps with customizable formatting <img alt="image" src="https://github.com/user-attachments/assets/0fcde655-d688-4c84-84b0-83622ff1fecf" />
-
-Clean UI Options - Hide scrollbars, filters and other buttons for a minimalist look <img alt="image" src="https://github.com/user-attachments/assets/dc962adc-d1c0-4ce6-8e62-b20f24223fad" />
-
-## Integration with Your Vault
-
-Seamless Note Conversion - Convert cards to full markdown notes with one click <img alt="image" src="https://github.com/user-attachments/assets/896cba69-7c47-4fd7-b8b6-93b2644ce187" />
-
-Bidirectional Sync - Changes in notes automatically reflect in cards
+- Folder Integration: Auto-import markdown files from a specified storage folder.
 
 
-Folder Integration - Auto-import markdown files from specified folders 
-<img alt="image" src="https://github.com/user-attachments/assets/f53035ca-5ab6-4fe5-a619-71cfba0f483c" />
+## Style Your Cards
 
-Frontmatter Support - Comprehensive metadata storage in YAML frontmatter <img alt="image" src="https://github.com/user-attachments/assets/dcf31698-ef5e-4165-b439-a5ffa95b1b12" />
+### 10 Custom Colors
+Color-code your cards for visual organization. Enable two row color swatches in two rows for a more compact layout.
 
-## Advanced Features
-
-- Custom Keyboard Shortcuts - Configure your preferred keys for saving and line breaks
-
-- Context Menu Actions - Rich right-click menu for card operations
-
-- Archive System - Archive cards to declutter without deleting
-
-- Auto-open Option - Automatically open sidebar when Obsidian starts
-
-- Bulk Operations - Reload all cards or apply sorting across entire collection
-
-- Custom Filter Creation - Build your own filters beyond the standard daily/weekly/monthly views
-<img alt="image" src="https://github.com/user-attachments/assets/d56fa01e-dd9d-45c0-a2b0-cb3d423a2310" /> <img width="752" height="439" alt="image" src="https://github.com/user-attachments/assets/1eb02b3e-800f-4578-a41b-71a21ec1affc" />
+![](assets/two-row-color-dots.png)
 
 
+### Auto-color Rules
+Automatically assign colors based on text content or tag matches.
+![Auto-color settings](assets/settings-autocolor.png)
 
-- Custom Color Naming - If card-color frontmatter is absent, card-color-name will work instead. 
-<img alt="card color name" src="https://github.com/user-attachments/assets/a291de80-79c1-4932-a35d-ff08fa9e0fef" />
+### Multiple Card Styles
+Choose from 3 visual styles and adjust border radius, opacity, and border thickness to customize it to your liking!
+![Card styling settings](assets/settings-card-styling.png)
 
-# Installation
 
-It is currently not available in the Obsidian Community Plugins or BRAT.
-You will have to clone this repo and put it in your `.obsidian/plugins` folder.
+## Categories
+
+By default, SideCards includes **Today**, **Tomorrow**, and **Archived** categories.
+
+- **Today** shows cards created or modified today.
+- **Tomorrow** is for cards you want to postpone as they’ll automatically move to Today when the day changes.
+- **Archived** stores all archived cards.
+
+
+### Custom Categories
+Build your own categories with custom labels, colors, and icons.
+
+![Categories settings](assets/settings-categories.png)
+
+Icons currently appear only in the context menu and category list, not on the button itself.
+
+## Card Status System
+Assign statuses with custom names, colors, and text colors.
+
+![Status menu](assets/status-menu.png)
+
+### Color Inheritance
+Optionally inherit the status color into the card background.
+
+## Expiry
+Set expiry times with optional auto-archive and a time-left pill display.
+
+![](assets/card-expiry.png)
+
+## Homepage
+
+### Dedicated Homepage View
+A full-page view with a card editor, pinned notes, and recent notes.
+
+![Banner](assets/SideCards-banner.png)
+
+You can replace your default new tab with this homepage.
+
+![Pinned and recent notes](assets/pinned-recent-notes.png)
+
+Notes can be pinned by right-clicking a tab and selecting “Pin tab to SideCards Homepage,” or by using a command. Icons are supported via the [Iconic plugin](https://github.com/gfxholo/iconic/).
+
+
+## Other Features
+
+### Auto-pair Brackets
+Automatically pairs `(`, `[`, `{`, `` ` ``, `=`, `%`, and `"` while typing.
+
+### Formatting Shortcuts
+Bold, italic, highlight, and comment wrapping work inside card editors.
+
+
+## Installation
+
+*SideCards is not yet available in Obsidian Community Plugins or BRAT.*
+
+1. **Clone the repository** and place the plugin folder in your vault’s `.obsidian/plugins/` directory. The folder structure should look like this:
 
 ```
-sidecard
-╰─ main.js
-╰─ styles.css
-╰─ manifest.json
+sidecards
+├─ main.js
+├─ styles.css
+└─ manifest.json
 ```
 
-into
+Inside your vault, it should end up like:
 
 ```
-.obsidian
-╰─ plugins
-    ╰─ sidecard
-       ╰─ main.js
-       ╰─ styles.css
-       ╰─ manifest.json
+.your-vault
+└─ .obsidian
+    └─ plugins
+        └─ sidecards
+           ├─ main.js
+           ├─ styles.css
+           └─ manifest.json
 ```
+
+2. **Enable the plugin** in Obsidian.
+
+3. **Set a storage folder** on first launch. This is where your cards will be saved as notes.
+
+
+### Questions or Suggestions?
+Create a new issue [here](https://github.com/Kazi-Aidah/sidecards/issues) to report bugs or request features!

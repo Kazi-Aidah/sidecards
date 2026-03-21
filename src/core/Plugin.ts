@@ -1,5 +1,5 @@
 
-import { Plugin, PluginSettingTab, App, Setting, WorkspaceLeaf, setIcon, Notice, TFile, Platform, requestUrl, Component, MarkdownRenderer, Modal, getIconIds } from "obsidian";
+import { Plugin, PluginSettingTab, App, Setting, WorkspaceLeaf, setIcon, Notice, TFile, Platform, requestUrl, Component, MarkdownRenderer, Modal, getIconIds, MarkdownView } from "obsidian";
 import { CardSidebarView } from "../views/CardSidebarView";
 import { CardStore } from "../services/CardStore";
 import { FilterService } from "../services/FilterService";
@@ -179,6 +179,18 @@ export default class SideCardsPlugin extends Plugin {
 
     this.addSettingTab(new SideCardsSettingTab(this.app, this));
 
+    // Keep card.notePath in sync when a note is renamed/moved
+    this.registerEvent(
+      this.app.vault.on('rename', (file, oldPath) => {
+        if (!(file instanceof TFile)) return;
+        const card = this.store.getAll().find(c => c.notePath === oldPath);
+        if (!card) return;
+        // Update in-memory path and persist
+        card.notePath = file.path;
+        void this.store.saveCards();
+      })
+    );
+
     this.registerEvent(
       this.app.workspace.on("file-menu", (menu, file) => {
         if (file instanceof TFile) {
@@ -229,6 +241,69 @@ export default class SideCardsPlugin extends Plugin {
     this.injectStatusColors();
     this.applyButtonPadding();
 
+    // Allow drop on any element — needed so the browser accepts the drop
+    this.registerDomEvent(document, 'dragover', (ev: DragEvent) => {
+      if (!ev.dataTransfer) return;
+      const types = Array.from(ev.dataTransfer.types || []);
+      if (!types.includes('text/x-card-sidebar')) return;
+      ev.preventDefault();
+      ev.dataTransfer.dropEffect = 'copy';
+    });
+
+    // Drop card content into a markdown editor.
+    // Must use capture phase so our handler runs before CodeMirror's own drop handler,
+    // which would otherwise also insert the dragged text and cause duplicates.
+    let lastDropTime = 0;
+    const cardDropHandler = (ev: DragEvent) => {
+      if (!ev.dataTransfer) return;
+      const types = Array.from(ev.dataTransfer.types || []);
+      if (!types.includes('text/x-card-sidebar')) return;
+
+      // Deduplicate: ignore if we already handled a drop within 200ms
+      const now = Date.now();
+      if (now - lastDropTime < 200) { ev.preventDefault(); ev.stopImmediatePropagation(); return; }
+      lastDropTime = now;
+
+      ev.preventDefault();
+      ev.stopImmediatePropagation();
+
+      let content: string | null = null;
+      try {
+        const json = ev.dataTransfer.getData('text/x-card-sidebar');
+        const payload = JSON.parse(json);
+        content = payload.content ?? null;
+      } catch { /* malformed payload */ }
+      if (!content) return;
+
+      // Find the MarkdownView whose editor DOM contains the drop target,
+      // falling back to whichever MarkdownView is currently active.
+      let mdView: MarkdownView | null = null;
+      const target = ev.target as HTMLElement | null;
+      if (target) {
+        this.app.workspace.iterateAllLeaves((leaf) => {
+          if (mdView) return;
+          const view = leaf.view;
+          if (!(view instanceof MarkdownView)) return;
+          const editorEl = (view as any).editor?.containerEl ?? (view as any).contentEl;
+          if (editorEl && editorEl.contains(target)) mdView = view;
+        });
+      }
+      if (!mdView) mdView = this.app.workspace.getActiveViewOfType(MarkdownView);
+      if (!mdView?.editor) return;
+
+      // Place cursor at the drop position before inserting
+      const cm = (mdView.editor as any).cm;
+      if (cm?.posAtCoords) {
+        const pos = cm.posAtCoords({ x: ev.clientX, y: ev.clientY }, false);
+        if (pos != null) cm.dispatch({ selection: { anchor: pos } });
+      }
+
+      mdView.editor.replaceSelection(content);
+      mdView.editor.focus();
+    };
+    document.addEventListener('drop', cardDropHandler, true /* capture */);
+    (this as any)._cardDropCleanup = () => document.removeEventListener('drop', cardDropHandler, true);
+
     // Auto-open sidebar on startup; show setup modal if no storage folder set
     this.app.workspace.onLayoutReady(() => {
       if (!this.settings.storageFolder) {
@@ -246,6 +321,8 @@ export default class SideCardsPlugin extends Plugin {
   onunload() {
     const el = document.getElementById('sc-status-colors');
     if (el) el.remove();
+    // Remove the capture-phase drop handler registered in onload
+    if ((this as any)._cardDropCleanup) (this as any)._cardDropCleanup();
   }
 
   applyButtonPadding(): void {
@@ -661,7 +738,7 @@ class SideCardsSettingTab extends PluginSettingTab {
       await this.plugin.saveSettings();
     }));
 
-    new Setting(containerEl).setName('Auto-pair brackets, quotes and code').setDesc('Automatically wrap selected text or place cursor between pairs when typing (, [, {, `, =, %, ", or \'').addToggle(toggle => toggle.setValue(this.plugin.settings.autoPairBrackets !== false).onChange(async (value) => {
+    new Setting(containerEl).setName('Auto-pair brackets, quotes and code').setDesc('Automatically wrap selected text or place cursor between pairs when typing (, [, {, `, =, %, or "').addToggle(toggle => toggle.setValue(this.plugin.settings.autoPairBrackets !== false).onChange(async (value) => {
       this.plugin.settings.autoPairBrackets = value;
       await this.plugin.saveSettings();
     }));

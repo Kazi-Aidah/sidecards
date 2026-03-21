@@ -13,7 +13,6 @@ export function handleKeyWrap(event: KeyboardEvent, editorEl: HTMLElement, edito
     "%": ["%", "%"],
     "=": ["=", "="],
     '"': ['"', '"'],
-    "'": ["'", "'"],
   };
 
   const pair = wrapMap[key];

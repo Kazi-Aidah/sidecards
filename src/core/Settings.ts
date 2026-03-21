@@ -31,6 +31,12 @@ export interface SideCardsSettings {
   showTimestamps: boolean;
   omitTagHash: boolean;
   groupTags: boolean;
+  sidebarShowTimestamps?: boolean;
+  sidebarGroupTags?: boolean;
+  homeShowTimestamps?: boolean;
+  homeGroupTags?: boolean;
+  sidebarShowTags?: boolean;
+  homeShowTags?: boolean;
   disableCardRendering: boolean;
   minCardWidth: number;
   colorNames: string[];

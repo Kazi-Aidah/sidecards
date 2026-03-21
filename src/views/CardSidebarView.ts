@@ -141,7 +141,6 @@ export class CardSidebarView extends ItemView {
       "%": ["%", "%"],
       "=": ["=", "="],
       '"': ['"', '"'],
-      "'": ["'", "'"],
     };
     const pair = wrapMap[event.key];
     if (!pair) return false;
@@ -691,6 +690,35 @@ export class CardSidebarView extends ItemView {
       })();
     });
 
+    const moreBtn = buttonContainer.createEl('button');
+    moreBtn.addClass('sc-icon-btn');
+    try { setIcon(moreBtn, 'more-vertical'); } catch { moreBtn.textContent = '…'; }
+    moreBtn.title = 'More';
+    moreBtn.addEventListener('click', (e) => {
+      const menu = new Menu();
+      menu.addItem(item => {
+        item.setTitle('Show tags')
+            .setChecked(this.plugin.settings.sidebarShowTags ?? true)
+            .onClick(async () => {
+              const current = this.plugin.settings.sidebarShowTags ?? true;
+              this.plugin.settings.sidebarShowTags = !current;
+              await this.plugin.saveSettings();
+              await this.renderCards();
+            });
+      });
+      menu.addItem(item => {
+        item.setTitle('Show timestamps')
+            .setChecked(this.plugin.settings.sidebarShowTimestamps ?? this.plugin.settings.showTimestamps)
+            .onClick(async () => {
+              const current = this.plugin.settings.sidebarShowTimestamps ?? this.plugin.settings.showTimestamps;
+              this.plugin.settings.sidebarShowTimestamps = !current;
+              await this.plugin.saveSettings();
+              await this.renderCards();
+            });
+      });
+      menu.showAtMouseEvent(e);
+    });
+
     const addButton = buttonContainer.createEl('button');
     addButton.addClass('sc-add-btn');
     addButton.textContent = 'Add card';
@@ -783,7 +811,11 @@ export class CardSidebarView extends ItemView {
 
       // Render each card
       for (const card of cards) {
-        const comp = new CardComponent(this.cardsContainer, card, this.store, this.app, this.plugin);
+        const comp = new CardComponent(this.cardsContainer, card, this.store, this.app, this.plugin, {
+          groupTags: this.plugin.settings.sidebarGroupTags ?? this.plugin.settings.groupTags,
+          showTimestamps: this.plugin.settings.sidebarShowTimestamps ?? this.plugin.settings.showTimestamps,
+          showTags: this.plugin.settings.sidebarShowTags ?? true,
+        });
         this.cardComponents.set(card.id, comp);
       }
 

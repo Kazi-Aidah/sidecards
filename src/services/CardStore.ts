@@ -25,6 +25,7 @@ export class CardStore {
     this.loadFromSettings();
     this.setupExpiryTimer();
     this.handleDateRollover();
+    void this.runStartupDateCleanup();
   }
 
   private loadFromSettings() {
@@ -428,6 +429,44 @@ export class CardStore {
     }, 1000);
   }
 
+  private async runStartupDateCleanup(): Promise<void> {
+    const todayStart = new Date();
+    todayStart.setHours(0, 0, 0, 0);
+    const todayStartMs = todayStart.getTime();
+
+    // Promote tomorrow → today only for cards assigned on a previous day
+    // (i.e. the day has rolled over since they were put in "tomorrow")
+    const tomorrowCards = this.getAll().filter(c => {
+      if (String(c.category || '').toLowerCase() !== 'tomorrow') return false;
+      const lastActivity = Math.max(c.modified ?? 0, c.created ?? 0);
+      return lastActivity < todayStartMs;
+    });
+    for (const card of tomorrowCards) {
+      await this.setCategory(card.id, 'today');
+    }
+
+    // Clear stale today cards (assigned on a previous day, never modified since)
+    await this.cleanupStaleTodayCards(todayStartMs);
+  }
+
+  private async cleanupStaleTodayCards(todayStartMs?: number): Promise<void> {
+    if (todayStartMs === undefined) {
+      const todayStart = new Date();
+      todayStart.setHours(0, 0, 0, 0);
+      todayStartMs = todayStart.getTime();
+    }
+
+    const stale = this.getAll().filter(c => {
+      if (String(c.category || '').toLowerCase() !== 'today') return false;
+      const lastActivity = Math.max(c.modified ?? 0, c.created ?? 0);
+      return lastActivity < todayStartMs!;
+    });
+
+    for (const card of stale) {
+      await this.setCategory(card.id, null);
+    }
+  }
+
   handleDateRollover(): void {
     if (this.dateRolloverTimeout) {
       window.clearTimeout(this.dateRolloverTimeout);
@@ -438,10 +477,7 @@ export class CardStore {
     const delay = Math.max(1000, next.getTime() - now.getTime());
     this.dateRolloverTimeout = window.setTimeout(() => {
       void (async () => {
-        const cards = this.getAll().filter(c => String(c.category || '').toLowerCase() === 'tomorrow');
-        for (const card of cards) {
-          await this.setCategory(card.id, 'today');
-        }
+        await this.runStartupDateCleanup();
         this.handleDateRollover();
       })();
     }, delay);

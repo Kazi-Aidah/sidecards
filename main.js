@@ -386,8 +386,7 @@ function handleKeyWrap(event, editorEl, editor, enabled = true) {
     "`": ["`", "`"],
     "%": ["%", "%"],
     "=": ["=", "="],
-    '"': ['"', '"'],
-    "'": ["'", "'"]
+    '"': ['"', '"']
   };
   const pair = wrapMap[key];
   if (!pair)
@@ -467,11 +466,12 @@ function getWordRangeAtCaret(selection) {
 
 // src/views/components/Card.ts
 var _CardComponent = class {
-  constructor(container, card, store, app, plugin) {
+  constructor(container, card, store, app, plugin, settingsOverride) {
     this.container = container;
     this.store = store;
     this.app = app;
     this.plugin = plugin;
+    this.settingsOverride = settingsOverride;
     this.unsubscribe = [];
     this.isEditing = false;
     this.ignoreNextClick = false;
@@ -648,9 +648,76 @@ var _CardComponent = class {
     var _a;
     const currentRender = ++this.renderCount;
     this.stopExpiryTick();
+    if (this.isEditing) {
+      const existingContent = this.el.querySelector(".sc-content");
+      if (existingContent) {
+        existingContent.setAttribute("contenteditable", "true");
+        existingContent.textContent = this.card.content;
+        existingContent.addClass("is-editing");
+        setTimeout(() => {
+          existingContent.focus();
+          const range = document.createRange();
+          const sel = window.getSelection();
+          range.selectNodeContents(existingContent);
+          range.collapse(false);
+          sel == null ? void 0 : sel.removeAllRanges();
+          sel == null ? void 0 : sel.addRange(range);
+        }, 0);
+        existingContent.addEventListener("focusin", () => {
+          this.app.keymap.pushScope(this.scope);
+          this.app.workspace.activeEditor = this.owner;
+        });
+        existingContent.addEventListener("blur", () => {
+          this.app.keymap.popScope(this.scope);
+          if (this.app.workspace.activeEditor === this.owner) {
+            this.app.workspace.activeEditor = null;
+          }
+          if (this.isEditing) {
+            void (async () => {
+              const newContent = existingContent.textContent || "";
+              if (newContent !== this.card.content) {
+                await this.store.update(this.card.id, { content: newContent });
+              }
+              this.isEditing = false;
+              if (_CardComponent.activeEditor === this) {
+                _CardComponent.activeEditor = null;
+              }
+              void this.render();
+            })();
+          }
+        });
+        existingContent.addEventListener("keydown", (e) => {
+          var _a2;
+          if (handleKeyWrap(e, existingContent, this.editor, ((_a2 = this.plugin.settings) == null ? void 0 : _a2.autoPairBrackets) !== false)) {
+            e.preventDefault();
+            e.stopPropagation();
+            return;
+          }
+          if (this.applyFormattingHotkey(e, existingContent))
+            return;
+          const settings = this.store.settings;
+          const normalizeKey = (v) => String(v || "").toLowerCase().replace(/[\s+_]+/g, "-").replace(/[^a-z0-9-]/g, "").replace(/-+/g, "-").replace(/^-|-$/g, "");
+          const saveKey = normalizeKey(settings.saveKey || "enter");
+          let pressed = "";
+          if (e.ctrlKey)
+            pressed += "ctrl-";
+          if (e.shiftKey)
+            pressed += "shift-";
+          if (e.altKey)
+            pressed += "alt-";
+          if (e.key && e.key.toLowerCase() === "enter")
+            pressed += "enter";
+          if (pressed === saveKey) {
+            e.preventDefault();
+            existingContent.blur();
+          }
+        });
+        return;
+      }
+    }
     this.el.empty();
     this.el.dataset.id = this.card.id;
-    this.el.draggable = false;
+    this.el.draggable = true;
     const statusDef = this.card.status ? (this.store.settings.cardStatuses || []).find((s) => s.name === this.card.status.name) : null;
     const useStatusColor = this.store.settings.inheritStatusColor && statusDef;
     const effectiveColor = useStatusColor && statusDef ? statusDef.colorIndex ? `var(--card-color-${statusDef.colorIndex})` : statusDef.color : this.card.color;
@@ -714,6 +781,8 @@ var _CardComponent = class {
     if (this.card.expiresAt && this.store.settings.showExpiryTimeLeft) {
       const pill = container.createDiv("sc-expiry-pill");
       pill.textContent = this.formatExpiryTimeLeft(this.card.expiresAt);
+      if (this.card.status)
+        pill.style.marginBottom = "4px";
     }
     if (this.card.status) {
       const pill = container.createDiv("sc-status-pill");
@@ -903,10 +972,14 @@ var _CardComponent = class {
     }
   }
   renderFooter(container) {
+    var _a, _b, _c, _d, _e, _f;
     const settings = this.store.settings;
-    const hasTags = this.card.tags && this.card.tags.length > 0;
-    if (settings.groupTags) {
-      if (settings.showTimestamps && settings.timestampBelowTags) {
+    const groupTags = (_b = (_a = this.settingsOverride) == null ? void 0 : _a.groupTags) != null ? _b : settings.groupTags;
+    const showTimestamps = (_d = (_c = this.settingsOverride) == null ? void 0 : _c.showTimestamps) != null ? _d : settings.showTimestamps;
+    const showTags = (_f = (_e = this.settingsOverride) == null ? void 0 : _e.showTags) != null ? _f : true;
+    const hasTags = showTags && this.card.tags && this.card.tags.length > 0;
+    if (groupTags) {
+      if (showTimestamps && settings.timestampBelowTags) {
         const ts = container.createDiv("sc-timestamp sc-timestamp--block");
         ts.textContent = this.formatTimestamp(this.card.created);
       }
@@ -922,17 +995,28 @@ var _CardComponent = class {
           });
         });
       }
-      if (settings.showTimestamps && !settings.timestampBelowTags) {
+      if (showTimestamps && !settings.timestampBelowTags) {
         const ts = container.createDiv(`sc-timestamp ${hasTags ? "sc-timestamp--inline-spaced" : "sc-timestamp--inline"}`);
         ts.textContent = this.formatTimestamp(this.card.created);
       }
     } else {
-      if (settings.showTimestamps) {
+      if (showTimestamps) {
         container.createDiv("sc-timestamp").textContent = this.formatTimestamp(this.card.created);
       }
     }
   }
   setupListeners() {
+    this.el.addEventListener("dragstart", (e) => {
+      if (!e.dataTransfer)
+        return;
+      e.dataTransfer.effectAllowed = "copyMove";
+      const payload = JSON.stringify({ id: this.card.id, content: this.card.content });
+      e.dataTransfer.setData("text/x-card-sidebar", payload);
+      try {
+        e.dataTransfer.setData("text/plain", this.card.content);
+      } catch (e2) {
+      }
+    });
     this.el.addEventListener("click", (e) => {
       if (this.ignoreNextClick) {
         this.ignoreNextClick = false;
@@ -1105,7 +1189,9 @@ var _CardComponent = class {
     const unbind = this.store.eventBus.on("card:updated", (updated) => {
       if (updated.id === this.card.id) {
         this.card = updated;
-        void this.render();
+        if (!this.isEditing) {
+          void this.render();
+        }
       }
     });
     this.unsubscribe.push(unbind);
@@ -1679,6 +1765,31 @@ function attachDragToReorder(container, plugin, getSortMode, onReorder, onPlaceh
       c.style.transform = "";
     });
   }
+  let dragStartX = 0;
+  let dragStartY = 0;
+  let dragPending = false;
+  const DRAG_THRESHOLD = 5;
+  const onNativeDragStart = () => {
+    if (!dragPending && !active)
+      return;
+    document.removeEventListener("mousemove", onMouseMove);
+    document.removeEventListener("mouseup", onMouseUp);
+    ghost == null ? void 0 : ghost.remove();
+    ghost = null;
+    if (draggedEl) {
+      draggedEl.style.opacity = "";
+      draggedEl.style.pointerEvents = "";
+    }
+    clearTransforms();
+    draggedEl = null;
+    active = false;
+    dragPending = false;
+    snapRects = /* @__PURE__ */ new Map();
+    lastFlipRects = /* @__PURE__ */ new Map();
+    originalOrder = [];
+    currentTargetIndex = -1;
+    draggedIndex = -1;
+  };
   const onMouseDown = (e) => {
     if (getSortMode() !== "manual")
       return;
@@ -1691,16 +1802,28 @@ function attachDragToReorder(container, plugin, getSortMode, onReorder, onPlaceh
     originalOrder = getCards();
     draggedIndex = originalOrder.indexOf(card);
     currentTargetIndex = draggedIndex;
+    dragStartX = e.clientX;
+    dragStartY = e.clientY;
+    dragPending = true;
     snapRects = /* @__PURE__ */ new Map();
     originalOrder.forEach((c) => snapRects.set(c, c.getBoundingClientRect()));
     const rect = snapRects.get(card);
     offsetX = e.clientX - rect.left;
     offsetY = e.clientY - rect.top;
-    card.style.opacity = "0";
-    card.style.pointerEvents = "none";
-    ghost = card.cloneNode(true);
+    document.addEventListener("mousemove", onMouseMove);
+    document.addEventListener("mouseup", onMouseUp);
+  };
+  function activateDrag(e) {
+    if (!draggedEl)
+      return;
+    dragPending = false;
+    active = true;
+    const rect = snapRects.get(draggedEl);
+    draggedEl.style.opacity = "0";
+    draggedEl.style.pointerEvents = "none";
+    ghost = draggedEl.cloneNode(true);
     ghost.classList.add("sc-drag-ghost");
-    const cs = getComputedStyle(card);
+    const cs = getComputedStyle(draggedEl);
     ghost.style.background = cs.background;
     ghost.style.backgroundColor = cs.backgroundColor;
     ghost.style.borderColor = cs.borderColor;
@@ -1716,8 +1839,8 @@ function attachDragToReorder(container, plugin, getSortMode, onReorder, onPlaceh
     ghost.style.pointerEvents = "none";
     ghost.style.width = rect.width + "px";
     ghost.style.height = rect.height + "px";
-    ghost.style.left = rect.left + "px";
-    ghost.style.top = rect.top + "px";
+    ghost.style.left = e.clientX - offsetX + "px";
+    ghost.style.top = e.clientY - offsetY + "px";
     ghost.style.margin = "0";
     ghost.style.boxShadow = "0 8px 24px rgba(0,0,0,0.25)";
     ghost.style.opacity = "1";
@@ -1725,12 +1848,17 @@ function attachDragToReorder(container, plugin, getSortMode, onReorder, onPlaceh
     ghost.style.transform = "";
     ghost.style.transition = "";
     document.body.appendChild(ghost);
-    active = true;
-    document.addEventListener("mousemove", onMouseMove);
-    document.addEventListener("mouseup", onMouseUp);
-    e.preventDefault();
-  };
+  }
   const onMouseMove = (e) => {
+    if (dragPending) {
+      const dx = e.clientX - dragStartX;
+      const dy = e.clientY - dragStartY;
+      if (Math.hypot(dx, dy) >= DRAG_THRESHOLD) {
+        activateDrag(e);
+      } else {
+        return;
+      }
+    }
     if (!active || !ghost || !draggedEl)
       return;
     ghost.style.left = e.clientX - offsetX + "px";
@@ -1743,11 +1871,18 @@ function attachDragToReorder(container, plugin, getSortMode, onReorder, onPlaceh
     }
   };
   const onMouseUp = () => {
+    document.removeEventListener("mousemove", onMouseMove);
+    document.removeEventListener("mouseup", onMouseUp);
+    if (dragPending) {
+      dragPending = false;
+      draggedEl = null;
+      snapRects = /* @__PURE__ */ new Map();
+      originalOrder = [];
+      return;
+    }
     if (!active || !draggedEl)
       return;
     active = false;
-    document.removeEventListener("mousemove", onMouseMove);
-    document.removeEventListener("mouseup", onMouseUp);
     ghost == null ? void 0 : ghost.remove();
     ghost = null;
     draggedEl.style.opacity = "";
@@ -1772,8 +1907,10 @@ function attachDragToReorder(container, plugin, getSortMode, onReorder, onPlaceh
     draggedIndex = -1;
   };
   container.addEventListener("mousedown", onMouseDown);
+  container.addEventListener("dragstart", onNativeDragStart);
   return () => {
     container.removeEventListener("mousedown", onMouseDown);
+    container.removeEventListener("dragstart", onNativeDragStart);
     document.removeEventListener("mousemove", onMouseMove);
     document.removeEventListener("mouseup", onMouseUp);
     ghost == null ? void 0 : ghost.remove();
@@ -1785,11 +1922,148 @@ function attachDragToReorder(container, plugin, getSortMode, onReorder, onPlaceh
     ghost = null;
     draggedEl = null;
     active = false;
+    dragPending = false;
     snapRects = /* @__PURE__ */ new Map();
     lastFlipRects = /* @__PURE__ */ new Map();
     originalOrder = [];
     currentTargetIndex = -1;
     draggedIndex = -1;
+  };
+}
+function attachPinnedListDragToReorder(container, getPaths, onReorder) {
+  let ghost = null;
+  let draggedEl = null;
+  let draggedPath = "";
+  let offsetY = 0;
+  let active = false;
+  let indicator = null;
+  let dropIndex = -1;
+  function getItems() {
+    return Array.from(container.querySelectorAll(":scope > .sc-home-file-item"));
+  }
+  function getItemEl(el) {
+    if (!(el instanceof HTMLElement))
+      return null;
+    return el.closest(".sc-home-file-item");
+  }
+  function getOrCreateIndicator() {
+    if (!indicator) {
+      indicator = document.createElement("div");
+      indicator.className = "sc-pinned-drop-indicator";
+      indicator.style.cssText = "position:absolute;left:0;right:0;height:2px;background:var(--interactive-accent);border-radius:2px;pointer-events:none;z-index:100;display:none;";
+    }
+    return indicator;
+  }
+  function computeDropIndex(clientY) {
+    const items = getItems().filter((i) => i !== draggedEl);
+    if (items.length === 0)
+      return 0;
+    for (let i = 0; i < items.length; i++) {
+      const r = items[i].getBoundingClientRect();
+      if (clientY < r.top + r.height / 2)
+        return i;
+    }
+    return items.length;
+  }
+  function positionIndicator(idx) {
+    const ind = getOrCreateIndicator();
+    const items = getItems().filter((i) => i !== draggedEl);
+    const containerRect = container.getBoundingClientRect();
+    let top;
+    if (items.length === 0) {
+      top = 0;
+    } else if (idx >= items.length) {
+      const last = items[items.length - 1].getBoundingClientRect();
+      top = last.bottom - containerRect.top;
+    } else {
+      const target = items[idx].getBoundingClientRect();
+      top = target.top - containerRect.top;
+    }
+    ind.style.display = "block";
+    ind.style.top = top - 1 + "px";
+    if (!ind.parentElement) {
+      container.style.position = "relative";
+      container.appendChild(ind);
+    }
+  }
+  const onMouseDown = (e) => {
+    var _a;
+    if (e.button !== 0)
+      return;
+    const item = getItemEl(e.target);
+    if (!item)
+      return;
+    draggedEl = item;
+    draggedPath = (_a = item.dataset.path) != null ? _a : "";
+    if (!draggedPath)
+      return;
+    const rect = item.getBoundingClientRect();
+    offsetY = e.clientY - rect.top;
+    ghost = item.cloneNode(true);
+    ghost.classList.add("sc-drag-ghost");
+    const cs = getComputedStyle(item);
+    ghost.style.cssText = `
+      position:fixed;z-index:9999;pointer-events:none;
+      width:${rect.width}px;height:${rect.height}px;
+      left:${rect.left}px;top:${rect.top}px;
+      background:${cs.background};background-color:${cs.backgroundColor};
+      border-radius:${cs.borderRadius};padding:${cs.padding};
+      font-size:${cs.fontSize};color:${cs.color};
+      box-shadow:0 4px 16px rgba(0,0,0,0.2);opacity:0.9;cursor:grabbing;
+    `;
+    document.body.appendChild(ghost);
+    item.style.opacity = "0.3";
+    active = true;
+    dropIndex = computeDropIndex(e.clientY);
+    positionIndicator(dropIndex);
+    document.addEventListener("mousemove", onMouseMove);
+    document.addEventListener("mouseup", onMouseUp);
+    e.preventDefault();
+  };
+  const onMouseMove = (e) => {
+    if (!active || !ghost)
+      return;
+    ghost.style.top = e.clientY - offsetY + "px";
+    dropIndex = computeDropIndex(e.clientY);
+    positionIndicator(dropIndex);
+  };
+  const onMouseUp = () => {
+    if (!active)
+      return;
+    active = false;
+    document.removeEventListener("mousemove", onMouseMove);
+    document.removeEventListener("mouseup", onMouseUp);
+    ghost == null ? void 0 : ghost.remove();
+    ghost = null;
+    if (indicator)
+      indicator.style.display = "none";
+    if (draggedEl)
+      draggedEl.style.opacity = "";
+    const paths = getPaths().slice();
+    const fromIdx = paths.indexOf(draggedPath);
+    if (fromIdx !== -1 && dropIndex !== -1) {
+      paths.splice(fromIdx, 1);
+      const insertAt = fromIdx < dropIndex ? dropIndex : dropIndex;
+      paths.splice(insertAt, 0, draggedPath);
+      void onReorder(paths);
+    }
+    draggedEl = null;
+    draggedPath = "";
+    dropIndex = -1;
+  };
+  container.addEventListener("mousedown", onMouseDown);
+  return () => {
+    container.removeEventListener("mousedown", onMouseDown);
+    document.removeEventListener("mousemove", onMouseMove);
+    document.removeEventListener("mouseup", onMouseUp);
+    ghost == null ? void 0 : ghost.remove();
+    indicator == null ? void 0 : indicator.remove();
+    if (draggedEl)
+      draggedEl.style.opacity = "";
+    ghost = null;
+    draggedEl = null;
+    active = false;
+    indicator = null;
   };
 }
 
@@ -1921,8 +2195,7 @@ var CardSidebarView = class extends import_obsidian4.ItemView {
       "`": ["`", "`"],
       "%": ["%", "%"],
       "=": ["=", "="],
-      '"': ['"', '"'],
-      "'": ["'", "'"]
+      '"': ['"', '"']
     };
     const pair = wrapMap[event.key];
     if (!pair)
@@ -2438,6 +2711,38 @@ var CardSidebarView = class extends import_obsidian4.ItemView {
         }, {}, this.store.settings);
       })();
     });
+    const moreBtn = buttonContainer.createEl("button");
+    moreBtn.addClass("sc-icon-btn");
+    try {
+      (0, import_obsidian4.setIcon)(moreBtn, "more-vertical");
+    } catch (e) {
+      moreBtn.textContent = "\u2026";
+    }
+    moreBtn.title = "More";
+    moreBtn.addEventListener("click", (e) => {
+      const menu = new import_obsidian4.Menu();
+      menu.addItem((item) => {
+        var _a;
+        item.setTitle("Show tags").setChecked((_a = this.plugin.settings.sidebarShowTags) != null ? _a : true).onClick(async () => {
+          var _a2;
+          const current = (_a2 = this.plugin.settings.sidebarShowTags) != null ? _a2 : true;
+          this.plugin.settings.sidebarShowTags = !current;
+          await this.plugin.saveSettings();
+          await this.renderCards();
+        });
+      });
+      menu.addItem((item) => {
+        var _a;
+        item.setTitle("Show timestamps").setChecked((_a = this.plugin.settings.sidebarShowTimestamps) != null ? _a : this.plugin.settings.showTimestamps).onClick(async () => {
+          var _a2;
+          const current = (_a2 = this.plugin.settings.sidebarShowTimestamps) != null ? _a2 : this.plugin.settings.showTimestamps;
+          this.plugin.settings.sidebarShowTimestamps = !current;
+          await this.plugin.saveSettings();
+          await this.renderCards();
+        });
+      });
+      menu.showAtMouseEvent(e);
+    });
     const addButton = buttonContainer.createEl("button");
     addButton.addClass("sc-add-btn");
     addButton.textContent = "Add card";
@@ -2516,6 +2821,7 @@ var CardSidebarView = class extends import_obsidian4.ItemView {
     const settings = { ...this.store.settings };
     const scrollTop = ((_a = this.cardsContainer) == null ? void 0 : _a.scrollTop) || 0;
     await flipAnimateAsync(this.cardsContainer, async () => {
+      var _a2, _b2, _c;
       this.cardComponents.forEach((comp) => comp.destroy());
       this.cardComponents.clear();
       this.cardsContainer.empty();
@@ -2523,7 +2829,11 @@ var CardSidebarView = class extends import_obsidian4.ItemView {
       cards = this.filterService.filter(cards, this.activeFilters);
       cards = this.sortService.sort(cards, this.currentSortMode, this.sortAscending, this.app);
       for (const card of cards) {
-        const comp = new CardComponent(this.cardsContainer, card, this.store, this.app, this.plugin);
+        const comp = new CardComponent(this.cardsContainer, card, this.store, this.app, this.plugin, {
+          groupTags: (_a2 = this.plugin.settings.sidebarGroupTags) != null ? _a2 : this.plugin.settings.groupTags,
+          showTimestamps: (_b2 = this.plugin.settings.sidebarShowTimestamps) != null ? _b2 : this.plugin.settings.showTimestamps,
+          showTags: (_c = this.plugin.settings.sidebarShowTags) != null ? _c : true
+        });
         this.cardComponents.set(card.id, comp);
       }
       this.applyLayoutMode();
@@ -2746,6 +3056,7 @@ var CardStore = class {
     this.loadFromSettings();
     this.setupExpiryTimer();
     this.handleDateRollover();
+    void this.runStartupDateCleanup();
   }
   loadFromSettings() {
     this.cards.clear();
@@ -3124,6 +3435,39 @@ var CardStore = class {
       })();
     }, 1e3);
   }
+  async runStartupDateCleanup() {
+    const todayStart = new Date();
+    todayStart.setHours(0, 0, 0, 0);
+    const todayStartMs = todayStart.getTime();
+    const tomorrowCards = this.getAll().filter((c) => {
+      var _a, _b;
+      if (String(c.category || "").toLowerCase() !== "tomorrow")
+        return false;
+      const lastActivity = Math.max((_a = c.modified) != null ? _a : 0, (_b = c.created) != null ? _b : 0);
+      return lastActivity < todayStartMs;
+    });
+    for (const card of tomorrowCards) {
+      await this.setCategory(card.id, "today");
+    }
+    await this.cleanupStaleTodayCards(todayStartMs);
+  }
+  async cleanupStaleTodayCards(todayStartMs) {
+    if (todayStartMs === void 0) {
+      const todayStart = new Date();
+      todayStart.setHours(0, 0, 0, 0);
+      todayStartMs = todayStart.getTime();
+    }
+    const stale = this.getAll().filter((c) => {
+      var _a, _b;
+      if (String(c.category || "").toLowerCase() !== "today")
+        return false;
+      const lastActivity = Math.max((_a = c.modified) != null ? _a : 0, (_b = c.created) != null ? _b : 0);
+      return lastActivity < todayStartMs;
+    });
+    for (const card of stale) {
+      await this.setCategory(card.id, null);
+    }
+  }
   handleDateRollover() {
     if (this.dateRolloverTimeout) {
       window.clearTimeout(this.dateRolloverTimeout);
@@ -3134,10 +3478,7 @@ var CardStore = class {
     const delay = Math.max(1e3, next.getTime() - now.getTime());
     this.dateRolloverTimeout = window.setTimeout(() => {
       void (async () => {
-        const cards = this.getAll().filter((c) => String(c.category || "").toLowerCase() === "tomorrow");
-        for (const card of cards) {
-          await this.setCategory(card.id, "today");
-        }
+        await this.runStartupDateCleanup();
         this.handleDateRollover();
       })();
     }, delay);
@@ -4099,8 +4440,7 @@ var SideCardsHomeView = class extends import_obsidian9.ItemView {
       "`": ["`", "`"],
       "%": ["%", "%"],
       "=": ["=", "="],
-      '"': ['"', '"'],
-      "'": ["'", "'"]
+      '"': ['"', '"']
     };
     const pair = wrapMap[key];
     if (!pair)
@@ -4407,6 +4747,8 @@ var SideCardsHomeView = class extends import_obsidian9.ItemView {
     }
     for (const file of files) {
       const item = container.createDiv({ cls: "sc-home-file-item" });
+      if (type === "pinned")
+        item.dataset.path = file.path;
       const iconSpan = item.createSpan({ cls: "sc-home-file-icon" });
       await this.renderCustomFileIcon(iconSpan, file);
       item.createSpan({ text: file.basename, cls: "sc-home-file-name" });
@@ -4425,6 +4767,20 @@ var SideCardsHomeView = class extends import_obsidian9.ItemView {
           menu.showAtMouseEvent(e);
         });
       }
+    }
+    if (type === "pinned") {
+      attachPinnedListDragToReorder(
+        container,
+        () => {
+          var _a;
+          return (_a = this.plugin.settings.pinnedNotes) != null ? _a : [];
+        },
+        async (newPaths) => {
+          this.plugin.settings.pinnedNotes = newPaths;
+          await this.plugin.saveSettings();
+          await this.renderFileList(container, "pinned");
+        }
+      );
     }
   }
   async renderCustomFileIcon(iconEl, file) {
@@ -4682,7 +5038,7 @@ var SideCardsHomeView = class extends import_obsidian9.ItemView {
     });
     const searchIcon = searchWrap.createSpan({ cls: "sc-home-search-icon" });
     (0, import_obsidian9.setIcon)(searchIcon, "search");
-    const searchInput = searchWrap.createEl("input", { cls: "sc-home-search-input", placeholder: "Search card..." });
+    const searchInput = searchWrap.createEl("input", { cls: "sc-home-search-input", placeholder: "Search cards..." });
     searchInput.addEventListener("input", () => {
       this.currentSearchQuery = searchInput.value;
       void this.renderCards(cardList);
@@ -4701,15 +5057,21 @@ var SideCardsHomeView = class extends import_obsidian9.ItemView {
     moreBtn.addEventListener("click", (e) => {
       const menu = new import_obsidian9.Menu();
       menu.addItem((item) => {
-        item.setTitle("Show tags").setChecked(!this.plugin.settings.groupTags).onClick(async () => {
-          this.plugin.settings.groupTags = !this.plugin.settings.groupTags;
+        var _a;
+        item.setTitle("Show tags").setChecked((_a = this.plugin.settings.homeShowTags) != null ? _a : true).onClick(async () => {
+          var _a2;
+          const current = (_a2 = this.plugin.settings.homeShowTags) != null ? _a2 : true;
+          this.plugin.settings.homeShowTags = !current;
           await this.plugin.saveSettings();
           void this.renderCards(cardList);
         });
       });
       menu.addItem((item) => {
-        item.setTitle("Show timestamps").setChecked(this.plugin.settings.showTimestamps).onClick(async () => {
-          this.plugin.settings.showTimestamps = !this.plugin.settings.showTimestamps;
+        var _a;
+        item.setTitle("Show timestamps").setChecked((_a = this.plugin.settings.homeShowTimestamps) != null ? _a : this.plugin.settings.showTimestamps).onClick(async () => {
+          var _a2;
+          const current = (_a2 = this.plugin.settings.homeShowTimestamps) != null ? _a2 : this.plugin.settings.showTimestamps;
+          this.plugin.settings.homeShowTimestamps = !current;
           await this.plugin.saveSettings();
           void this.renderCards(cardList);
         });
@@ -4805,7 +5167,12 @@ var SideCardsHomeView = class extends import_obsidian9.ItemView {
       if (chunk.length === 0)
         return;
       chunk.forEach((card) => {
-        const comp = new CardComponent(container, card, this.store, this.app, this.plugin);
+        var _a2, _b, _c;
+        const comp = new CardComponent(container, card, this.store, this.app, this.plugin, {
+          groupTags: (_a2 = this.plugin.settings.homeGroupTags) != null ? _a2 : this.plugin.settings.groupTags,
+          showTimestamps: (_b = this.plugin.settings.homeShowTimestamps) != null ? _b : this.plugin.settings.showTimestamps,
+          showTags: (_c = this.plugin.settings.homeShowTags) != null ? _c : true
+        });
         this.cardComponents.set(card.id, comp);
       });
       if (startIdx + CHUNK_SIZE < cards.length) {
@@ -4825,22 +5192,42 @@ var SideCardsHomeView = class extends import_obsidian9.ItemView {
     );
   }
   getAvailableFilters() {
-    const filters = [{ type: "all", label: "All", value: "all" }];
-    if (!this.plugin.settings.hideTodayFilter) {
-      filters.push({ type: "category", label: "Today", value: "today" });
-    }
-    if (!this.plugin.settings.hideTomorrowFilter) {
-      filters.push({ type: "category", label: "Tomorrow", value: "tomorrow" });
-    }
-    if (this.plugin.settings.enableCustomCategories) {
-      const cats = Array.isArray(this.plugin.settings.customCategories) ? this.plugin.settings.customCategories : [];
-      cats.forEach((cat) => {
-        if (cat)
+    const settings = this.plugin.settings;
+    const cats = Array.isArray(settings.customCategories) ? settings.customCategories : [];
+    const defaultOrder = ["filter-all"].concat(!settings.hideTodayFilter ? ["filter-today"] : []).concat(!settings.hideTomorrowFilter ? ["filter-tomorrow"] : []).concat(!settings.hideArchivedFilterButton ? ["filter-archived"] : []).concat(cats.map((c) => String(c.id || "")));
+    const combinedOrder = Array.isArray(settings.allItemsOrder) && settings.allItemsOrder.length > 0 ? settings.allItemsOrder : defaultOrder;
+    const filters = [];
+    combinedOrder.forEach((itemId) => {
+      if (!itemId)
+        return;
+      if (itemId === "filter-all") {
+        filters.push({ type: "all", label: "All", value: "all" });
+        return;
+      }
+      if (itemId === "filter-today") {
+        if (!settings.hideTodayFilter)
+          filters.push({ type: "category", label: "Today", value: "today" });
+        return;
+      }
+      if (itemId === "filter-tomorrow") {
+        if (!settings.hideTomorrowFilter)
+          filters.push({ type: "category", label: "Tomorrow", value: "tomorrow" });
+        return;
+      }
+      if (itemId === "filter-archived") {
+        if (!settings.hideArchivedFilterButton)
+          filters.push({ type: "archived", label: "Archived", value: "archived" });
+        return;
+      }
+      if (settings.enableCustomCategories) {
+        const cat = cats.find((c) => String(c.id) === String(itemId));
+        if (cat && cat.showInMenu !== false) {
           filters.push({ type: "category", label: cat.label || "", value: cat.id || cat.label || "" });
-      });
-    }
-    if (!this.plugin.settings.hideArchivedFilterButton) {
-      filters.push({ type: "archived", label: "Archived", value: "archived" });
+        }
+      }
+    });
+    if (!filters.find((f) => f.value === "all")) {
+      filters.unshift({ type: "all", label: "All", value: "all" });
     }
     return filters;
   }
@@ -5048,6 +5435,17 @@ var SideCardsPlugin = class extends import_obsidian10.Plugin {
     this.addRibbonIcon("rectangle-horizontal", "Add card to sidecards", () => new QuickCardWithFilterModal(this.app, this, this.store).open());
     this.addSettingTab(new SideCardsSettingTab(this.app, this));
     this.registerEvent(
+      this.app.vault.on("rename", (file, oldPath) => {
+        if (!(file instanceof import_obsidian10.TFile))
+          return;
+        const card = this.store.getAll().find((c) => c.notePath === oldPath);
+        if (!card)
+          return;
+        card.notePath = file.path;
+        void this.store.saveCards();
+      })
+    );
+    this.registerEvent(
       this.app.workspace.on("file-menu", (menu, file) => {
         if (file instanceof import_obsidian10.TFile) {
           menu.addItem((item) => {
@@ -5094,6 +5492,76 @@ var SideCardsPlugin = class extends import_obsidian10.Plugin {
     );
     this.injectStatusColors();
     this.applyButtonPadding();
+    this.registerDomEvent(document, "dragover", (ev) => {
+      if (!ev.dataTransfer)
+        return;
+      const types = Array.from(ev.dataTransfer.types || []);
+      if (!types.includes("text/x-card-sidebar"))
+        return;
+      ev.preventDefault();
+      ev.dataTransfer.dropEffect = "copy";
+    });
+    let lastDropTime = 0;
+    const cardDropHandler = (ev) => {
+      var _a2;
+      if (!ev.dataTransfer)
+        return;
+      const types = Array.from(ev.dataTransfer.types || []);
+      if (!types.includes("text/x-card-sidebar"))
+        return;
+      const now = Date.now();
+      if (now - lastDropTime < 200) {
+        ev.preventDefault();
+        ev.stopImmediatePropagation();
+        return;
+      }
+      lastDropTime = now;
+      ev.preventDefault();
+      ev.stopImmediatePropagation();
+      let content = null;
+      try {
+        const json = ev.dataTransfer.getData("text/x-card-sidebar");
+        const payload = JSON.parse(json);
+        content = (_a2 = payload.content) != null ? _a2 : null;
+      } catch (e) {
+      }
+      if (!content)
+        return;
+      let mdView = null;
+      const target = ev.target;
+      if (target) {
+        this.app.workspace.iterateAllLeaves((leaf) => {
+          var _a3, _b;
+          if (mdView)
+            return;
+          const view = leaf.view;
+          if (!(view instanceof import_obsidian10.MarkdownView))
+            return;
+          const editorEl = (_b = (_a3 = view.editor) == null ? void 0 : _a3.containerEl) != null ? _b : view.contentEl;
+          if (editorEl && editorEl.contains(target))
+            mdView = view;
+        });
+      }
+      if (!mdView)
+        mdView = this.app.workspace.getActiveViewOfType(import_obsidian10.MarkdownView);
+      if (!(mdView == null ? void 0 : mdView.editor))
+        return;
+      const cm = mdView.editor.cm;
+      if (cm == null ? void 0 : cm.posAtCoords) {
+        const pos = cm.posAtCoords({ x: ev.clientX, y: ev.clientY }, false);
+        if (pos != null)
+          cm.dispatch({ selection: { anchor: pos } });
+      }
+      mdView.editor.replaceSelection(content);
+      mdView.editor.focus();
+    };
+    document.addEventListener(
+      "drop",
+      cardDropHandler,
+      true
+      /* capture */
+    );
+    this._cardDropCleanup = () => document.removeEventListener("drop", cardDropHandler, true);
     this.app.workspace.onLayoutReady(() => {
       if (!this.settings.storageFolder) {
         this.showStorageFolderSetupModal();
@@ -5109,6 +5577,8 @@ var SideCardsPlugin = class extends import_obsidian10.Plugin {
     const el = document.getElementById("sc-status-colors");
     if (el)
       el.remove();
+    if (this._cardDropCleanup)
+      this._cardDropCleanup();
   }
   applyButtonPadding() {
     var _a;
@@ -5474,7 +5944,7 @@ var SideCardsSettingTab = class extends import_obsidian10.PluginSettingTab {
       this.plugin.settings.nextLineKey = value;
       await this.plugin.saveSettings();
     }));
-    new import_obsidian10.Setting(containerEl).setName("Auto-pair brackets, quotes and code").setDesc("Automatically wrap selected text or place cursor between pairs when typing (, [, {, `, =, %, \", or '").addToggle((toggle) => toggle.setValue(this.plugin.settings.autoPairBrackets !== false).onChange(async (value) => {
+    new import_obsidian10.Setting(containerEl).setName("Auto-pair brackets, quotes and code").setDesc('Automatically wrap selected text or place cursor between pairs when typing (, [, {, `, =, %, or "').addToggle((toggle) => toggle.setValue(this.plugin.settings.autoPairBrackets !== false).onChange(async (value) => {
       this.plugin.settings.autoPairBrackets = value;
       await this.plugin.saveSettings();
     }));

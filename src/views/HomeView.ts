@@ -7,7 +7,7 @@ import { SortService, SortMode } from "../services/SortService";
 import { resolveAutoColor } from "../utils/dom";
 import { animateCardsEntrance } from "../utils/animations";
 import { InlineAutocomplete } from "./components/InlineAutocomplete";
-import { attachDragToReorder } from "../utils/drag-drop";
+import { attachDragToReorder, attachPinnedListDragToReorder } from "../utils/drag-drop";
 
 export class SideCardsHomeView extends ItemView {
   private selectedColor = 'var(--card-color-1)';
@@ -146,7 +146,6 @@ export class SideCardsHomeView extends ItemView {
       "%": ["%", "%"],
       "=": ["=", "="],
       '"': ['"', '"'],
-      "'": ["'", "'"],
     };
 
     const pair = wrapMap[key];
@@ -492,6 +491,7 @@ export class SideCardsHomeView extends ItemView {
 
     for (const file of files) {
       const item = container.createDiv({ cls: 'sc-home-file-item' });
+      if (type === 'pinned') item.dataset.path = file.path;
       const iconSpan = item.createSpan({ cls: 'sc-home-file-icon' });
       await this.renderCustomFileIcon(iconSpan, file);
       item.createSpan({ text: file.basename, cls: 'sc-home-file-name' });
@@ -512,6 +512,18 @@ export class SideCardsHomeView extends ItemView {
           menu.showAtMouseEvent(e);
         });
       }
+    }
+
+    if (type === 'pinned') {
+      attachPinnedListDragToReorder(
+        container,
+        () => this.plugin.settings.pinnedNotes ?? [],
+        async (newPaths) => {
+          this.plugin.settings.pinnedNotes = newPaths;
+          await this.plugin.saveSettings();
+          await this.renderFileList(container, 'pinned');
+        }
+      );
     }
   }
 
@@ -791,7 +803,7 @@ export class SideCardsHomeView extends ItemView {
     // Search Bar
     const searchIcon = searchWrap.createSpan({ cls: 'sc-home-search-icon' });
     setIcon(searchIcon, 'search');
-    const searchInput = searchWrap.createEl('input', { cls: 'sc-home-search-input', placeholder: 'Search card...' });
+    const searchInput = searchWrap.createEl('input', { cls: 'sc-home-search-input', placeholder: 'Search cards...' });
     searchInput.addEventListener('input', () => {
       this.currentSearchQuery = searchInput.value;
       void this.renderCards(cardList);
@@ -814,18 +826,20 @@ export class SideCardsHomeView extends ItemView {
       const menu = new Menu();
       menu.addItem(item => {
         item.setTitle('Show tags')
-            .setChecked(!this.plugin.settings.groupTags)
+            .setChecked(this.plugin.settings.homeShowTags ?? true)
             .onClick(async () => {
-              this.plugin.settings.groupTags = !this.plugin.settings.groupTags;
+              const current = this.plugin.settings.homeShowTags ?? true;
+              this.plugin.settings.homeShowTags = !current;
               await this.plugin.saveSettings();
               void this.renderCards(cardList);
             });
       });
       menu.addItem(item => {
         item.setTitle('Show timestamps')
-            .setChecked(this.plugin.settings.showTimestamps)
+            .setChecked(this.plugin.settings.homeShowTimestamps ?? this.plugin.settings.showTimestamps)
             .onClick(async () => {
-              this.plugin.settings.showTimestamps = !this.plugin.settings.showTimestamps;
+              const current = this.plugin.settings.homeShowTimestamps ?? this.plugin.settings.showTimestamps;
+              this.plugin.settings.homeShowTimestamps = !current;
               await this.plugin.saveSettings();
               void this.renderCards(cardList);
             });
@@ -934,7 +948,11 @@ export class SideCardsHomeView extends ItemView {
       const chunk = cards.slice(startIdx, startIdx + CHUNK_SIZE);
       if (chunk.length === 0) return;
       chunk.forEach(card => {
-        const comp = new CardComponent(container, card, this.store, this.app, this.plugin);
+        const comp = new CardComponent(container, card, this.store, this.app, this.plugin, {
+          groupTags: this.plugin.settings.homeGroupTags ?? this.plugin.settings.groupTags,
+          showTimestamps: this.plugin.settings.homeShowTimestamps ?? this.plugin.settings.showTimestamps,
+          showTags: this.plugin.settings.homeShowTags ?? true,
+        });
         this.cardComponents.set(card.id, comp);
       });
       if (startIdx + CHUNK_SIZE < cards.length) {
@@ -959,22 +977,53 @@ export class SideCardsHomeView extends ItemView {
   }
 
   private getAvailableFilters(): Array<{ type: string; label: string; value: string }> {
-    const filters = [{ type: 'all', label: 'All', value: 'all' }];
-    if (!this.plugin.settings.hideTodayFilter) {
-      filters.push({ type: 'category', label: 'Today', value: 'today' });
+    const settings = this.plugin.settings;
+    const cats = Array.isArray(settings.customCategories) ? settings.customCategories : [];
+
+    // Build default order matching the sidebar
+    const defaultOrder = ['filter-all']
+      .concat(!settings.hideTodayFilter ? ['filter-today'] : [])
+      .concat(!settings.hideTomorrowFilter ? ['filter-tomorrow'] : [])
+      .concat(!settings.hideArchivedFilterButton ? ['filter-archived'] : [])
+      .concat(cats.map(c => String(c.id || '')));
+
+    const combinedOrder = Array.isArray(settings.allItemsOrder) && settings.allItemsOrder.length > 0
+      ? settings.allItemsOrder
+      : defaultOrder;
+
+    const filters: Array<{ type: string; label: string; value: string }> = [];
+
+    combinedOrder.forEach(itemId => {
+      if (!itemId) return;
+      if (itemId === 'filter-all') {
+        filters.push({ type: 'all', label: 'All', value: 'all' });
+        return;
+      }
+      if (itemId === 'filter-today') {
+        if (!settings.hideTodayFilter) filters.push({ type: 'category', label: 'Today', value: 'today' });
+        return;
+      }
+      if (itemId === 'filter-tomorrow') {
+        if (!settings.hideTomorrowFilter) filters.push({ type: 'category', label: 'Tomorrow', value: 'tomorrow' });
+        return;
+      }
+      if (itemId === 'filter-archived') {
+        if (!settings.hideArchivedFilterButton) filters.push({ type: 'archived', label: 'Archived', value: 'archived' });
+        return;
+      }
+      if (settings.enableCustomCategories) {
+        const cat = cats.find(c => String(c.id) === String(itemId));
+        if (cat && cat.showInMenu !== false) {
+          filters.push({ type: 'category', label: cat.label || '', value: cat.id || cat.label || '' });
+        }
+      }
+    });
+
+    // Ensure 'All' is always present
+    if (!filters.find(f => f.value === 'all')) {
+      filters.unshift({ type: 'all', label: 'All', value: 'all' });
     }
-    if (!this.plugin.settings.hideTomorrowFilter) {
-      filters.push({ type: 'category', label: 'Tomorrow', value: 'tomorrow' });
-    }
-    if (this.plugin.settings.enableCustomCategories) {
-      const cats = Array.isArray(this.plugin.settings.customCategories) ? this.plugin.settings.customCategories : [];
-      cats.forEach(cat => {
-        if (cat) filters.push({ type: 'category', label: cat.label || '', value: cat.id || cat.label || '' });
-      });
-    }
-    if (!this.plugin.settings.hideArchivedFilterButton) {
-      filters.push({ type: 'archived', label: 'Archived', value: 'archived' });
-    }
+
     return filters;
   }
 

@@ -35,7 +35,8 @@ export class CardComponent {
     card: Card,
     private store: CardStore,
     private app: App,
-    private plugin: Plugin
+    private plugin: Plugin,
+    private settingsOverride?: { groupTags?: boolean; showTimestamps?: boolean; showTags?: boolean }
   ) {
     CardComponent.instanceCount += 1;
     this.card = card;
@@ -215,9 +216,75 @@ export class CardComponent {
   private async render(): Promise<void> {
     const currentRender = ++this.renderCount;
     this.stopExpiryTick();
+
+    // When entering edit mode, swap only the content div in-place
+    // to avoid a full re-render race that removes the contenteditable element
+    if (this.isEditing) {
+      const existingContent = this.el.querySelector('.sc-content') as HTMLElement | null;
+      if (existingContent) {
+        existingContent.setAttribute('contenteditable', 'true');
+        existingContent.textContent = this.card.content;
+        existingContent.addClass('is-editing');
+        setTimeout(() => {
+          existingContent.focus();
+          const range = document.createRange();
+          const sel = window.getSelection();
+          range.selectNodeContents(existingContent);
+          range.collapse(false);
+          sel?.removeAllRanges();
+          sel?.addRange(range);
+        }, 0);
+        existingContent.addEventListener('focusin', () => {
+          // @ts-ignore
+          this.app.keymap.pushScope(this.scope);
+          // @ts-ignore
+          this.app.workspace.activeEditor = this.owner;
+        });
+        existingContent.addEventListener('blur', () => {
+          // @ts-ignore
+          this.app.keymap.popScope(this.scope);
+          // @ts-ignore
+          if (this.app.workspace.activeEditor === this.owner) {
+            // @ts-ignore
+            this.app.workspace.activeEditor = null;
+          }
+          if (this.isEditing) {
+            void (async () => {
+              const newContent = existingContent.textContent || '';
+              if (newContent !== this.card.content) {
+                await this.store.update(this.card.id, { content: newContent });
+              }
+              this.isEditing = false;
+              if (CardComponent.activeEditor === this) {
+                CardComponent.activeEditor = null;
+              }
+              void this.render();
+            })();
+          }
+        });
+        existingContent.addEventListener('keydown', (e) => {
+          if (handleKeyWrap(e, existingContent, this.editor, (this.plugin as any).settings?.autoPairBrackets !== false)) {
+            e.preventDefault(); e.stopPropagation(); return;
+          }
+          if (this.applyFormattingHotkey(e, existingContent)) return;
+          const settings = this.store.settings;
+          const normalizeKey = (v: string) => String(v || '').toLowerCase().replace(/[\s+_]+/g, '-').replace(/[^a-z0-9-]/g, '').replace(/-+/g, '-').replace(/^-|-$/g, '');
+          const saveKey = normalizeKey(settings.saveKey || 'enter');
+          let pressed = '';
+          if (e.ctrlKey) pressed += 'ctrl-';
+          if (e.shiftKey) pressed += 'shift-';
+          if (e.altKey) pressed += 'alt-';
+          if (e.key && e.key.toLowerCase() === 'enter') pressed += 'enter';
+          if (pressed === saveKey) { e.preventDefault(); existingContent.blur(); }
+        });
+        return;
+      }
+      // No existing content div — fall through to full render
+    }
+
     this.el.empty();
     this.el.dataset.id = this.card.id;
-    this.el.draggable = false;
+    this.el.draggable = true;
     
     // Apply styling
     const statusDef = this.card.status
@@ -304,6 +371,7 @@ export class CardComponent {
     if (this.card.expiresAt && this.store.settings.showExpiryTimeLeft) {
       const pill = container.createDiv('sc-expiry-pill');
       pill.textContent = this.formatExpiryTimeLeft(this.card.expiresAt);
+      if (this.card.status) pill.style.marginBottom = '4px';
     }
     if (this.card.status) {
       const pill = container.createDiv('sc-status-pill');
@@ -523,10 +591,14 @@ export class CardComponent {
 
   private renderFooter(container: HTMLElement): void {
     const settings = this.store.settings;
-    const hasTags = this.card.tags && this.card.tags.length > 0;
+    const groupTags = this.settingsOverride?.groupTags ?? settings.groupTags;
+    const showTimestamps = this.settingsOverride?.showTimestamps ?? settings.showTimestamps;
+    // showTags override: if explicitly set use it, otherwise tags are always shown
+    const showTags = this.settingsOverride?.showTags ?? true;
+    const hasTags = showTags && this.card.tags && this.card.tags.length > 0;
 
-    if (settings.groupTags) {
-      if (settings.showTimestamps && settings.timestampBelowTags) {
+    if (groupTags) {
+      if (showTimestamps && settings.timestampBelowTags) {
         // "above tags" mode — render timestamp first
         const ts = container.createDiv('sc-timestamp sc-timestamp--block');
         ts.textContent = this.formatTimestamp(this.card.created);
@@ -546,20 +618,29 @@ export class CardComponent {
         });
       }
 
-      if (settings.showTimestamps && !settings.timestampBelowTags) {
+      if (showTimestamps && !settings.timestampBelowTags) {
         // default: inline after tags
         const ts = container.createDiv(`sc-timestamp ${hasTags ? 'sc-timestamp--inline-spaced' : 'sc-timestamp--inline'}`);
         ts.textContent = this.formatTimestamp(this.card.created);
       }
     } else {
       // Tags already rendered above footer in render()
-      if (settings.showTimestamps) {
+      if (showTimestamps) {
         container.createDiv('sc-timestamp').textContent = this.formatTimestamp(this.card.created);
       }
     }
   }
 
   private setupListeners(): void {
+    // Drag card content into an editor
+    this.el.addEventListener('dragstart', (e: DragEvent) => {
+      if (!e.dataTransfer) return;
+      e.dataTransfer.effectAllowed = 'copyMove';
+      const payload = JSON.stringify({ id: this.card.id, content: this.card.content });
+      e.dataTransfer.setData('text/x-card-sidebar', payload);
+      try { e.dataTransfer.setData('text/plain', this.card.content); } catch { /* some browsers restrict */ }
+    });
+
     // Enter edit mode on click
     this.el.addEventListener('click', (e) => {
       if (this.ignoreNextClick) {
@@ -758,7 +839,11 @@ export class CardComponent {
     const unbind = this.store.eventBus.on('card:updated', (updated: Card) => {
       if (updated.id === this.card.id) {
         this.card = updated;
-        void this.render();
+        // Don't re-render while the user is actively editing — it would
+        // race with the in-flight render and remove the contenteditable div
+        if (!this.isEditing) {
+          void this.render();
+        }
       }
     });
     this.unsubscribe.push(unbind);
