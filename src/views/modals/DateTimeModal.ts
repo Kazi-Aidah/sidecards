@@ -56,32 +56,19 @@ export class DateTimeModal extends Modal {
     // Quick presets
     const presetsRow = relPanel.createDiv('sc-dt-presets');
     const presets: Array<{ label: string; minutes: number }> = [
+      { label: '5 min', minutes: 5 },
       { label: '30 min', minutes: 30 },
       { label: '1 hour', minutes: 60 },
-      { label: '3 hours', minutes: 180 },
-      { label: 'Tomorrow 18:00', minutes: -1 },
     ];
     presets.forEach(p => {
       const btn = presetsRow.createEl('button', { text: p.label, cls: 'sc-dt-preset-btn' });
       btn.addEventListener('click', () => {
-        if (p.minutes === -1) {
-          // Switch to exact mode and set tomorrow 18:00
-          exactRadio.checked = true;
-          this.mode = 'exact';
-          relPanel.style.display = 'none';
-          exactPanel.style.display = '';
-          const d = new Date(Date.now() + 24 * 3600 * 1000);
-          d.setHours(18, 0, 0, 0);
-          exactInput.value = this.toInputValue(d);
+        this.slots = [];
+        this.slotsContainer.empty();
+        if (p.minutes < 60) {
+          this.addSlot(p.minutes, 'minutes');
         } else {
-          // Fill slots with the preset
-          this.slots = [];
-          this.slotsContainer.empty();
-          if (p.minutes < 60) {
-            this.addSlot(p.minutes, 'minutes');
-          } else {
-            this.addSlot(p.minutes / 60, 'hours');
-          }
+          this.addSlot(p.minutes / 60, 'hours');
         }
       });
     });
@@ -97,16 +84,10 @@ export class DateTimeModal extends Modal {
     }
 
     const quickRow = exactPanel.createDiv('sc-dt-quick-row');
-    const todayBtn = quickRow.createEl('button', { text: 'Today 23:59', cls: 'sc-dt-quick-btn' });
-    const tomorrowBtn = quickRow.createEl('button', { text: 'Tomorrow 18:00', cls: 'sc-dt-quick-btn' });
-    todayBtn.addEventListener('click', () => {
+    const todayMidnightBtn = quickRow.createEl('button', { text: 'Today midnight', cls: 'sc-dt-quick-btn' });
+    todayMidnightBtn.addEventListener('click', () => {
       const d = new Date();
       d.setHours(23, 59, 0, 0);
-      exactInput.value = this.toInputValue(d);
-    });
-    tomorrowBtn.addEventListener('click', () => {
-      const d = new Date(Date.now() + 24 * 3600 * 1000);
-      d.setHours(18, 0, 0, 0);
       exactInput.value = this.toInputValue(d);
     });
 

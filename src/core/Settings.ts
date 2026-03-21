@@ -95,7 +95,7 @@ export const DEFAULT_SETTINGS: SideCardsSettings = {
   borderThickness: 2,
   disableFilterButtons: false,
   disableTimeBasedFiltering: false,
-  enableCustomCategories: false,
+  enableCustomCategories: true,
   customCategories: [],
   hideArchivedFilterButton: false,
   animatedCards: true,

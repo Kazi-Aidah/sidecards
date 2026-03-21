@@ -99,14 +99,30 @@ export class CardStore {
   }
 
   async delete(id: string): Promise<void> {
+    const card = this.cards.get(id);
     this.cards.delete(id);
     this.eventBus.emit('card:deleted', id);
     await this.persist();
+    // Also delete the associated note file so it doesn't get re-imported
+    if (card?.notePath) {
+      const file = this.app.vault.getAbstractFileByPath(card.notePath);
+      if (file instanceof TFile) {
+        this._syncingPaths.add(card.notePath);
+        try {
+          await this.app.fileManager.trashFile(file);
+        } catch { /* file may already be gone */ } finally {
+          setTimeout(() => this._syncingPaths.delete(card.notePath!), 500);
+        }
+      }
+    }
   }
 
   async toggleArchive(id: string, archived: boolean): Promise<void> {
-    const card = await this.update(id, { archived });
-    await this.syncCardToFrontmatter(card, { archived });
+    // When unarchiving, also clear expiresAt so an expired card can stay unarchived
+    const updates: Partial<Card> = { archived };
+    if (!archived) updates.expiresAt = null;
+    const card = await this.update(id, updates);
+    await this.syncCardToFrontmatter(card, updates);
   }
 
   async togglePin(id: string, pinned: boolean): Promise<void> {
@@ -400,7 +416,9 @@ export class CardStore {
           if (!card.expiresAt || card.archived) continue;
           if (card.expiresAt <= now) {
             if (this.settings.autoArchiveOnExpiry) {
-              await this.toggleArchive(card.id, true);
+              // Archive and clear expiresAt so it doesn't re-trigger
+              const updated = await this.update(card.id, { archived: true, expiresAt: null });
+              await this.syncCardToFrontmatter(updated, { archived: true, expiresAt: null });
             } else {
               await this.delete(card.id);
             }

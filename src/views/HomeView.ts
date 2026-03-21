@@ -506,13 +506,13 @@ export class SideCardsHomeView extends ItemView {
   private async renderCustomFileIcon(iconEl: HTMLElement, file: TFile): Promise<void> {
     const iconInfo = await this.getIconicFileIcon(file);
     if (!iconInfo) {
-      setIcon(iconEl, 'file-text');
+      try { setIcon(iconEl, 'file-text'); } catch { setIcon(iconEl, 'file'); }
       return;
     }
 
     const iconValue = String(iconInfo.icon || '').trim();
     if (!iconValue) {
-      setIcon(iconEl, 'file-text');
+      try { setIcon(iconEl, 'file-text'); } catch { setIcon(iconEl, 'file'); }
       return;
     }
 
@@ -537,12 +537,17 @@ export class SideCardsHomeView extends ItemView {
     }
 
     if (!rendered) {
-      iconEl.setText(iconValue);
-      rendered = true;
+      // Last resort: try as-is, then fall back to default file icon
+      try {
+        setIcon(iconEl, iconValue);
+        rendered = true;
+      } catch {
+        try { setIcon(iconEl, 'file-text'); } catch { setIcon(iconEl, 'file'); }
+        rendered = true;
+      }
     }
 
     if (iconInfo.color) {
-      // Map Iconic color names to Obsidian CSS variables
       const colorNameToVar: Record<string, string> = {
         red: 'var(--color-red)',
         orange: 'var(--color-orange)',
@@ -610,6 +615,29 @@ export class SideCardsHomeView extends ItemView {
     if (!iconicPlugin) return null;
 
     const path = file.path;
+
+    // Try checkRuling first — this resolves rulebook icons
+    try {
+      const ruled = iconicPlugin.ruleManager?.checkRuling?.('file', path);
+      if (ruled) {
+        const iconValue = ruled.icon ?? ruled.iconDefault;
+        if (iconValue) {
+          return { icon: String(iconValue), color: ruled.color ?? undefined };
+        }
+      }
+    } catch { /* ruleManager may not exist */ }
+
+    // Try the public getFileItem API
+    try {
+      const item = iconicPlugin.getFileItem?.(path);
+      if (item) {
+        // Check icon first, then iconDefault (set by iconic for files with no custom icon)
+        const iconValue = item.icon ?? item.iconDefault;
+        if (iconValue) {
+          return { icon: String(iconValue), color: item.color ?? undefined };
+        }
+      }
+    } catch { /* API may not exist */ }
 
     const immediateEntry = this.resolveIconicIconEntry(
       iconicPlugin.settings?.fileIcons?.[path]
@@ -819,7 +847,10 @@ export class SideCardsHomeView extends ItemView {
 
       const customColors = this.plugin.settings.filterColors?.[colorKey];
       if (customColors?.bgColor) btn.style.setProperty('background-color', customColors.bgColor, 'important');
-      if (customColors?.textColor) btn.style.setProperty('color', customColors.textColor, 'important');
+      if (customColors?.textColor) {
+        btn.style.setProperty('color', customColors.textColor, 'important');
+        btn.style.setProperty('--sc-btn-text-color', customColors.textColor);
+      }
 
       btn.addEventListener('click', () => {
         container.querySelectorAll('.sc-category-btn').forEach(b => {
@@ -828,8 +859,13 @@ export class SideCardsHomeView extends ItemView {
           const bColors = this.plugin.settings.filterColors?.[bColorKey];
           if (bColors?.bgColor) (b as HTMLElement).style.setProperty('background-color', bColors.bgColor, 'important');
           else (b as HTMLElement).style.removeProperty('background-color');
-          if (bColors?.textColor) (b as HTMLElement).style.setProperty('color', bColors.textColor, 'important');
-          else (b as HTMLElement).style.removeProperty('color');
+          if (bColors?.textColor) {
+            (b as HTMLElement).style.setProperty('color', bColors.textColor, 'important');
+            (b as HTMLElement).style.setProperty('--sc-btn-text-color', bColors.textColor);
+          } else {
+            (b as HTMLElement).style.removeProperty('color');
+            (b as HTMLElement).style.removeProperty('--sc-btn-text-color');
+          }
         });
         btn.addClass('active');
         this.filterType = f.type;

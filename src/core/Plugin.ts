@@ -1040,12 +1040,12 @@ class SideCardsSettingTab extends PluginSettingTab {
     });
     // ── Categories ────────────────────────────────────────────────────────────
     new Setting(containerEl).setName('Categories').setDesc('Configure category display and reordering.').setHeading();
-    new Setting(containerEl).setName('Enable custom categories').setDesc('Allow custom categories in the right-click menu.').addToggle(toggle => toggle.setValue(!!this.plugin.settings.enableCustomCategories).onChange(async (value) => {
-      this.plugin.settings.enableCustomCategories = value;
-      await this.plugin.saveSettings();
-      this.display();
-      refreshSidebarHeader();
-    }));
+    // new Setting(containerEl).setName('Enable custom categories').setDesc('Allow custom categories in the right-click menu.').addToggle(toggle => toggle.setValue(!!this.plugin.settings.enableCustomCategories).onChange(async (value) => {
+    //   this.plugin.settings.enableCustomCategories = value;
+    //   await this.plugin.saveSettings();
+    //   this.display();
+    //   refreshSidebarHeader();
+    // }));
 
     const catsContainer = containerEl.createDiv({ cls: 'categories-list sc-cats-container' });
 

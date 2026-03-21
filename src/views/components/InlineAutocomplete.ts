@@ -107,6 +107,8 @@ export class InlineAutocomplete {
       if (item.prefix === '@' && item.icon) {
         const iconEl = row.createSpan('sc-inline-ac-icon');
         try { setIcon(iconEl, item.icon); } catch { iconEl.textContent = '@'; }
+      } else if (item.prefix === '@') {
+        row.createSpan({ cls: 'sc-inline-ac-badge', text: '@' });
       } else {
         row.createSpan({ cls: 'sc-inline-ac-badge', text: '#' });
       }

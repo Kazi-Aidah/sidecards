@@ -428,7 +428,10 @@ export class CardSidebarView extends ItemView {
 
       const customColors = settings.filterColors?.[colorKey];
       if (customColors?.bgColor) btn.style.setProperty('background-color', customColors.bgColor, 'important');
-      if (customColors?.textColor) btn.style.setProperty('color', customColors.textColor, 'important');
+      if (customColors?.textColor) {
+        btn.style.setProperty('color', customColors.textColor, 'important');
+        btn.style.setProperty('--sc-btn-text-color', customColors.textColor);
+      }
 
       btn.addEventListener('click', () => {
         void (async () => {
@@ -438,8 +441,13 @@ export class CardSidebarView extends ItemView {
           const bColors = settings.filterColors?.[bVal];
           if (bColors?.bgColor) (b as HTMLElement).style.setProperty('background-color', bColors.bgColor, 'important');
           else (b as HTMLElement).style.removeProperty('background-color');
-          if (bColors?.textColor) (b as HTMLElement).style.setProperty('color', bColors.textColor, 'important');
-          else (b as HTMLElement).style.removeProperty('color');
+          if (bColors?.textColor) {
+            (b as HTMLElement).style.setProperty('color', bColors.textColor, 'important');
+            (b as HTMLElement).style.setProperty('--sc-btn-text-color', bColors.textColor);
+          } else {
+            (b as HTMLElement).style.removeProperty('color');
+            (b as HTMLElement).style.removeProperty('--sc-btn-text-color');
+          }
         });
         btn.addClass('active');
         if (chip.type === 'archived') {

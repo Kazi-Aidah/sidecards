@@ -240,30 +240,19 @@ var DateTimeModal = class extends import_obsidian.Modal {
     addSlotBtn.addEventListener("click", () => this.addSlot());
     const presetsRow = relPanel.createDiv("sc-dt-presets");
     const presets = [
+      { label: "5 min", minutes: 5 },
       { label: "30 min", minutes: 30 },
-      { label: "1 hour", minutes: 60 },
-      { label: "3 hours", minutes: 180 },
-      { label: "Tomorrow 18:00", minutes: -1 }
+      { label: "1 hour", minutes: 60 }
     ];
     presets.forEach((p) => {
       const btn = presetsRow.createEl("button", { text: p.label, cls: "sc-dt-preset-btn" });
       btn.addEventListener("click", () => {
-        if (p.minutes === -1) {
-          exactRadio.checked = true;
-          this.mode = "exact";
-          relPanel.style.display = "none";
-          exactPanel.style.display = "";
-          const d = new Date(Date.now() + 24 * 3600 * 1e3);
-          d.setHours(18, 0, 0, 0);
-          exactInput.value = this.toInputValue(d);
+        this.slots = [];
+        this.slotsContainer.empty();
+        if (p.minutes < 60) {
+          this.addSlot(p.minutes, "minutes");
         } else {
-          this.slots = [];
-          this.slotsContainer.empty();
-          if (p.minutes < 60) {
-            this.addSlot(p.minutes, "minutes");
-          } else {
-            this.addSlot(p.minutes / 60, "hours");
-          }
+          this.addSlot(p.minutes / 60, "hours");
         }
       });
     });
@@ -275,16 +264,10 @@ var DateTimeModal = class extends import_obsidian.Modal {
       exactInput.value = this.toInputValue(d);
     }
     const quickRow = exactPanel.createDiv("sc-dt-quick-row");
-    const todayBtn = quickRow.createEl("button", { text: "Today 23:59", cls: "sc-dt-quick-btn" });
-    const tomorrowBtn = quickRow.createEl("button", { text: "Tomorrow 18:00", cls: "sc-dt-quick-btn" });
-    todayBtn.addEventListener("click", () => {
+    const todayMidnightBtn = quickRow.createEl("button", { text: "Today midnight", cls: "sc-dt-quick-btn" });
+    todayMidnightBtn.addEventListener("click", () => {
       const d = new Date();
       d.setHours(23, 59, 0, 0);
-      exactInput.value = this.toInputValue(d);
-    });
-    tomorrowBtn.addEventListener("click", () => {
-      const d = new Date(Date.now() + 24 * 3600 * 1e3);
-      d.setHours(18, 0, 0, 0);
       exactInput.value = this.toInputValue(d);
     });
     relRadio.addEventListener("change", () => {
@@ -724,7 +707,7 @@ var _CardComponent = class {
     });
   }
   renderPills(container) {
-    if (this.card.expiresAt) {
+    if (this.card.expiresAt && this.store.settings.showExpiryTimeLeft) {
       const pill = container.createDiv("sc-expiry-pill");
       pill.textContent = this.formatExpiryTimeLeft(this.card.expiresAt);
     }
@@ -1229,7 +1212,7 @@ var _CardComponent = class {
   }
   startExpiryTick() {
     this.stopExpiryTick();
-    if (!this.card.expiresAt)
+    if (!this.card.expiresAt || !this.store.settings.showExpiryTimeLeft)
       return;
     this.expiryTickInterval = window.setInterval(() => {
       const pill = this.el.querySelector(".sc-expiry-pill");
@@ -1477,6 +1460,8 @@ var InlineAutocomplete = class {
         } catch (e) {
           iconEl.textContent = "@";
         }
+      } else if (item.prefix === "@") {
+        row.createSpan({ cls: "sc-inline-ac-badge", text: "@" });
       } else {
         row.createSpan({ cls: "sc-inline-ac-badge", text: "#" });
       }
@@ -1986,8 +1971,10 @@ var CardSidebarView = class extends import_obsidian4.ItemView {
       const customColors = (_a = settings.filterColors) == null ? void 0 : _a[colorKey];
       if (customColors == null ? void 0 : customColors.bgColor)
         btn.style.setProperty("background-color", customColors.bgColor, "important");
-      if (customColors == null ? void 0 : customColors.textColor)
+      if (customColors == null ? void 0 : customColors.textColor) {
         btn.style.setProperty("color", customColors.textColor, "important");
+        btn.style.setProperty("--sc-btn-text-color", customColors.textColor);
+      }
       btn.addEventListener("click", () => {
         void (async () => {
           filterGroup.querySelectorAll(".sc-category-btn").forEach((b) => {
@@ -1999,10 +1986,13 @@ var CardSidebarView = class extends import_obsidian4.ItemView {
               b.style.setProperty("background-color", bColors.bgColor, "important");
             else
               b.style.removeProperty("background-color");
-            if (bColors == null ? void 0 : bColors.textColor)
+            if (bColors == null ? void 0 : bColors.textColor) {
               b.style.setProperty("color", bColors.textColor, "important");
-            else
+              b.style.setProperty("--sc-btn-text-color", bColors.textColor);
+            } else {
               b.style.removeProperty("color");
+              b.style.removeProperty("--sc-btn-text-color");
+            }
           });
           btn.addClass("active");
           if (chip.type === "archived") {
@@ -2573,13 +2563,29 @@ var CardStore = class {
     return card;
   }
   async delete(id) {
+    const card = this.cards.get(id);
     this.cards.delete(id);
     this.eventBus.emit("card:deleted", id);
     await this.persist();
+    if (card == null ? void 0 : card.notePath) {
+      const file = this.app.vault.getAbstractFileByPath(card.notePath);
+      if (file instanceof import_obsidian5.TFile) {
+        this._syncingPaths.add(card.notePath);
+        try {
+          await this.app.fileManager.trashFile(file);
+        } catch (e) {
+        } finally {
+          setTimeout(() => this._syncingPaths.delete(card.notePath), 500);
+        }
+      }
+    }
   }
   async toggleArchive(id, archived) {
-    const card = await this.update(id, { archived });
-    await this.syncCardToFrontmatter(card, { archived });
+    const updates = { archived };
+    if (!archived)
+      updates.expiresAt = null;
+    const card = await this.update(id, updates);
+    await this.syncCardToFrontmatter(card, updates);
   }
   async togglePin(id, pinned) {
     const card = await this.update(id, { pinned });
@@ -2856,7 +2862,8 @@ var CardStore = class {
             continue;
           if (card.expiresAt <= now) {
             if (this.settings.autoArchiveOnExpiry) {
-              await this.toggleArchive(card.id, true);
+              const updated = await this.update(card.id, { archived: true, expiresAt: null });
+              await this.syncCardToFrontmatter(updated, { archived: true, expiresAt: null });
             } else {
               await this.delete(card.id);
             }
@@ -3130,7 +3137,7 @@ var DEFAULT_SETTINGS = {
   borderThickness: 2,
   disableFilterButtons: false,
   disableTimeBasedFiltering: false,
-  enableCustomCategories: false,
+  enableCustomCategories: true,
   customCategories: [],
   hideArchivedFilterButton: false,
   animatedCards: true,
@@ -4160,12 +4167,20 @@ var SideCardsHomeView = class extends import_obsidian9.ItemView {
     var _a;
     const iconInfo = await this.getIconicFileIcon(file);
     if (!iconInfo) {
-      (0, import_obsidian9.setIcon)(iconEl, "file-text");
+      try {
+        (0, import_obsidian9.setIcon)(iconEl, "file-text");
+      } catch (e) {
+        (0, import_obsidian9.setIcon)(iconEl, "file");
+      }
       return;
     }
     const iconValue = String(iconInfo.icon || "").trim();
     if (!iconValue) {
-      (0, import_obsidian9.setIcon)(iconEl, "file-text");
+      try {
+        (0, import_obsidian9.setIcon)(iconEl, "file-text");
+      } catch (e) {
+        (0, import_obsidian9.setIcon)(iconEl, "file");
+      }
       return;
     }
     let rendered = false;
@@ -4186,8 +4201,17 @@ var SideCardsHomeView = class extends import_obsidian9.ItemView {
       rendered = true;
     }
     if (!rendered) {
-      iconEl.setText(iconValue);
-      rendered = true;
+      try {
+        (0, import_obsidian9.setIcon)(iconEl, iconValue);
+        rendered = true;
+      } catch (e) {
+        try {
+          (0, import_obsidian9.setIcon)(iconEl, "file-text");
+        } catch (e2) {
+          (0, import_obsidian9.setIcon)(iconEl, "file");
+        }
+        rendered = true;
+      }
     }
     if (iconInfo.color) {
       const colorNameToVar = {
@@ -4256,19 +4280,39 @@ var SideCardsHomeView = class extends import_obsidian9.ItemView {
     return null;
   }
   async getIconicFileIcon(file) {
-    var _a, _b, _c, _d, _e, _f, _g, _h, _i, _j;
+    var _a, _b, _c, _d, _e, _f, _g, _h, _i, _j, _k, _l, _m, _n, _o, _p, _q;
     const iconicPlugin = (_b = (_a = this.app.plugins) == null ? void 0 : _a.getPlugin) == null ? void 0 : _b.call(_a, "iconic");
     if (!iconicPlugin)
       return null;
     const path = file.path;
+    try {
+      const ruled = (_d = (_c = iconicPlugin.ruleManager) == null ? void 0 : _c.checkRuling) == null ? void 0 : _d.call(_c, "file", path);
+      if (ruled) {
+        const iconValue = (_e = ruled.icon) != null ? _e : ruled.iconDefault;
+        if (iconValue) {
+          return { icon: String(iconValue), color: (_f = ruled.color) != null ? _f : void 0 };
+        }
+      }
+    } catch (e) {
+    }
+    try {
+      const item = (_g = iconicPlugin.getFileItem) == null ? void 0 : _g.call(iconicPlugin, path);
+      if (item) {
+        const iconValue = (_h = item.icon) != null ? _h : item.iconDefault;
+        if (iconValue) {
+          return { icon: String(iconValue), color: (_i = item.color) != null ? _i : void 0 };
+        }
+      }
+    } catch (e) {
+    }
     const immediateEntry = this.resolveIconicIconEntry(
-      (_i = (_g = (_d = (_c = iconicPlugin.settings) == null ? void 0 : _c.fileIcons) == null ? void 0 : _d[path]) != null ? _g : (_f = (_e = iconicPlugin.data) == null ? void 0 : _e.fileIcons) == null ? void 0 : _f[path]) != null ? _i : (_h = iconicPlugin.fileIcons) == null ? void 0 : _h[path]
+      (_p = (_n = (_k = (_j = iconicPlugin.settings) == null ? void 0 : _j.fileIcons) == null ? void 0 : _k[path]) != null ? _n : (_m = (_l = iconicPlugin.data) == null ? void 0 : _l.fileIcons) == null ? void 0 : _m[path]) != null ? _p : (_o = iconicPlugin.fileIcons) == null ? void 0 : _o[path]
     );
     if (immediateEntry)
       return immediateEntry;
     if (this.iconicFileIconsCache === null) {
       try {
-        const loaded = await ((_j = iconicPlugin.loadData) == null ? void 0 : _j.call(iconicPlugin));
+        const loaded = await ((_q = iconicPlugin.loadData) == null ? void 0 : _q.call(iconicPlugin));
         this.iconicFileIconsCache = (loaded == null ? void 0 : loaded.fileIcons) && typeof loaded.fileIcons === "object" ? loaded.fileIcons : {};
       } catch (e) {
         this.iconicFileIconsCache = {};
@@ -4429,8 +4473,10 @@ var SideCardsHomeView = class extends import_obsidian9.ItemView {
       const customColors = (_a = this.plugin.settings.filterColors) == null ? void 0 : _a[colorKey];
       if (customColors == null ? void 0 : customColors.bgColor)
         btn.style.setProperty("background-color", customColors.bgColor, "important");
-      if (customColors == null ? void 0 : customColors.textColor)
+      if (customColors == null ? void 0 : customColors.textColor) {
         btn.style.setProperty("color", customColors.textColor, "important");
+        btn.style.setProperty("--sc-btn-text-color", customColors.textColor);
+      }
       btn.addEventListener("click", () => {
         container.querySelectorAll(".sc-category-btn").forEach((b) => {
           var _a2;
@@ -4441,10 +4487,13 @@ var SideCardsHomeView = class extends import_obsidian9.ItemView {
             b.style.setProperty("background-color", bColors.bgColor, "important");
           else
             b.style.removeProperty("background-color");
-          if (bColors == null ? void 0 : bColors.textColor)
+          if (bColors == null ? void 0 : bColors.textColor) {
             b.style.setProperty("color", bColors.textColor, "important");
-          else
+            b.style.setProperty("--sc-btn-text-color", bColors.textColor);
+          } else {
             b.style.removeProperty("color");
+            b.style.removeProperty("--sc-btn-text-color");
+          }
         });
         btn.addClass("active");
         this.filterType = f.type;
@@ -5450,12 +5499,6 @@ var SideCardsSettingTab = class extends import_obsidian10.PluginSettingTab {
       }));
     });
     new import_obsidian10.Setting(containerEl).setName("Categories").setDesc("Configure category display and reordering.").setHeading();
-    new import_obsidian10.Setting(containerEl).setName("Enable custom categories").setDesc("Allow custom categories in the right-click menu.").addToggle((toggle) => toggle.setValue(!!this.plugin.settings.enableCustomCategories).onChange(async (value) => {
-      this.plugin.settings.enableCustomCategories = value;
-      await this.plugin.saveSettings();
-      this.display();
-      refreshSidebarHeader();
-    }));
     const catsContainer = containerEl.createDiv({ cls: "categories-list sc-cats-container" });
     const renderCategories = () => {
       catsContainer.empty();

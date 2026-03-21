@@ -301,7 +301,7 @@ export class CardComponent {
   }
 
   private renderPills(container: HTMLElement): void {
-    if (this.card.expiresAt) {
+    if (this.card.expiresAt && this.store.settings.showExpiryTimeLeft) {
       const pill = container.createDiv('sc-expiry-pill');
       pill.textContent = this.formatExpiryTimeLeft(this.card.expiresAt);
     }
@@ -863,7 +863,7 @@ export class CardComponent {
 
   private startExpiryTick(): void {
     this.stopExpiryTick();
-    if (!this.card.expiresAt) return;
+    if (!this.card.expiresAt || !this.store.settings.showExpiryTimeLeft) return;
     // Tick every second so the countdown stays live
     this.expiryTickInterval = window.setInterval(() => {
       const pill = this.el.querySelector('.sc-expiry-pill');

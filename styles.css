@@ -72,7 +72,7 @@
 }
 
 .sc-category-btn.active {
-  border: 2px solid var(--interactive-accent);
+  border: 2px solid var(--sc-btn-text-color, var(--interactive-accent));
   transition: border-width 0s ease;
 }
 
@@ -1191,6 +1191,10 @@ de
 }
 
 /* ── DateTimeModal ───────────────────────────────────────────────────── */
+.sc-datetime-modal .modal-title {
+  margin-bottom: 0;
+}
+
 .sc-datetime-modal .sc-dt-mode-row {
   display: flex;
   gap: 16px;
@@ -1297,7 +1301,7 @@ de
   overflow: visible !important;
 }
 
-.modal-title {
+.sc-setup-modal .modal-title {
   margin-bottom: -16px;
 }
 
