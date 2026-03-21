@@ -221,7 +221,7 @@ export class CardComponent {
     // When entering edit mode, swap only the content div in-place
     // to avoid a full re-render race that removes the contenteditable element
     if (this.isEditing) {
-      const existingContent = this.el.querySelector('.sc-content') as HTMLElement | null;
+      const existingContent = this.el.querySelector('.sc-content');
       if (existingContent) {
         existingContent.setAttribute('contenteditable', 'true');
         existingContent.textContent = this.card.content;
@@ -372,7 +372,7 @@ export class CardComponent {
     if (this.card.expiresAt && this.store.settings.showExpiryTimeLeft) {
       const pill = container.createDiv('sc-expiry-pill');
       pill.textContent = this.formatExpiryTimeLeft(this.card.expiresAt);
-      if (this.card.status) pill.style.marginBottom = '4px';
+      if (this.card.status) pill.setCssProps({ 'margin-bottom': '4px' });
     }
     if (this.card.status) {
       const pill = container.createDiv('sc-status-pill');
