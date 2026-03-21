@@ -661,6 +661,11 @@ class SideCardsSettingTab extends PluginSettingTab {
       await this.plugin.saveSettings();
     }));
 
+    new Setting(containerEl).setName('Auto-pair brackets, quotes and code').setDesc('Automatically wrap selected text or place cursor between pairs when typing (, [, {, `, =, %, ", or \'').addToggle(toggle => toggle.setValue(this.plugin.settings.autoPairBrackets !== false).onChange(async (value) => {
+      this.plugin.settings.autoPairBrackets = value;
+      await this.plugin.saveSettings();
+    }));
+
     new Setting(containerEl).setName('Auto-open sidebar').setDesc('Automatically open the sidebar when Obsidian starts').addToggle(toggle => toggle.setValue(!!this.plugin.settings.autoOpen).onChange(async (value) => {
       this.plugin.settings.autoOpen = value;
       await this.plugin.saveSettings();

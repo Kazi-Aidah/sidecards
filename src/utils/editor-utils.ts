@@ -1,6 +1,7 @@
 import { Editor } from "obsidian";
 
-export function handleKeyWrap(event: KeyboardEvent, editorEl: HTMLElement, editor: Editor): boolean {
+export function handleKeyWrap(event: KeyboardEvent, editorEl: HTMLElement, editor: Editor, enabled = true): boolean {
+  if (!enabled) return false;
   if (event.ctrlKey || event.metaKey || event.altKey) return false;
 
   const key = event.key;
@@ -11,6 +12,8 @@ export function handleKeyWrap(event: KeyboardEvent, editorEl: HTMLElement, edito
     "`": ["`", "`"],
     "%": ["%", "%"],
     "=": ["=", "="],
+    '"': ['"', '"'],
+    "'": ["'", "'"],
   };
 
   const pair = wrapMap[key];

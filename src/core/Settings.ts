@@ -49,6 +49,7 @@ export interface SideCardsSettings {
   filterColors?: Record<string, { bgColor?: string; textColor?: string }>;
   saveKey?: string;
   nextLineKey?: string;
+  autoPairBrackets?: boolean;
   sidebarPosition?: string;
   sortMode?: 'manual' | 'created' | 'modified' | 'alpha' | 'status';
   sortAscending?: boolean;
@@ -123,6 +124,7 @@ export const DEFAULT_SETTINGS: SideCardsSettings = {
   filterColors: {},
   saveKey: 'enter',
   nextLineKey: 'shift-enter',
+  autoPairBrackets: true,
   sortMode: 'manual',
   sortAscending: true,
   showPinnedOnly: false,

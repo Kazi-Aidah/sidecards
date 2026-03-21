@@ -217,7 +217,7 @@ export class CardComponent {
     this.stopExpiryTick();
     this.el.empty();
     this.el.dataset.id = this.card.id;
-    this.el.draggable = !this.isEditing;
+    this.el.draggable = false;
     
     // Apply styling
     const statusDef = this.card.status
@@ -369,7 +369,7 @@ export class CardComponent {
 
       // Handle Enter and Shift+Enter according to settings
       container.addEventListener('keydown', (e) => {
-        if (handleKeyWrap(e, container, this.editor)) {
+        if (handleKeyWrap(e, container, this.editor, (this.plugin as any).settings?.autoPairBrackets !== false)) {
           e.preventDefault();
           e.stopPropagation();
           return;
@@ -751,20 +751,6 @@ export class CardComponent {
       });
 
       menu.showAtMouseEvent(e);
-    });
-
-    // Drag start
-    this.el.addEventListener('dragstart', (e) => {
-      if (this.isEditing) {
-        e.preventDefault();
-        return;
-      }
-      // @ts-ignore
-      this.store.eventBus.emit('card:dragstart', { card: this.card, event: e });
-      if (e.dataTransfer) {
-        e.dataTransfer.setData('text/plain', this.card.content);
-        e.dataTransfer.setData('application/json', JSON.stringify(this.card));
-      }
     });
 
     // Store updates

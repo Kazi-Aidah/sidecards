@@ -373,7 +373,9 @@ var DateTimeModal = class extends import_obsidian.Modal {
 };
 
 // src/utils/editor-utils.ts
-function handleKeyWrap(event, editorEl, editor) {
+function handleKeyWrap(event, editorEl, editor, enabled = true) {
+  if (!enabled)
+    return false;
   if (event.ctrlKey || event.metaKey || event.altKey)
     return false;
   const key = event.key;
@@ -383,7 +385,9 @@ function handleKeyWrap(event, editorEl, editor) {
     "{": ["{", "}"],
     "`": ["`", "`"],
     "%": ["%", "%"],
-    "=": ["=", "="]
+    "=": ["=", "="],
+    '"': ['"', '"'],
+    "'": ["'", "'"]
   };
   const pair = wrapMap[key];
   if (!pair)
@@ -646,7 +650,7 @@ var _CardComponent = class {
     this.stopExpiryTick();
     this.el.empty();
     this.el.dataset.id = this.card.id;
-    this.el.draggable = !this.isEditing;
+    this.el.draggable = false;
     const statusDef = this.card.status ? (this.store.settings.cardStatuses || []).find((s) => s.name === this.card.status.name) : null;
     const useStatusColor = this.store.settings.inheritStatusColor && statusDef;
     const effectiveColor = useStatusColor && statusDef ? statusDef.colorIndex ? `var(--card-color-${statusDef.colorIndex})` : statusDef.color : this.card.color;
@@ -762,7 +766,8 @@ var _CardComponent = class {
         }
       });
       container.addEventListener("keydown", (e) => {
-        if (handleKeyWrap(e, container, this.editor)) {
+        var _a;
+        if (handleKeyWrap(e, container, this.editor, ((_a = this.plugin.settings) == null ? void 0 : _a.autoPairBrackets) !== false)) {
           e.preventDefault();
           e.stopPropagation();
           return;
@@ -1096,17 +1101,6 @@ var _CardComponent = class {
         });
       });
       menu.showAtMouseEvent(e);
-    });
-    this.el.addEventListener("dragstart", (e) => {
-      if (this.isEditing) {
-        e.preventDefault();
-        return;
-      }
-      this.store.eventBus.emit("card:dragstart", { card: this.card, event: e });
-      if (e.dataTransfer) {
-        e.dataTransfer.setData("text/plain", this.card.content);
-        e.dataTransfer.setData("application/json", JSON.stringify(this.card));
-      }
     });
     const unbind = this.store.eventBus.on("card:updated", (updated) => {
       if (updated.id === this.card.id) {
@@ -1591,6 +1585,215 @@ var InlineAutocomplete = class {
 
 // src/views/CardSidebarView.ts
 init_dom();
+
+// src/utils/drag-drop.ts
+function attachDragToReorder(container, plugin, getSortMode, onReorder, onPlaceholderMoved) {
+  let ghost = null;
+  let draggedEl = null;
+  let offsetX = 0;
+  let offsetY = 0;
+  let active = false;
+  let snapRects = /* @__PURE__ */ new Map();
+  let originalOrder = [];
+  let currentTargetIndex = -1;
+  let draggedIndex = -1;
+  let lastFlipRects = /* @__PURE__ */ new Map();
+  function getCards() {
+    return Array.from(container.querySelectorAll(":scope > .sc-card"));
+  }
+  function getCardEl(el) {
+    if (!(el instanceof HTMLElement))
+      return null;
+    if (el.closest('button, a, [contenteditable="true"], .sc-tag, .sc-copy-btn'))
+      return null;
+    return el.closest(".sc-card");
+  }
+  function computeTargetIndex(clientX, clientY) {
+    const others = originalOrder.filter((_, i) => i !== draggedIndex);
+    if (others.length === 0)
+      return 0;
+    let closest = null;
+    let closestDist = Infinity;
+    for (const card of others) {
+      const r2 = snapRects.get(card);
+      const cx = r2.left + r2.width / 2;
+      const cy = r2.top + r2.height / 2;
+      const d = Math.hypot(clientX - cx, clientY - cy);
+      if (d < closestDist) {
+        closestDist = d;
+        closest = card;
+      }
+    }
+    if (!closest)
+      return draggedIndex;
+    const closestOrigIdx = originalOrder.indexOf(closest);
+    const r = snapRects.get(closest);
+    const isGrid = others.some((c) => {
+      if (c === closest)
+        return false;
+      return Math.abs(snapRects.get(c).top - r.top) < 10;
+    });
+    const insertBefore = isGrid ? clientX < r.left + r.width / 2 : clientY < r.top + r.height / 2;
+    if (insertBefore) {
+      return closestOrigIdx <= draggedIndex ? closestOrigIdx : closestOrigIdx - 1;
+    } else {
+      return closestOrigIdx >= draggedIndex ? closestOrigIdx : closestOrigIdx + 1;
+    }
+  }
+  function readFlipRects(targetIdx) {
+    const newOrder = originalOrder.slice();
+    newOrder.splice(draggedIndex, 1);
+    newOrder.splice(targetIdx, 0, draggedEl);
+    originalOrder.forEach((c) => {
+      c.style.transition = "none";
+      c.style.transform = "";
+    });
+    newOrder.forEach((card) => container.appendChild(card));
+    const rects = /* @__PURE__ */ new Map();
+    originalOrder.forEach((c) => rects.set(c, c.getBoundingClientRect()));
+    originalOrder.forEach((card) => container.appendChild(card));
+    return rects;
+  }
+  function applyFlip(flipRects) {
+    for (const card of originalOrder) {
+      if (card === draggedEl)
+        continue;
+      card.style.transition = "none";
+      card.style.transform = card.style.transform || "";
+    }
+    container.offsetHeight;
+    for (const card of originalOrder) {
+      if (card === draggedEl)
+        continue;
+      const from = snapRects.get(card);
+      const to = flipRects.get(card);
+      const dx = to.left - from.left;
+      const dy = to.top - from.top;
+      card.style.transition = "transform 150ms cubic-bezier(0.25,0.46,0.45,0.94)";
+      card.style.transform = dx === 0 && dy === 0 ? "" : `translate(${dx}px,${dy}px)`;
+    }
+  }
+  function clearTransforms() {
+    getCards().forEach((c) => {
+      c.style.transition = "";
+      c.style.transform = "";
+    });
+  }
+  const onMouseDown = (e) => {
+    if (getSortMode() !== "manual")
+      return;
+    if (e.button !== 0)
+      return;
+    const card = getCardEl(e.target);
+    if (!card)
+      return;
+    draggedEl = card;
+    originalOrder = getCards();
+    draggedIndex = originalOrder.indexOf(card);
+    currentTargetIndex = draggedIndex;
+    snapRects = /* @__PURE__ */ new Map();
+    originalOrder.forEach((c) => snapRects.set(c, c.getBoundingClientRect()));
+    const rect = snapRects.get(card);
+    offsetX = e.clientX - rect.left;
+    offsetY = e.clientY - rect.top;
+    card.style.opacity = "0";
+    card.style.pointerEvents = "none";
+    ghost = card.cloneNode(true);
+    ghost.classList.add("sc-drag-ghost");
+    const cs = getComputedStyle(card);
+    ghost.style.background = cs.background;
+    ghost.style.backgroundColor = cs.backgroundColor;
+    ghost.style.borderColor = cs.borderColor;
+    ghost.style.borderWidth = cs.borderWidth;
+    ghost.style.borderStyle = cs.borderStyle;
+    ghost.style.borderRadius = cs.borderRadius;
+    ghost.style.color = cs.color;
+    ghost.style.fontSize = cs.fontSize;
+    ghost.style.lineHeight = cs.lineHeight;
+    ghost.style.padding = cs.padding;
+    ghost.style.position = "fixed";
+    ghost.style.zIndex = "9999";
+    ghost.style.pointerEvents = "none";
+    ghost.style.width = rect.width + "px";
+    ghost.style.height = rect.height + "px";
+    ghost.style.left = rect.left + "px";
+    ghost.style.top = rect.top + "px";
+    ghost.style.margin = "0";
+    ghost.style.boxShadow = "0 8px 24px rgba(0,0,0,0.25)";
+    ghost.style.opacity = "1";
+    ghost.style.cursor = "grabbing";
+    ghost.style.transform = "";
+    ghost.style.transition = "";
+    document.body.appendChild(ghost);
+    active = true;
+    document.addEventListener("mousemove", onMouseMove);
+    document.addEventListener("mouseup", onMouseUp);
+    e.preventDefault();
+  };
+  const onMouseMove = (e) => {
+    if (!active || !ghost || !draggedEl)
+      return;
+    ghost.style.left = e.clientX - offsetX + "px";
+    ghost.style.top = e.clientY - offsetY + "px";
+    const newTarget = computeTargetIndex(e.clientX, e.clientY);
+    if (newTarget !== currentTargetIndex) {
+      currentTargetIndex = newTarget;
+      lastFlipRects = readFlipRects(currentTargetIndex);
+      applyFlip(lastFlipRects);
+    }
+  };
+  const onMouseUp = () => {
+    if (!active || !draggedEl)
+      return;
+    active = false;
+    document.removeEventListener("mousemove", onMouseMove);
+    document.removeEventListener("mouseup", onMouseUp);
+    ghost == null ? void 0 : ghost.remove();
+    ghost = null;
+    draggedEl.style.opacity = "";
+    draggedEl.style.pointerEvents = "";
+    clearTransforms();
+    const newOrder = originalOrder.slice();
+    newOrder.splice(draggedIndex, 1);
+    newOrder.splice(currentTargetIndex, 0, draggedEl);
+    newOrder.forEach((card) => container.appendChild(card));
+    const ids = newOrder.map((c) => {
+      var _a;
+      return (_a = c.dataset.id) != null ? _a : "";
+    }).filter(Boolean);
+    plugin.settings.manualOrder = ids;
+    void onReorder(ids);
+    onPlaceholderMoved == null ? void 0 : onPlaceholderMoved();
+    draggedEl = null;
+    snapRects = /* @__PURE__ */ new Map();
+    lastFlipRects = /* @__PURE__ */ new Map();
+    originalOrder = [];
+    currentTargetIndex = -1;
+    draggedIndex = -1;
+  };
+  container.addEventListener("mousedown", onMouseDown);
+  return () => {
+    container.removeEventListener("mousedown", onMouseDown);
+    document.removeEventListener("mousemove", onMouseMove);
+    document.removeEventListener("mouseup", onMouseUp);
+    ghost == null ? void 0 : ghost.remove();
+    if (draggedEl) {
+      draggedEl.style.opacity = "";
+      draggedEl.style.pointerEvents = "";
+    }
+    clearTransforms();
+    ghost = null;
+    draggedEl = null;
+    active = false;
+    snapRects = /* @__PURE__ */ new Map();
+    lastFlipRects = /* @__PURE__ */ new Map();
+    originalOrder = [];
+    currentTargetIndex = -1;
+    draggedIndex = -1;
+  };
+}
+
+// src/views/CardSidebarView.ts
 var CardSidebarView = class extends import_obsidian4.ItemView {
   constructor(leaf, plugin, store, eventBus, filterService, sortService) {
     super(leaf);
@@ -1603,6 +1806,7 @@ var CardSidebarView = class extends import_obsidian4.ItemView {
     this.activeFilters = { query: "", tags: [] };
     this.currentSortMode = "manual";
     this.sortAscending = true;
+    this.dragDropCleanup = null;
     this._loadInProgress = false;
     this._loadingEl = null;
     this._loadingTimeout = null;
@@ -1706,28 +1910,61 @@ var CardSidebarView = class extends import_obsidian4.ItemView {
     this.editor.replaceSelection(newText);
   }
   applySelectionWrapShortcut(event, root) {
+    if (this.plugin.settings.autoPairBrackets === false)
+      return false;
     if (event.ctrlKey || event.metaKey || event.altKey)
       return false;
     const wrapMap = {
       "[": ["[", "]"],
       "(": ["(", ")"],
       "{": ["{", "}"],
-      "`": ["`", "`"]
+      "`": ["`", "`"],
+      "%": ["%", "%"],
+      "=": ["=", "="],
+      '"': ['"', '"'],
+      "'": ["'", "'"]
     };
     const pair = wrapMap[event.key];
     if (!pair)
       return false;
     const sel = window.getSelection();
-    if (!sel || !sel.rangeCount || sel.isCollapsed)
+    if (!sel || !sel.rangeCount)
       return false;
     const range = sel.getRangeAt(0);
-    const selectedText = sel.toString();
-    if (!selectedText || !root.contains(range.commonAncestorContainer))
+    if (!root.contains(range.commonAncestorContainer))
       return false;
-    event.preventDefault();
+    const selectedText = range.toString();
     const [open, close] = pair;
-    const newText = `${open}${selectedText}${close}`;
-    this.editor.replaceSelection(newText);
+    let newText = `${open}${selectedText}${close}`;
+    if (event.key === "%") {
+      if (selectedText.startsWith("%") && selectedText.endsWith("%") && !selectedText.startsWith("%%")) {
+        const inner = selectedText.slice(1, -1).trim();
+        newText = `%% ${inner} %%`;
+      }
+    } else if (event.key === "=") {
+      if (selectedText.startsWith("=") && selectedText.endsWith("=") && !selectedText.startsWith("==")) {
+        const inner = selectedText.slice(1, -1);
+        newText = `==${inner}==`;
+      }
+    } else if (event.key === "[") {
+      if (selectedText.startsWith("[") && selectedText.endsWith("]") && !selectedText.startsWith("[[")) {
+        const inner = selectedText.slice(1, -1);
+        newText = `[[${inner}]]`;
+      }
+    }
+    event.preventDefault();
+    range.deleteContents();
+    const node = document.createTextNode(newText);
+    range.insertNode(node);
+    const newRange = document.createRange();
+    if (selectedText.length === 0) {
+      newRange.setStart(node, open.length);
+      newRange.collapse(true);
+    } else {
+      newRange.selectNode(node);
+    }
+    sel.removeAllRanges();
+    sel.addRange(newRange);
     return true;
   }
   getEffectiveHotkeys(commandId) {
@@ -2275,7 +2512,7 @@ var CardSidebarView = class extends import_obsidian4.ItemView {
     }, 300);
   }
   async renderCards(isManualReload = false) {
-    var _a;
+    var _a, _b;
     const settings = { ...this.store.settings };
     const scrollTop = ((_a = this.cardsContainer) == null ? void 0 : _a.scrollTop) || 0;
     await flipAnimateAsync(this.cardsContainer, async () => {
@@ -2294,8 +2531,23 @@ var CardSidebarView = class extends import_obsidian4.ItemView {
         this.cardsContainer.scrollTop = scrollTop;
       }
     }, {}, settings);
+    (_b = this.dragDropCleanup) == null ? void 0 : _b.call(this);
+    this.dragDropCleanup = attachDragToReorder(
+      this.cardsContainer,
+      this.plugin,
+      () => this.currentSortMode,
+      async () => {
+        await this.plugin.saveSettings();
+      },
+      () => {
+        this.refreshMasonrySpans();
+      }
+    );
   }
   async onClose() {
+    var _a;
+    (_a = this.dragDropCleanup) == null ? void 0 : _a.call(this);
+    this.dragDropCleanup = null;
     if (this._masonryObserver) {
       this._masonryObserver.disconnect();
       this._masonryObserver = null;
@@ -3165,6 +3417,7 @@ var DEFAULT_SETTINGS = {
   filterColors: {},
   saveKey: "enter",
   nextLineKey: "shift-enter",
+  autoPairBrackets: true,
   sortMode: "manual",
   sortAscending: true,
   showPinnedOnly: false,
@@ -3591,9 +3844,10 @@ var QuickCardWithFilterModal = class extends import_obsidian7.Modal {
       void handleCreate();
     });
     editorEl.addEventListener("keydown", (e) => {
+      var _a;
       if (this.applyFormattingHotkey(e, editorEl))
         return;
-      if (handleKeyWrap(e, editorEl, this.editor)) {
+      if (handleKeyWrap(e, editorEl, this.editor, ((_a = this.plugin.settings) == null ? void 0 : _a.autoPairBrackets) !== false)) {
         editorEl.dispatchEvent(new Event("input"));
         return;
       }
@@ -3733,6 +3987,7 @@ var SideCardsHomeView = class extends import_obsidian9.ItemView {
     this.currentSortMode = "created";
     this.sortAscending = false;
     this.pinnedOnly = false;
+    this.dragDropCleanup = null;
     this.currentSearchQuery = "";
     this.iconicFileIconsCache = null;
     this.cardRenderGen = 0;
@@ -3832,6 +4087,8 @@ var SideCardsHomeView = class extends import_obsidian9.ItemView {
     this.editor.replaceSelection(newText);
   }
   handleKeyWrap(event) {
+    if (this.plugin.settings.autoPairBrackets === false)
+      return { handled: false };
     if (event.ctrlKey || event.metaKey || event.altKey)
       return { handled: false };
     const key = event.key;
@@ -3841,7 +4098,9 @@ var SideCardsHomeView = class extends import_obsidian9.ItemView {
       "{": ["{", "}"],
       "`": ["`", "`"],
       "%": ["%", "%"],
-      "=": ["=", "="]
+      "=": ["=", "="],
+      '"': ['"', '"'],
+      "'": ["'", "'"]
     };
     const pair = wrapMap[key];
     if (!pair)
@@ -3876,7 +4135,12 @@ var SideCardsHomeView = class extends import_obsidian9.ItemView {
     const node = document.createTextNode(newText);
     range.insertNode(node);
     const newRange = document.createRange();
-    newRange.selectNode(node);
+    if (selectedText.length === 0) {
+      newRange.setStart(node, open.length);
+      newRange.collapse(true);
+    } else {
+      newRange.selectNode(node);
+    }
     sel.removeAllRanges();
     sel.addRange(newRange);
     return { handled: true };
@@ -4503,6 +4767,7 @@ var SideCardsHomeView = class extends import_obsidian9.ItemView {
     });
   }
   async renderCards(container) {
+    var _a;
     const gen = ++this.cardRenderGen;
     container.empty();
     this.cardComponents.forEach((c) => c.destroy());
@@ -4549,6 +4814,15 @@ var SideCardsHomeView = class extends import_obsidian9.ItemView {
     };
     renderChunk(0);
     requestAnimationFrame(() => animateCardsEntrance(container, {}, this.plugin.settings));
+    (_a = this.dragDropCleanup) == null ? void 0 : _a.call(this);
+    this.dragDropCleanup = attachDragToReorder(
+      container,
+      this.plugin,
+      () => this.currentSortMode,
+      async () => {
+        await this.plugin.saveSettings();
+      }
+    );
   }
   getAvailableFilters() {
     const filters = [{ type: "all", label: "All", value: "all" }];
@@ -4609,6 +4883,13 @@ var SideCardsHomeView = class extends import_obsidian9.ItemView {
     editorEl.dispatchEvent(new Event("input"));
     this.selectedTags = [];
     new import_obsidian9.Notice("Card created");
+  }
+  async onClose() {
+    var _a;
+    (_a = this.dragDropCleanup) == null ? void 0 : _a.call(this);
+    this.dragDropCleanup = null;
+    this.cardComponents.forEach((c) => c.destroy());
+    this.cardComponents.clear();
   }
 };
 
@@ -5191,6 +5472,10 @@ var SideCardsSettingTab = class extends import_obsidian10.PluginSettingTab {
     }));
     new import_obsidian10.Setting(containerEl).setName("Next line key").setDesc("Choose which key combo inserts a new line inside a card (does not save)").addDropdown((dropdown) => dropdown.addOption("enter", "Enter").addOption("shift-enter", "Shift+Enter").addOption("ctrl-enter", "Ctrl+Enter").addOption("alt-enter", "Alt+Enter").addOption("ctrl-shift-enter", "Ctrl+Shift+Enter").setValue(this.plugin.settings.nextLineKey || "shift-enter").onChange(async (value) => {
       this.plugin.settings.nextLineKey = value;
+      await this.plugin.saveSettings();
+    }));
+    new import_obsidian10.Setting(containerEl).setName("Auto-pair brackets, quotes and code").setDesc("Automatically wrap selected text or place cursor between pairs when typing (, [, {, `, =, %, \", or '").addToggle((toggle) => toggle.setValue(this.plugin.settings.autoPairBrackets !== false).onChange(async (value) => {
+      this.plugin.settings.autoPairBrackets = value;
       await this.plugin.saveSettings();
     }));
     new import_obsidian10.Setting(containerEl).setName("Auto-open sidebar").setDesc("Automatically open the sidebar when Obsidian starts").addToggle((toggle) => toggle.setValue(!!this.plugin.settings.autoOpen).onChange(async (value) => {

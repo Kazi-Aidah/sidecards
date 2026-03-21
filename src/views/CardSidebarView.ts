@@ -10,6 +10,7 @@ import { Card } from "../models/Card";
 import SideCardsPlugin from "../core/Plugin";
 import { InlineAutocomplete } from "./components/InlineAutocomplete";
 import { resolveAutoColor } from "../utils/dom";
+import { attachDragToReorder } from "../utils/drag-drop";
 
 export class CardSidebarView extends ItemView {
   private cardsContainer!: HTMLElement;
@@ -20,6 +21,7 @@ export class CardSidebarView extends ItemView {
   private editorScope: Scope;
   private editor!: Editor;
   private owner!: any;
+  private dragDropCleanup: (() => void) | null = null;
 
   constructor(
     leaf: WorkspaceLeaf,
@@ -129,24 +131,61 @@ export class CardSidebarView extends ItemView {
   }
 
   private applySelectionWrapShortcut(event: KeyboardEvent, root: HTMLElement): boolean {
+    if (this.plugin.settings.autoPairBrackets === false) return false;
     if (event.ctrlKey || event.metaKey || event.altKey) return false;
     const wrapMap: Record<string, [string, string]> = {
       "[": ["[", "]"],
       "(": ["(", ")"],
       "{": ["{", "}"],
       "`": ["`", "`"],
+      "%": ["%", "%"],
+      "=": ["=", "="],
+      '"': ['"', '"'],
+      "'": ["'", "'"],
     };
     const pair = wrapMap[event.key];
     if (!pair) return false;
     const sel = window.getSelection();
-    if (!sel || !sel.rangeCount || sel.isCollapsed) return false;
+    if (!sel || !sel.rangeCount) return false;
     const range = sel.getRangeAt(0);
-    const selectedText = sel.toString();
-    if (!selectedText || !root.contains(range.commonAncestorContainer)) return false;
-    event.preventDefault();
+    if (!root.contains(range.commonAncestorContainer)) return false;
+
+    const selectedText = range.toString();
     const [open, close] = pair;
-    const newText = `${open}${selectedText}${close}`;
-    this.editor.replaceSelection(newText);
+    let newText = `${open}${selectedText}${close}`;
+
+    // Upgrade logic
+    if (event.key === "%") {
+      if (selectedText.startsWith("%") && selectedText.endsWith("%") && !selectedText.startsWith("%%")) {
+        const inner = selectedText.slice(1, -1).trim();
+        newText = `%% ${inner} %%`;
+      }
+    } else if (event.key === "=") {
+      if (selectedText.startsWith("=") && selectedText.endsWith("=") && !selectedText.startsWith("==")) {
+        const inner = selectedText.slice(1, -1);
+        newText = `==${inner}==`;
+      }
+    } else if (event.key === "[") {
+      if (selectedText.startsWith("[") && selectedText.endsWith("]") && !selectedText.startsWith("[[")) {
+        const inner = selectedText.slice(1, -1);
+        newText = `[[${inner}]]`;
+      }
+    }
+
+    event.preventDefault();
+    range.deleteContents();
+    const node = document.createTextNode(newText);
+    range.insertNode(node);
+
+    const newRange = document.createRange();
+    if (selectedText.length === 0) {
+      newRange.setStart(node, open.length);
+      newRange.collapse(true);
+    } else {
+      newRange.selectNode(node);
+    }
+    sel.removeAllRanges();
+    sel.addRange(newRange);
     return true;
   }
 
@@ -756,9 +795,23 @@ export class CardSidebarView extends ItemView {
         this.cardsContainer.scrollTop = scrollTop;
       }
     }, {}, settings);
+
+    // Re-attach drag-to-reorder (cleans up previous listeners first)
+    this.dragDropCleanup?.();
+    this.dragDropCleanup = attachDragToReorder(
+      this.cardsContainer,
+      this.plugin,
+      () => this.currentSortMode,
+      async () => {
+        await this.plugin.saveSettings();
+      },
+      () => { this.refreshMasonrySpans(); }
+    );
   }
 
   async onClose(): Promise<void> {
+    this.dragDropCleanup?.();
+    this.dragDropCleanup = null;
     if (this._masonryObserver) {
       this._masonryObserver.disconnect();
       this._masonryObserver = null;

@@ -7,6 +7,7 @@ import { SortService, SortMode } from "../services/SortService";
 import { resolveAutoColor } from "../utils/dom";
 import { animateCardsEntrance } from "../utils/animations";
 import { InlineAutocomplete } from "./components/InlineAutocomplete";
+import { attachDragToReorder } from "../utils/drag-drop";
 
 export class SideCardsHomeView extends ItemView {
   private selectedColor = 'var(--card-color-1)';
@@ -23,6 +24,7 @@ export class SideCardsHomeView extends ItemView {
   private currentSortMode: SortMode = 'created';
   private sortAscending: boolean = false;
   private pinnedOnly: boolean = false;
+  private dragDropCleanup: (() => void) | null = null;
   private currentSearchQuery: string = '';
   private iconicFileIconsCache: Record<string, any> | null = null;
 
@@ -132,6 +134,7 @@ export class SideCardsHomeView extends ItemView {
   }
 
   private handleKeyWrap(event: KeyboardEvent): { handled: boolean } {
+    if (this.plugin.settings.autoPairBrackets === false) return { handled: false };
     if (event.ctrlKey || event.metaKey || event.altKey) return { handled: false };
 
     const key = event.key;
@@ -142,6 +145,8 @@ export class SideCardsHomeView extends ItemView {
       "`": ["`", "`"],
       "%": ["%", "%"],
       "=": ["=", "="],
+      '"': ['"', '"'],
+      "'": ["'", "'"],
     };
 
     const pair = wrapMap[key];
@@ -181,7 +186,14 @@ export class SideCardsHomeView extends ItemView {
     range.insertNode(node);
 
     const newRange = document.createRange();
-    newRange.selectNode(node);
+    if (selectedText.length === 0) {
+      // No selection: place cursor between the pair
+      newRange.setStart(node, open.length);
+      newRange.collapse(true);
+    } else {
+      // Had selection: select the wrapped text
+      newRange.selectNode(node);
+    }
     sel.removeAllRanges();
     sel.addRange(newRange);
 
@@ -933,6 +945,17 @@ export class SideCardsHomeView extends ItemView {
     renderChunk(0);
     // Trigger entrance animation after first chunk is painted
     requestAnimationFrame(() => animateCardsEntrance(container, {}, this.plugin.settings));
+
+    // Re-attach drag-to-reorder
+    this.dragDropCleanup?.();
+    this.dragDropCleanup = attachDragToReorder(
+      container,
+      this.plugin,
+      () => this.currentSortMode,
+      async () => {
+        await this.plugin.saveSettings();
+      }
+    );
   }
 
   private getAvailableFilters(): Array<{ type: string; label: string; value: string }> {
@@ -1005,4 +1028,10 @@ export class SideCardsHomeView extends ItemView {
     
     new Notice('Card created');
   }
+  async onClose(): Promise<void> {
+      this.dragDropCleanup?.();
+      this.dragDropCleanup = null;
+      this.cardComponents.forEach(c => c.destroy());
+      this.cardComponents.clear();
+    }
 }

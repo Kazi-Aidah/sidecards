@@ -440,7 +440,7 @@ export class QuickCardWithFilterModal extends Modal {
     // Keyboard Shortcuts
     editorEl.addEventListener('keydown', (e) => {
       if (this.applyFormattingHotkey(e, editorEl)) return;
-      if (handleKeyWrap(e, editorEl, this.editor)) {
+      if (handleKeyWrap(e, editorEl, this.editor, (this.plugin as any).settings?.autoPairBrackets !== false)) {
         editorEl.dispatchEvent(new Event('input'));
         return;
       }
