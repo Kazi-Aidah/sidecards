@@ -19,6 +19,7 @@
   "author": "Kazi Aidah Haque",
   "license": "MIT",
   "devDependencies": {
+    "@esbuild/linux-x64": "^0.17.3",
     "@types/node": "^16.11.21",
     "@typescript-eslint/eslint-plugin": "^8.57.1",
     "@typescript-eslint/parser": "^8.57.1",

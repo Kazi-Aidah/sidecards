@@ -11,7 +11,7 @@ interface AppWithInternals extends App {
   workspace: App['workspace'] & { activeEditor: { editor: Editor; editMode: boolean } | null };
 }
 
-export class CardComponent {
+export class CardComponent extends Component {
   public el: HTMLElement;
   static activeEditor: CardComponent | null = null;
   private static instanceCount = 0;
@@ -43,12 +43,14 @@ export class CardComponent {
     private plugin: Plugin,
     private settingsOverride?: { groupTags?: boolean; showTimestamps?: boolean; showTags?: boolean }
   ) {
+    super();
     CardComponent.instanceCount += 1;
     this.card = card;
     this.el = container.createDiv('sc-card');
     this.scope = new Scope(this.app.scope);
     this.setupMockEditor();
     this.ensureGlobalMouseDownHandler();
+    this.load();
     void this.render();
     this.setupListeners();
   }
@@ -478,11 +480,50 @@ export class CardComponent {
       container.setAttribute('contenteditable', 'false');
       container.removeClass('is-editing');
       const temp = document.createElement('div');
-      await MarkdownRenderer.render(this.app, this.card.content, temp, this.card.notePath || '', this.app as unknown as Component);
+      try {
+        await MarkdownRenderer.render(this.app, this.card.content, temp, this.card.notePath || '', this);
+      } catch {
+        temp.textContent = this.card.content;
+      }
       temp.querySelectorAll('mark').forEach(el => el.addClass('cm-highlight'));
+      this.resolveImageEmbeds(temp);
       while (temp.firstChild) container.appendChild(temp.firstChild);
       this.attachInternalLinkHandlers(container);
     }
+  }
+
+  private resolveImageEmbeds(container: HTMLElement): void {
+    const IMAGE_EXTS = new Set(['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'bmp', 'avif']);
+    container.querySelectorAll('span.internal-embed').forEach((span) => {
+      try {
+        const src = span.getAttribute('src') || '';
+        const ext = src.split('.').pop()?.toLowerCase() ?? '';
+        if (!IMAGE_EXTS.has(ext)) return;
+
+        // Resolve via vault metadata cache (handles wikilink paths)
+        const file = this.app.metadataCache.getFirstLinkpathDest(src, this.card.notePath || '');
+        if (!file) return; // can't resolve — leave the span as-is
+
+        const resourcePath = this.app.vault.getResourcePath(file);
+
+        const img = document.createElement('img');
+        img.src = resourcePath;
+        img.alt = src;
+        img.addClass('sc-embed-image');
+
+        // Honour optional size from ![[image.png|300]] or ![[image.png|300x200]]
+        const altAttr = span.getAttribute('alt') || '';
+        const sizeMatch = altAttr.match(/(\d+)(?:x(\d+))?/);
+        if (sizeMatch) {
+          img.style.width = `${sizeMatch[1]}px`;
+          if (sizeMatch[2]) img.style.height = `${sizeMatch[2]}px`;
+        }
+
+        span.replaceWith(img);
+      } catch {
+        // leave embed span untouched on any error
+      }
+    });
   }
 
   private attachInternalLinkHandlers(container: HTMLElement): void {
@@ -938,6 +979,7 @@ export class CardComponent {
     }
     this.stopExpiryTick();
     this.unsubscribe.forEach(fn => fn());
+    this.unload();
     this.el.remove();
   }
 

@@ -308,6 +308,36 @@ export class CardStore {
     if (!silent) new Notice(`Imported ${files.length} notes from ${folder}`);
   }
 
+  async switchStorageFolder(newFolder: string): Promise<void> {
+    // Collect IDs before clearing so we can notify views
+    const oldIds = Array.from(this.cards.keys());
+
+    // Clear all cards from the store without touching any files on disk
+    this.cards.clear();
+    this.settings.cards = [];
+    await (this.plugin as SideCardsPlugin).saveSettings();
+
+    // Notify views to remove all old cards
+    for (const id of oldIds) {
+      this.eventBus.emit('card:deleted', id);
+    }
+
+    if (!newFolder || newFolder === '/') return;
+
+    // Create the folder if it doesn't exist yet
+    if (!(await this.app.vault.adapter.exists(newFolder))) {
+      await this.app.vault.createFolder(newFolder);
+    }
+
+    await this.importNotesFromFolderToSettings(newFolder, true);
+
+    // Trigger a single re-render for all newly imported cards
+    const allCards = this.getAll();
+    if (allCards.length > 0) {
+      this.eventBus.emit('card:added', allCards[0]);
+    }
+  }
+
   async saveCards(): Promise<void> {
     await this.saveToStorage();
   }

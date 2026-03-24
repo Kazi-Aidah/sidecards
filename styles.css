@@ -555,6 +555,31 @@
   overflow-wrap: break-word;
 }
 
+.sc-card .sc-content img.sc-embed-image {
+  max-width: 100%;
+  height: auto;
+  display: block;
+  border-radius: 4px;
+  margin: 4px 0;
+}
+
+.sc-card .sc-content .internal-embed {
+  display: block;
+  /* border: 1px solid var(--background-modifier-border); */
+  border-radius: 4px;
+  padding: 6px 8px;
+  margin: 4px 0;
+  font-size: 0.9em;
+  overflow: hidden;
+}
+
+.sc-card .sc-content .internal-embed .markdown-embed-title {
+  font-weight: 600;
+  margin-bottom: 4px;
+  font-size: 0.85em;
+  opacity: 0.7;
+}
+
 .sc-timestamp {
   font-size: small;
   color: var(--text-normal) !important;

@@ -521,7 +521,7 @@ export default class SideCardsPlugin extends Plugin {
           this.settings.storageFolder = val;
           this.settings.tutorialShown = true;
           await this.saveSettings();
-          void this.store.importNotesFromFolderToSettings(val, true);
+          await this.store.switchStorageFolder(val);
         }
         modal.close();
       })();
@@ -681,9 +681,14 @@ class SideCardsSettingTab extends PluginSettingTab {
         cb.setPlaceholder('Choose a folder')
           .setValue(this.plugin.settings.storageFolder || '')
           .onChange(async (value) => {
-            this.plugin.settings.storageFolder = value;
+            const newFolder = value.trim();
+            const oldFolder = this.plugin.settings.storageFolder;
+            this.plugin.settings.storageFolder = newFolder;
             this.plugin.settings.tutorialShown = true;
             await this.plugin.saveSettings();
+            if (newFolder !== oldFolder) {
+              await this.plugin.store.switchStorageFolder(newFolder);
+            }
           });
         const folders = new Set<string>(['/']);
         this.app.vault.getAllLoadedFiles().forEach((file) => { if (file.parent) folders.add(file.parent.path); });

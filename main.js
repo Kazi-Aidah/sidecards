@@ -765,8 +765,9 @@ var InlineAutocomplete = class {
 };
 
 // src/views/components/Card.ts
-var _CardComponent = class {
+var _CardComponent = class extends import_obsidian3.Component {
   constructor(container, card, store, app, plugin, settingsOverride) {
+    super();
     this.container = container;
     this.store = store;
     this.app = app;
@@ -783,6 +784,7 @@ var _CardComponent = class {
     this.scope = new import_obsidian3.Scope(this.app.scope);
     this.setupMockEditor();
     this.ensureGlobalMouseDownHandler();
+    this.load();
     void this.render();
     this.setupListeners();
   }
@@ -1182,12 +1184,46 @@ var _CardComponent = class {
       container.setAttribute("contenteditable", "false");
       container.removeClass("is-editing");
       const temp = document.createElement("div");
-      await import_obsidian3.MarkdownRenderer.render(this.app, this.card.content, temp, this.card.notePath || "", this.app);
+      try {
+        await import_obsidian3.MarkdownRenderer.render(this.app, this.card.content, temp, this.card.notePath || "", this);
+      } catch (e) {
+        temp.textContent = this.card.content;
+      }
       temp.querySelectorAll("mark").forEach((el) => el.addClass("cm-highlight"));
+      this.resolveImageEmbeds(temp);
       while (temp.firstChild)
         container.appendChild(temp.firstChild);
       this.attachInternalLinkHandlers(container);
     }
+  }
+  resolveImageEmbeds(container) {
+    const IMAGE_EXTS = /* @__PURE__ */ new Set(["png", "jpg", "jpeg", "gif", "webp", "svg", "bmp", "avif"]);
+    container.querySelectorAll("span.internal-embed").forEach((span) => {
+      var _a, _b;
+      try {
+        const src = span.getAttribute("src") || "";
+        const ext = (_b = (_a = src.split(".").pop()) == null ? void 0 : _a.toLowerCase()) != null ? _b : "";
+        if (!IMAGE_EXTS.has(ext))
+          return;
+        const file = this.app.metadataCache.getFirstLinkpathDest(src, this.card.notePath || "");
+        if (!file)
+          return;
+        const resourcePath = this.app.vault.getResourcePath(file);
+        const img = document.createElement("img");
+        img.src = resourcePath;
+        img.alt = src;
+        img.addClass("sc-embed-image");
+        const altAttr = span.getAttribute("alt") || "";
+        const sizeMatch = altAttr.match(/(\d+)(?:x(\d+))?/);
+        if (sizeMatch) {
+          img.style.width = `${sizeMatch[1]}px`;
+          if (sizeMatch[2])
+            img.style.height = `${sizeMatch[2]}px`;
+        }
+        span.replaceWith(img);
+      } catch (e) {
+      }
+    });
   }
   attachInternalLinkHandlers(container) {
     const links = container.querySelectorAll("a.internal-link, a[data-href]");
@@ -1605,6 +1641,7 @@ var _CardComponent = class {
     }
     this.stopExpiryTick();
     this.unsubscribe.forEach((fn) => fn());
+    this.unload();
     this.el.remove();
   }
   startExpiryTick() {
@@ -3435,6 +3472,25 @@ var CardStore = class {
     await this.persist();
     if (!silent)
       new import_obsidian5.Notice(`Imported ${files.length} notes from ${folder}`);
+  }
+  async switchStorageFolder(newFolder) {
+    const oldIds = Array.from(this.cards.keys());
+    this.cards.clear();
+    this.settings.cards = [];
+    await this.plugin.saveSettings();
+    for (const id of oldIds) {
+      this.eventBus.emit("card:deleted", id);
+    }
+    if (!newFolder || newFolder === "/")
+      return;
+    if (!await this.app.vault.adapter.exists(newFolder)) {
+      await this.app.vault.createFolder(newFolder);
+    }
+    await this.importNotesFromFolderToSettings(newFolder, true);
+    const allCards = this.getAll();
+    if (allCards.length > 0) {
+      this.eventBus.emit("card:added", allCards[0]);
+    }
   }
   async saveCards() {
     await this.saveToStorage();
@@ -5870,7 +5926,7 @@ var SideCardsPlugin = class extends import_obsidian10.Plugin {
           this.settings.storageFolder = val;
           this.settings.tutorialShown = true;
           await this.saveSettings();
-          void this.store.importNotesFromFolderToSettings(val, true);
+          await this.store.switchStorageFolder(val);
         }
         modal.close();
       })();
@@ -6011,9 +6067,14 @@ var SideCardsSettingTab = class extends import_obsidian10.PluginSettingTab {
     });
     new import_obsidian10.Setting(containerEl).setName("Storage folder").setDesc("Choose where to save notes created from cards.").addSearch((cb) => {
       cb.setPlaceholder("Choose a folder").setValue(this.plugin.settings.storageFolder || "").onChange(async (value) => {
-        this.plugin.settings.storageFolder = value;
+        const newFolder = value.trim();
+        const oldFolder = this.plugin.settings.storageFolder;
+        this.plugin.settings.storageFolder = newFolder;
         this.plugin.settings.tutorialShown = true;
         await this.plugin.saveSettings();
+        if (newFolder !== oldFolder) {
+          await this.plugin.store.switchStorageFolder(newFolder);
+        }
       });
       const folders = /* @__PURE__ */ new Set(["/"]);
       this.app.vault.getAllLoadedFiles().forEach((file) => {
