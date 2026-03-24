@@ -5,7 +5,10 @@ Quickly create cards in your Obsidian sidebar; color, tag, and drag them straigh
 
 <img alt="SideCards Banner" src="assets/SideCards-banner.png" />
 
----
+<br>
+
+> Create and choose an empty folder in your vault to create new cards from notes instead of importing them!
+
 
 ## Create & Manage Cards Instantly
 
