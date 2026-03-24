@@ -1,4 +1,3 @@
-/* eslint-disable obsidianmd/no-static-styles-assignment */
 import { CardStore } from "../../services/CardStore";
 
 export class TagAutocomplete {
@@ -12,17 +11,19 @@ export class TagAutocomplete {
   ) {
     const parent = this.input.parentElement || document.body;
     this.container = parent.createDiv('sc-tag-autocomplete');
-    this.container.style.display = 'none';
-    this.container.style.position = 'absolute';
-    this.container.style.bottom = 'calc(100% + 4px)';
-    this.container.style.left = '0';
-    this.container.style.right = '0';
-    this.container.style.maxHeight = '150px';
-    this.container.style.overflowY = 'auto';
-    this.container.style.border = '1px solid var(--background-modifier-border)';
-    this.container.style.borderRadius = '4px';
-    this.container.style.background = 'var(--background-primary)';
-    this.container.style.zIndex = '1000';
+    this.container.setCssProps({
+      'display': 'none',
+      'position': 'absolute',
+      'bottom': 'calc(100% + 4px)',
+      'left': '0',
+      'right': '0',
+      'max-height': '150px',
+      'overflow-y': 'auto',
+      'border': '1px solid var(--background-modifier-border)',
+      'border-radius': '4px',
+      'background': 'var(--background-primary)',
+      'z-index': '1000'
+    });
   }
 
   attach(): void {
@@ -56,10 +57,10 @@ export class TagAutocomplete {
       const item = this.container.createDiv('sc-autocomplete-item');
       item.textContent = '#' + tag;
       item.addEventListener('mouseenter', () => {
-        item.style.background = 'var(--background-modifier-hover)';
+        item.setCssProps({ 'background': 'var(--background-modifier-hover)' });
         this.selectedIndex = idx;
       });
-      item.addEventListener('mouseleave', () => { item.style.background = ''; });
+      item.addEventListener('mouseleave', () => { item.setCssProps({ 'background': '' }); });
       item.addEventListener('click', () => {
         const before = this.input.value.substring(0, lastHashIdx);
         const after = this.input.value.substring(cursorPos);
@@ -69,7 +70,7 @@ export class TagAutocomplete {
         this.update();
       });
     });
-    this.container.style.display = '';
+    this.container.setCssProps({ 'display': '' });
   }
 
   private onKeyDown(e: KeyboardEvent): void {
@@ -79,7 +80,10 @@ export class TagAutocomplete {
       e.preventDefault();
       if (e.key === 'ArrowDown') this.selectedIndex = (this.selectedIndex + 1) % items.length;
       else this.selectedIndex = (this.selectedIndex - 1 + items.length) % items.length;
-      items.forEach((item, idx) => ((item as HTMLElement).style.background = idx === this.selectedIndex ? 'var(--background-modifier-hover)' : ''));
+      items.forEach((item, idx) => {
+        if (idx === this.selectedIndex) (item as HTMLElement).setCssProps({ 'background': 'var(--background-modifier-hover)' });
+        else (item as HTMLElement).setCssProps({ 'background': '' });
+      });
       return;
     }
     if (e.key === 'Enter' && this.selectedIndex >= 0 && items[this.selectedIndex]) {
@@ -95,6 +99,6 @@ export class TagAutocomplete {
   }
 
   private hide(): void {
-    this.container.style.display = 'none';
+    this.container.setCssProps({ 'display': 'none' });
   }
 }

@@ -1,5 +1,5 @@
 
-import { ItemView, WorkspaceLeaf, Notice, Menu, TFile, setIcon, Scope, Editor } from "obsidian";
+import { ItemView, WorkspaceLeaf, Notice, Menu, TFile, setIcon, Scope, Editor, App } from "obsidian";
 import { CardStore } from "../services/CardStore";
 import { FilterService, FilterOptions } from "../services/FilterService";
 import { SortService, SortMode } from "../services/SortService";
@@ -12,6 +12,11 @@ import { InlineAutocomplete } from "./components/InlineAutocomplete";
 import { resolveAutoColor } from "../utils/dom";
 import { attachDragToReorder } from "../utils/drag-drop";
 
+interface AppWithInternals extends App {
+  keymap: { pushScope: (scope: Scope) => void; popScope: (scope: Scope) => void };
+  workspace: App['workspace'] & { activeEditor: { editor: Editor; editMode: boolean } | null };
+}
+
 export class CardSidebarView extends ItemView {
   private cardsContainer!: HTMLElement;
   private cardComponents: Map<string, CardComponent> = new Map();
@@ -20,7 +25,7 @@ export class CardSidebarView extends ItemView {
   private sortAscending: boolean = true;
   private editorScope: Scope;
   private editor!: Editor;
-  private owner!: any;
+  private owner!: { editor: Editor; editMode: boolean };
   private dragDropCleanup: (() => void) | null = null;
 
   constructor(
@@ -65,7 +70,7 @@ export class CardSidebarView extends ItemView {
       toggleItalic: () => this.toggleMarkdownWrapper("*"),
       toggleHighlight: () => this.toggleMarkdownWrapper("=="),
       toggleComment: () => this.toggleMarkdownWrapper("%%", "%%", true),
-    } as any;
+    } as unknown as Editor;
 
     this.owner = {
       editor: this.editor,
@@ -189,7 +194,7 @@ export class CardSidebarView extends ItemView {
   }
 
   private getEffectiveHotkeys(commandId: string): Array<{ modifiers?: string[]; key?: string }> {
-    const appAny = this.app as any;
+    const appAny = this.app as unknown as { hotkeyManager?: { getHotkeys?: (id: string) => Array<{ modifiers?: string[]; key?: string }>; customKeys?: Record<string, Array<{ modifiers?: string[]; key?: string }>> }; commands?: { commands?: Record<string, { hotkeys?: Array<{ modifiers?: string[]; key?: string }> }> } };
     const fromManager = appAny.hotkeyManager?.getHotkeys?.(commandId);
     if (Array.isArray(fromManager) && fromManager.length > 0) return fromManager;
     const custom = appAny.hotkeyManager?.customKeys?.[commandId];
@@ -206,7 +211,7 @@ export class CardSidebarView extends ItemView {
       highlight: ["editor:toggle-highlight"],
       comment: ["editor:toggle-comment"],
     };
-    const appAny = this.app as any;
+    const appAny = this.app as unknown as { commands?: { commands?: Record<string, { id?: string; name?: string }> } };
     const commands = appAny.commands?.commands || {};
     const matcher: Record<"bold" | "italic" | "highlight" | "comment", RegExp> = {
       bold: /bold/i,
@@ -215,9 +220,9 @@ export class CardSidebarView extends ItemView {
       comment: /comment/i,
     };
     const discovered = Object.values(commands)
-      .filter((cmd: any) => typeof cmd?.id === "string" && cmd.id.startsWith("editor:"))
-      .filter((cmd: any) => matcher[kind].test(String(cmd?.name || "")))
-      .map((cmd: any) => String(cmd.id));
+      .filter((cmd) => typeof cmd?.id === "string" && cmd.id.startsWith("editor:"))
+      .filter((cmd) => matcher[kind].test(String(cmd?.name || "")))
+      .map((cmd) => String(cmd.id));
     return Array.from(new Set([...defaults[kind], ...discovered]));
   }
 
@@ -386,12 +391,9 @@ export class CardSidebarView extends ItemView {
     this.plugin.registerEvent(this.app.vault.on('modify', async (file) => {
       if (!(file instanceof TFile)) return;
       // Skip if we're the ones writing this file (prevents expiry/color wipe race)
-      // @ts-ignore
       if (this.store._syncingPaths?.has(file.path)) return;
-      // @ts-ignore
       const pending = this.store._pendingTagWrites.get(file.path);
       if (pending) {
-        // @ts-ignore
         await this.store.handlePendingTagReapply(file, pending);
       } else {
         await this.store.updateCardFromNotePath(file.path);
@@ -522,7 +524,7 @@ export class CardSidebarView extends ItemView {
     const row = wrapper.createDiv('sc-search-row');
 
     const iconSpan = row.createSpan({ cls: 'sc-search-input-icon' });
-    try { setIcon(iconSpan as any, 'search'); } catch { /* icon may not exist */ }
+    try { setIcon(iconSpan, 'search'); } catch { /* icon may not exist */ }
 
     const input = row.createEl('input', { type: 'search', placeholder: 'Search cards…', cls: 'sc-search-input' });
     const clearBtn = row.createEl('button', { text: '✕', cls: 'sc-search-clear-btn' });
@@ -561,19 +563,14 @@ export class CardSidebarView extends ItemView {
     editorEl.addEventListener('input', updatePlaceholder);
 
     editorEl.addEventListener('focusin', () => {
-      // @ts-ignore
-      this.app.keymap.pushScope(this.editorScope);
-      // @ts-ignore
-      this.app.workspace.activeEditor = this.owner;
+      (this.app as unknown as AppWithInternals).keymap.pushScope(this.editorScope);
+      (this.app as unknown as AppWithInternals).workspace.activeEditor = this.owner as any;
     });
 
     editorEl.addEventListener('blur', () => {
-      // @ts-ignore
-      this.app.keymap.popScope(this.editorScope);
-      // @ts-ignore
-      if (this.app.workspace.activeEditor === this.owner) {
-        // @ts-ignore
-        this.app.workspace.activeEditor = null;
+      (this.app as unknown as AppWithInternals).keymap.popScope(this.editorScope);
+      if ((this.app as unknown as AppWithInternals).workspace.activeEditor === this.owner) {
+        (this.app as unknown as AppWithInternals).workspace.activeEditor = null;
       }
     });
 
@@ -630,7 +627,6 @@ export class CardSidebarView extends ItemView {
     sortBtn.title = 'Sort';
     try { setIcon(sortBtn, 'sort-desc'); } catch { sortBtn.textContent = 'Sort'; }
     sortBtn.addEventListener('click', (e) => {
-      void (async () => {
       const menu = new Menu();
       const modes: Array<{ key: SortMode; label: string }> = [
         { key: 'manual', label: 'Manual' },
@@ -662,7 +658,6 @@ export class CardSidebarView extends ItemView {
         });
       });
       menu.showAtMouseEvent(e);
-      })();
     });
 
     const pinToggleBtn = buttonContainer.createEl('button');
@@ -841,23 +836,8 @@ export class CardSidebarView extends ItemView {
     );
   }
 
-  async onClose(): Promise<void> {
-    this.dragDropCleanup?.();
-    this.dragDropCleanup = null;
-    if (this._masonryObserver) {
-      this._masonryObserver.disconnect();
-      this._masonryObserver = null;
-    }
-    if (this._masonryMutationObserver) {
-      this._masonryMutationObserver.disconnect();
-      this._masonryMutationObserver = null;
-    }
-    if (this._masonryTimeout) {
-      clearTimeout(this._masonryTimeout);
-      this._masonryTimeout = null;
-    }
-    this.cardComponents.forEach(comp => comp.destroy());
-    this.cardComponents.clear();
+  onClose() {
+    return Promise.resolve();
   }
 
   private applyLayoutMode(): void {

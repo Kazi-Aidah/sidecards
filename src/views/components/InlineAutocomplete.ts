@@ -112,7 +112,15 @@ export class InlineAutocomplete {
   /** Synchronously resolve iconic plugin icon for a file (no async needed for sync APIs). */
   private resolveIconicIcon(file: TFile): { icon: string; color?: string } | null {
     if (!this.app) return null;
-    const iconicPlugin = (this.app as any).plugins?.getPlugin?.('iconic');
+    type IconicEntry = { icon?: string; name?: string; value?: string; color?: string } | string;
+    type IconicPlugin = {
+      ruleManager?: { checkRuling?: (type: string, path: string) => { icon?: string; iconDefault?: string; color?: string } | null };
+      getFileItem?: (path: string) => { icon?: string; iconDefault?: string; color?: string } | null;
+      settings?: { fileIcons?: Record<string, IconicEntry> };
+      data?: { fileIcons?: Record<string, IconicEntry> };
+      fileIcons?: Record<string, IconicEntry>;
+    };
+    const iconicPlugin = (this.app as unknown as { plugins?: { getPlugin?: (id: string) => IconicPlugin | null } }).plugins?.getPlugin?.('iconic');
     if (!iconicPlugin) return null;
 
     const path = file.path;

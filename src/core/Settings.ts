@@ -12,7 +12,7 @@ export interface CustomCategory {
 
 export interface SideCardsSettings {
   storageFolder: string;
-  cards: any[]; // Raw card data
+  cards: Record<string, unknown>[]; // Raw card data
   cardStyle: number;
   cardBgOpacity: number;
   cardBorderShadowOpacity?: number; // 0–1, applied to border and shadow color alpha

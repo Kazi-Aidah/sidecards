@@ -1,5 +1,5 @@
 
-export function updateFrontmatter(content: string, key: string, value: any): string {
+export function updateFrontmatter(content: string, key: string, value: string | number | boolean | null | undefined): string {
   try {
     if (typeof content !== 'string') return content;
 
@@ -36,7 +36,6 @@ export function updateFrontmatter(content: string, key: string, value: any): str
     const newFm = filtered.join('\n');
     return '---\n' + newFm + '\n---\n' + rest;
   } catch (err) {
-    // eslint-disable-next-line no-undef
     console.error('Error in updateFrontmatter:', err);
     return content;
   }

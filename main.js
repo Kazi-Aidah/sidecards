@@ -236,7 +236,7 @@ var DateTimeModal = class extends import_obsidian.Modal {
     const relPanel = contentEl.createDiv("sc-dt-panel sc-dt-panel-relative");
     this.slotsContainer = relPanel.createDiv("sc-dt-slots");
     this.addSlot();
-    const addSlotBtn = relPanel.createEl("button", { text: "+ Add time unit", cls: "sc-dt-add-slot-btn" });
+    const addSlotBtn = relPanel.createEl("button", { text: "Add time unit", cls: "sc-dt-add-slot-btn" });
     addSlotBtn.addEventListener("click", () => this.addSlot());
     const presetsRow = relPanel.createDiv("sc-dt-presets");
     const presets = [
@@ -257,7 +257,7 @@ var DateTimeModal = class extends import_obsidian.Modal {
       });
     });
     const exactPanel = contentEl.createDiv("sc-dt-panel sc-dt-panel-exact");
-    exactPanel.style.display = "none";
+    exactPanel.setCssProps({ "display": "none" });
     const exactInput = exactPanel.createEl("input", { type: "datetime-local", cls: "sc-dt-exact-input" });
     if (this.card.expiresAt) {
       const d = new Date(this.card.expiresAt);
@@ -273,97 +273,68 @@ var DateTimeModal = class extends import_obsidian.Modal {
     relRadio.addEventListener("change", () => {
       if (relRadio.checked) {
         this.mode = "relative";
-        relPanel.style.display = "";
-        exactPanel.style.display = "none";
+        relPanel.setCssProps({ "display": "" });
+        exactPanel.setCssProps({ "display": "none" });
       }
     });
     exactRadio.addEventListener("change", () => {
       if (exactRadio.checked) {
         this.mode = "exact";
-        relPanel.style.display = "none";
-        exactPanel.style.display = "";
+        relPanel.setCssProps({ "display": "none" });
+        exactPanel.setCssProps({ "display": "" });
       }
     });
-    if (this.card.expiresAt) {
-      exactRadio.checked = true;
-      this.mode = "exact";
-      relPanel.style.display = "none";
-      exactPanel.style.display = "";
-    }
-    const actions = contentEl.createDiv("sc-dt-actions");
-    const clearBtn = actions.createEl("button", { text: "Clear" });
-    const saveBtn = actions.createEl("button", { text: "Save", cls: "mod-cta" });
-    clearBtn.addEventListener("click", () => {
-      void (async () => {
-        await this.store.setExpiry(this.card.id, null);
-        this.close();
-      })();
-    });
+    const actionsRow = contentEl.createDiv("sc-dt-actions-row");
+    const cancelBtn = actionsRow.createEl("button", { text: "Cancel", cls: "sc-dt-cancel-btn" });
+    cancelBtn.addEventListener("click", () => this.close());
+    const saveBtn = actionsRow.createEl("button", { text: "Save", cls: "sc-dt-save-btn mod-cta" });
     saveBtn.addEventListener("click", () => {
       void (async () => {
-        let ms = null;
-        if (this.mode === "exact") {
-          const raw = exactInput.value.trim();
-          if (raw) {
-            const parsed = new Date(raw).getTime();
-            if (!Number.isNaN(parsed))
-              ms = parsed;
-          }
-        } else {
+        let expiresAt = null;
+        if (this.mode === "relative") {
           let totalMs = 0;
-          for (const slot of this.slots) {
-            const v = parseFloat(slot.numInput.value) || 0;
-            if (v <= 0)
-              continue;
-            if (slot.unit === "seconds")
-              totalMs += v * 1e3;
-            else if (slot.unit === "minutes")
-              totalMs += v * 60 * 1e3;
-            else if (slot.unit === "hours")
-              totalMs += v * 3600 * 1e3;
-            else if (slot.unit === "days")
-              totalMs += v * 86400 * 1e3;
-            else if (slot.unit === "weeks")
-              totalMs += v * 7 * 86400 * 1e3;
-          }
+          this.slots.forEach((s) => {
+            const val = Number(s.numInput.value) || 0;
+            const unit = s.el.querySelector("select").value;
+            if (unit === "seconds")
+              totalMs += val * 1e3;
+            else if (unit === "minutes")
+              totalMs += val * 60 * 1e3;
+            else if (unit === "hours")
+              totalMs += val * 60 * 60 * 1e3;
+            else if (unit === "days")
+              totalMs += val * 24 * 60 * 60 * 1e3;
+            else if (unit === "weeks")
+              totalMs += val * 7 * 24 * 60 * 60 * 1e3;
+          });
           if (totalMs > 0)
-            ms = Date.now() + totalMs;
+            expiresAt = Date.now() + totalMs;
+        } else {
+          const val = exactInput.value;
+          if (val)
+            expiresAt = new Date(val).getTime();
         }
-        await this.store.setExpiry(this.card.id, ms);
+        await this.store.update(this.card.id, { expiresAt });
         this.close();
       })();
     });
   }
-  addSlot(defaultValue = 1, defaultUnit = "hours") {
-    const row = this.slotsContainer.createDiv("sc-dt-slot-row");
-    const numInput = row.createEl("input", { type: "number", cls: "sc-dt-slot-num" });
-    numInput.min = "1";
-    numInput.value = String(defaultValue);
-    const unitSelect = row.createEl("select", { cls: "sc-dt-slot-unit" });
+  addSlot(val = 1, unit = "minutes") {
+    const slotEl = this.slotsContainer.createDiv("sc-dt-slot");
+    const numInput = slotEl.createEl("input", { type: "number", cls: "sc-dt-slot-num" });
+    numInput.value = String(val);
+    const unitSelect = slotEl.createEl("select", { cls: "sc-dt-slot-unit" });
     ["seconds", "minutes", "hours", "days", "weeks"].forEach((u) => {
-      const opt = unitSelect.createEl("option", { value: u, text: u });
-      if (u === defaultUnit)
+      const opt = unitSelect.createEl("option", { text: u, value: u });
+      if (u === unit)
         opt.selected = true;
     });
-    const removeBtn = row.createEl("button", { text: "\u2715", cls: "sc-dt-slot-remove" });
-    const slot = {
-      value: defaultValue,
-      unit: defaultUnit,
-      el: row,
-      numInput
-    };
-    this.slots.push(slot);
-    numInput.addEventListener("input", () => {
-      slot.value = parseFloat(numInput.value) || 0;
-    });
-    unitSelect.addEventListener("change", () => {
-      slot.unit = unitSelect.value;
-    });
+    const removeBtn = slotEl.createEl("button", { text: "\xD7", cls: "sc-dt-slot-remove" });
+    const slotObj = { value: val, unit, el: slotEl, numInput };
+    this.slots.push(slotObj);
     removeBtn.addEventListener("click", () => {
-      if (this.slots.length <= 1)
-        return;
-      this.slots = this.slots.filter((s) => s !== slot);
-      row.remove();
+      this.slots = this.slots.filter((s) => s !== slotObj);
+      slotEl.remove();
     });
   }
   toInputValue(d) {
@@ -1017,24 +988,25 @@ var _CardComponent = class {
         });
         existingContent.addEventListener("keydown", (e) => {
           var _a2;
-          if (handleKeyWrap(e, existingContent, this.editor, ((_a2 = this.plugin.settings) == null ? void 0 : _a2.autoPairBrackets) !== false)) {
+          const keyboardEvent = e;
+          if (handleKeyWrap(keyboardEvent, existingContent, this.editor, ((_a2 = this.plugin.settings) == null ? void 0 : _a2.autoPairBrackets) !== false)) {
             e.preventDefault();
             e.stopPropagation();
             return;
           }
-          if (this.applyFormattingHotkey(e, existingContent))
+          if (this.applyFormattingHotkey(keyboardEvent, existingContent))
             return;
           const settings = this.store.settings;
           const normalizeKey = (v) => String(v || "").toLowerCase().replace(/[\s+_]+/g, "-").replace(/[^a-z0-9-]/g, "").replace(/-+/g, "-").replace(/^-|-$/g, "");
           const saveKey = normalizeKey(settings.saveKey || "enter");
           let pressed = "";
-          if (e.ctrlKey)
+          if (keyboardEvent.ctrlKey)
             pressed += "ctrl-";
-          if (e.shiftKey)
+          if (keyboardEvent.shiftKey)
             pressed += "shift-";
-          if (e.altKey)
+          if (keyboardEvent.altKey)
             pressed += "alt-";
-          if (e.key && e.key.toLowerCase() === "enter")
+          if (keyboardEvent.key && keyboardEvent.key.toLowerCase() === "enter")
             pressed += "enter";
           if (pressed === saveKey) {
             e.preventDefault();
@@ -1050,7 +1022,12 @@ var _CardComponent = class {
     const statusDef = this.card.status ? (this.store.settings.cardStatuses || []).find((s) => s.name === this.card.status.name) : null;
     const useStatusColor = this.store.settings.inheritStatusColor && statusDef;
     const effectiveColor = useStatusColor && statusDef ? statusDef.colorIndex ? `var(--card-color-${statusDef.colorIndex})` : statusDef.color : this.card.color;
-    applyCardColorToElement(this.el, effectiveColor, this.store.settings);
+    applyCardColorToElement(this.el, effectiveColor, {
+      cardStyle: this.store.settings.cardStyle,
+      cardBgOpacity: this.store.settings.cardBgOpacity,
+      borderThickness: this.store.settings.borderThickness,
+      cardBorderShadowOpacity: this.store.settings.cardBorderShadowOpacity
+    });
     if ((_a = this.card.status) == null ? void 0 : _a.name) {
       this.el.dataset.status = this.card.status.name;
     } else {
@@ -1058,11 +1035,15 @@ var _CardComponent = class {
     }
     const maxH = this.store.settings.maxCardHeight;
     if (maxH && maxH > 0) {
-      this.el.style.setProperty("max-height", `${maxH}px`, "important");
-      this.el.style.setProperty("overflow", "hidden", "important");
+      this.el.setCssProps({
+        "max-height": `${maxH}px`,
+        "overflow": "hidden"
+      });
     } else {
-      this.el.style.removeProperty("max-height");
-      this.el.style.removeProperty("overflow");
+      this.el.setCssProps({
+        "max-height": "",
+        "overflow": ""
+      });
     }
     if (this.store.settings.cardStyle === 2) {
       this.el.addClass("sc-style-2-masonry");
@@ -1111,24 +1092,28 @@ var _CardComponent = class {
       const pill = container.createDiv("sc-expiry-pill");
       pill.textContent = this.formatExpiryTimeLeft(this.card.expiresAt);
       if (this.card.status)
-        pill.style.marginBottom = "4px";
+        pill.setCssProps({ "margin-bottom": "4px" });
     }
     if (this.card.status) {
       const pill = container.createDiv("sc-status-pill");
       pill.textContent = this.card.status.name;
       const statusDef = (this.store.settings.cardStatuses || []).find((s) => s.name === this.card.status.name);
       if (statusDef == null ? void 0 : statusDef.colorIndex) {
-        pill.style.backgroundColor = `var(--card-color-${statusDef.colorIndex})`;
-        pill.style.color = statusDef.textColor || "#000";
+        pill.setCssProps({
+          "background-color": `var(--card-color-${statusDef.colorIndex})`,
+          "color": statusDef.textColor || "#000"
+        });
       } else {
-        pill.style.backgroundColor = this.card.status.color || "transparent";
-        pill.style.color = this.card.status.textColor || "#000";
+        pill.setCssProps({
+          "background-color": this.card.status.color || "transparent",
+          "color": this.card.status.textColor || "#000"
+        });
       }
     }
   }
   async renderContent(container) {
     if (this.isEditing || this.store.settings.disableCardRendering) {
-      container.setAttribute("contenteditable", "true");
+      container.setAttr("contenteditable", "true");
       container.textContent = this.card.content;
       container.addClass("is-editing");
       const ac = new InlineAutocomplete(container, this.store, this.app);
@@ -1197,7 +1182,7 @@ var _CardComponent = class {
       container.setAttribute("contenteditable", "false");
       container.removeClass("is-editing");
       const temp = document.createElement("div");
-      await import_obsidian3.MarkdownRenderer.render(this.app, this.card.content, temp, this.card.notePath || "", this.plugin);
+      await import_obsidian3.MarkdownRenderer.render(this.app, this.card.content, temp, this.card.notePath || "", this.app);
       temp.querySelectorAll("mark").forEach((el) => el.addClass("cm-highlight"));
       while (temp.firstChild)
         container.appendChild(temp.firstChild);
@@ -1536,8 +1521,9 @@ var _CardComponent = class {
   formatTimestamp(ts) {
     const created = this.getCreatedTime();
     const fmt = this.store.settings.datetimeFormat;
-    if (fmt && window.moment) {
-      return window.moment(created).format(fmt);
+    const momentFn = window.moment;
+    if (fmt && momentFn) {
+      return momentFn(created).format(fmt);
     }
     return new Date(created).toLocaleDateString() + " " + new Date(created).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
   }
@@ -1696,16 +1682,20 @@ async function flipAnimateAsync(container, asyncDomChange, opts = {}, settings) 
       const dx = oldRect.left - newRect.left;
       const dy = oldRect.top - newRect.top;
       if (dx !== 0 || dy !== 0) {
-        el.style.transition = "none";
-        el.style.transform = `translateY(${dy}px)`;
-        el.style.willChange = "transform";
+        el.setCssProps({
+          "transition": "none",
+          "transform": `translateY(${dy}px)`,
+          "will-change": "transform"
+        });
       }
     } else if (el) {
-      el.style.transition = "none";
-      el.style.transform = `translateY(${entranceOffset}px)`;
-      el.style.willChange = "transform";
+      el.setCssProps({
+        "transition": "none",
+        "transform": `translateY(${entranceOffset}px)`,
+        "will-change": "transform"
+      });
       if (!settings.disableCardFadeIn) {
-        el.style.opacity = "0";
+        el.setCssProps({ "opacity": "0" });
       }
     }
   });
@@ -1716,10 +1706,12 @@ async function flipAnimateAsync(container, asyncDomChange, opts = {}, settings) 
       return;
     const delay = i * stagger;
     setTimeout(() => {
-      el.style.transition = `transform ${duration}ms ease-out, opacity ${duration}ms ease-out`;
-      el.style.transform = "";
+      el.setCssProps({
+        "transition": `transform ${duration}ms ease-out, opacity ${duration}ms ease-out`,
+        "transform": ""
+      });
       if (!settings.disableCardFadeIn) {
-        el.style.opacity = "1";
+        el.setCssProps({ "opacity": "1" });
       }
     }, delay);
   });
@@ -1727,7 +1719,7 @@ async function flipAnimateAsync(container, asyncDomChange, opts = {}, settings) 
     ids.forEach((id) => {
       const el = elById.get(id);
       if (el) {
-        el.style.transition = "";
+        el.setCssProps({ "transition": "" });
       }
     });
   }, duration + ids.length * stagger + 50);
@@ -1745,33 +1737,34 @@ function animateCardsEntrance(container, opts = {}, settings) {
   const stagger = (_b = opts.stagger) != null ? _b : 34;
   const offsetPx = (_c = opts.offset) != null ? _c : 28;
   els.forEach((el) => {
-    el.style.transition = "none";
-    el.style.transform = `translateY(${offsetPx}px)`;
-    el.style.opacity = settings.disableCardFadeIn ? "1" : "0";
-    el.style.willChange = "transform, opacity";
+    el.setCssProps({
+      "transition": "none",
+      "transform": `translateY(${offsetPx}px)`,
+      "opacity": settings.disableCardFadeIn ? "1" : "0",
+      "will-change": "transform, opacity"
+    });
   });
   void container.offsetHeight;
   els.forEach((el, i) => {
     const delay = i * stagger;
     setTimeout(() => {
-      const transitions = [`transform ${duration}ms ease-out`];
-      if (!settings.disableCardFadeIn) {
-        transitions.push(`opacity ${duration}ms ease-out`);
-      }
-      el.style.transition = transitions.join(", ");
-      el.style.transform = "";
-      el.style.opacity = "1";
+      el.setCssProps({
+        "transition": `transform ${duration}ms cubic-bezier(0.2, 0, 0, 1), opacity ${duration}ms cubic-bezier(0.2, 0, 0, 1)`,
+        "transform": "translateY(0)",
+        "opacity": "1"
+      });
     }, delay);
   });
-  const total = duration + els.length * stagger + 50;
   setTimeout(() => {
     els.forEach((el) => {
-      el.style.transition = "";
-      el.style.willChange = "";
-      el.style.transform = "";
-      el.style.opacity = "";
+      el.setCssProps({
+        "transition": "",
+        "transform": "",
+        "opacity": "",
+        "will-change": ""
+      });
     });
-  }, total);
+  }, duration + els.length * stagger + 50);
 }
 
 // src/views/CardSidebarView.ts
@@ -1837,8 +1830,10 @@ function attachDragToReorder(container, plugin, getSortMode, onReorder, onPlaceh
     newOrder.splice(draggedIndex, 1);
     newOrder.splice(targetIdx, 0, draggedEl);
     originalOrder.forEach((c) => {
-      c.style.transition = "none";
-      c.style.transform = "";
+      c.setCssProps({
+        "transition": "none",
+        "transform": ""
+      });
     });
     newOrder.forEach((card) => container.appendChild(card));
     const rects = /* @__PURE__ */ new Map();
@@ -1850,10 +1845,12 @@ function attachDragToReorder(container, plugin, getSortMode, onReorder, onPlaceh
     for (const card of originalOrder) {
       if (card === draggedEl)
         continue;
-      card.style.transition = "none";
-      card.style.transform = card.style.transform || "";
+      card.setCssProps({
+        "transition": "none",
+        "transform": card.style.transform || ""
+      });
     }
-    container.offsetHeight;
+    void container.offsetHeight;
     for (const card of originalOrder) {
       if (card === draggedEl)
         continue;
@@ -1861,14 +1858,18 @@ function attachDragToReorder(container, plugin, getSortMode, onReorder, onPlaceh
       const to = flipRects.get(card);
       const dx = to.left - from.left;
       const dy = to.top - from.top;
-      card.style.transition = "transform 150ms cubic-bezier(0.25,0.46,0.45,0.94)";
-      card.style.transform = dx === 0 && dy === 0 ? "" : `translate(${dx}px,${dy}px)`;
+      card.setCssProps({
+        "transition": "transform 150ms cubic-bezier(0.25,0.46,0.45,0.94)",
+        "transform": dx === 0 && dy === 0 ? "" : `translate(${dx}px,${dy}px)`
+      });
     }
   }
   function clearTransforms() {
     getCards().forEach((c) => {
-      c.style.transition = "";
-      c.style.transform = "";
+      c.setCssProps({
+        "transition": "",
+        "transform": ""
+      });
     });
   }
   let dragStartX = 0;
@@ -1883,8 +1884,10 @@ function attachDragToReorder(container, plugin, getSortMode, onReorder, onPlaceh
     ghost == null ? void 0 : ghost.remove();
     ghost = null;
     if (draggedEl) {
-      draggedEl.style.opacity = "";
-      draggedEl.style.pointerEvents = "";
+      draggedEl.setCssProps({
+        "opacity": "",
+        "pointer-events": ""
+      });
     }
     clearTransforms();
     draggedEl = null;
@@ -1925,34 +1928,38 @@ function attachDragToReorder(container, plugin, getSortMode, onReorder, onPlaceh
     dragPending = false;
     active = true;
     const rect = snapRects.get(draggedEl);
-    draggedEl.style.opacity = "0";
-    draggedEl.style.pointerEvents = "none";
+    draggedEl.setCssProps({
+      "opacity": "0",
+      "pointer-events": "none"
+    });
     ghost = draggedEl.cloneNode(true);
     ghost.classList.add("sc-drag-ghost");
     const cs = getComputedStyle(draggedEl);
-    ghost.style.background = cs.background;
-    ghost.style.backgroundColor = cs.backgroundColor;
-    ghost.style.borderColor = cs.borderColor;
-    ghost.style.borderWidth = cs.borderWidth;
-    ghost.style.borderStyle = cs.borderStyle;
-    ghost.style.borderRadius = cs.borderRadius;
-    ghost.style.color = cs.color;
-    ghost.style.fontSize = cs.fontSize;
-    ghost.style.lineHeight = cs.lineHeight;
-    ghost.style.padding = cs.padding;
-    ghost.style.position = "fixed";
-    ghost.style.zIndex = "9999";
-    ghost.style.pointerEvents = "none";
-    ghost.style.width = rect.width + "px";
-    ghost.style.height = rect.height + "px";
-    ghost.style.left = e.clientX - offsetX + "px";
-    ghost.style.top = e.clientY - offsetY + "px";
-    ghost.style.margin = "0";
-    ghost.style.boxShadow = "0 8px 24px rgba(0,0,0,0.25)";
-    ghost.style.opacity = "1";
-    ghost.style.cursor = "grabbing";
-    ghost.style.transform = "";
-    ghost.style.transition = "";
+    ghost.setCssProps({
+      "background": cs.background,
+      "background-color": cs.backgroundColor,
+      "border-color": cs.borderColor,
+      "border-width": cs.borderWidth,
+      "border-style": cs.borderStyle,
+      "border-radius": cs.borderRadius,
+      "color": cs.color,
+      "font-size": cs.fontSize,
+      "line-height": cs.lineHeight,
+      "padding": cs.padding,
+      "position": "fixed",
+      "z-index": "9999",
+      "pointer-events": "none",
+      "width": rect.width + "px",
+      "height": rect.height + "px",
+      "left": e.clientX - offsetX + "px",
+      "top": e.clientY - offsetY + "px",
+      "margin": "0",
+      "box-shadow": "0 8px 24px rgba(0,0,0,0.25)",
+      "opacity": "1",
+      "cursor": "grabbing",
+      "transform": "",
+      "transition": ""
+    });
     document.body.appendChild(ghost);
   }
   const onMouseMove = (e) => {
@@ -1967,8 +1974,10 @@ function attachDragToReorder(container, plugin, getSortMode, onReorder, onPlaceh
     }
     if (!active || !ghost || !draggedEl)
       return;
-    ghost.style.left = e.clientX - offsetX + "px";
-    ghost.style.top = e.clientY - offsetY + "px";
+    ghost.setCssProps({
+      "left": e.clientX - offsetX + "px",
+      "top": e.clientY - offsetY + "px"
+    });
     const newTarget = computeTargetIndex(e.clientX, e.clientY);
     if (newTarget !== currentTargetIndex) {
       currentTargetIndex = newTarget;
@@ -1991,8 +2000,10 @@ function attachDragToReorder(container, plugin, getSortMode, onReorder, onPlaceh
     active = false;
     ghost == null ? void 0 : ghost.remove();
     ghost = null;
-    draggedEl.style.opacity = "";
-    draggedEl.style.pointerEvents = "";
+    draggedEl.setCssProps({
+      "opacity": "",
+      "pointer-events": ""
+    });
     clearTransforms();
     const newOrder = originalOrder.slice();
     newOrder.splice(draggedIndex, 1);
@@ -2021,8 +2032,10 @@ function attachDragToReorder(container, plugin, getSortMode, onReorder, onPlaceh
     document.removeEventListener("mouseup", onMouseUp);
     ghost == null ? void 0 : ghost.remove();
     if (draggedEl) {
-      draggedEl.style.opacity = "";
-      draggedEl.style.pointerEvents = "";
+      draggedEl.setCssProps({
+        "opacity": "",
+        "pointer-events": ""
+      });
     }
     clearTransforms();
     ghost = null;
@@ -2056,7 +2069,7 @@ function attachPinnedListDragToReorder(container, getPaths, onReorder) {
     if (!indicator) {
       indicator = document.createElement("div");
       indicator.className = "sc-pinned-drop-indicator";
-      indicator.style.cssText = "position:absolute;left:0;right:0;height:2px;background:var(--interactive-accent);border-radius:2px;pointer-events:none;z-index:100;display:none;";
+      indicator.setCssStyles({ position: "absolute", left: "0", right: "0", height: "2px", background: "var(--interactive-accent)", borderRadius: "2px", pointerEvents: "none", zIndex: "100", display: "none" });
     }
     return indicator;
   }
@@ -2085,10 +2098,12 @@ function attachPinnedListDragToReorder(container, getPaths, onReorder) {
       const target = items[idx].getBoundingClientRect();
       top = target.top - containerRect.top;
     }
-    ind.style.display = "block";
-    ind.style.top = top - 1 + "px";
+    ind.setCssProps({
+      "display": "block",
+      "top": top - 1 + "px"
+    });
     if (!ind.parentElement) {
-      container.style.position = "relative";
+      container.setCssProps({ "position": "relative" });
       container.appendChild(ind);
     }
   }
@@ -2108,17 +2123,26 @@ function attachPinnedListDragToReorder(container, getPaths, onReorder) {
     ghost = item.cloneNode(true);
     ghost.classList.add("sc-drag-ghost");
     const cs = getComputedStyle(item);
-    ghost.style.cssText = `
-      position:fixed;z-index:9999;pointer-events:none;
-      width:${rect.width}px;height:${rect.height}px;
-      left:${rect.left}px;top:${rect.top}px;
-      background:${cs.background};background-color:${cs.backgroundColor};
-      border-radius:${cs.borderRadius};padding:${cs.padding};
-      font-size:${cs.fontSize};color:${cs.color};
-      box-shadow:0 4px 16px rgba(0,0,0,0.2);opacity:0.9;cursor:grabbing;
-    `;
+    ghost.setCssStyles({
+      position: "fixed",
+      zIndex: "9999",
+      pointerEvents: "none",
+      width: rect.width + "px",
+      height: rect.height + "px",
+      left: rect.left + "px",
+      top: rect.top + "px",
+      background: cs.background,
+      backgroundColor: cs.backgroundColor,
+      borderRadius: cs.borderRadius,
+      padding: cs.padding,
+      fontSize: cs.fontSize,
+      color: cs.color,
+      boxShadow: "0 4px 16px rgba(0,0,0,0.2)",
+      opacity: "0.9",
+      cursor: "grabbing"
+    });
     document.body.appendChild(ghost);
-    item.style.opacity = "0.3";
+    item.setCssProps({ "opacity": "0.3" });
     active = true;
     dropIndex = computeDropIndex(e.clientY);
     positionIndicator(dropIndex);
@@ -2129,7 +2153,7 @@ function attachPinnedListDragToReorder(container, getPaths, onReorder) {
   const onMouseMove = (e) => {
     if (!active || !ghost)
       return;
-    ghost.style.top = e.clientY - offsetY + "px";
+    ghost.setCssProps({ "top": e.clientY - offsetY + "px" });
     dropIndex = computeDropIndex(e.clientY);
     positionIndicator(dropIndex);
   };
@@ -2142,9 +2166,9 @@ function attachPinnedListDragToReorder(container, getPaths, onReorder) {
     ghost == null ? void 0 : ghost.remove();
     ghost = null;
     if (indicator)
-      indicator.style.display = "none";
+      indicator.setCssProps({ "display": "none" });
     if (draggedEl)
-      draggedEl.style.opacity = "";
+      draggedEl.setCssProps({ "opacity": "" });
     const paths = getPaths().slice();
     const fromIdx = paths.indexOf(draggedPath);
     if (fromIdx !== -1 && dropIndex !== -1) {
@@ -2165,7 +2189,7 @@ function attachPinnedListDragToReorder(container, getPaths, onReorder) {
     ghost == null ? void 0 : ghost.remove();
     indicator == null ? void 0 : indicator.remove();
     if (draggedEl)
-      draggedEl.style.opacity = "";
+      draggedEl.setCssProps({ "opacity": "" });
     ghost = null;
     draggedEl = null;
     active = false;
@@ -2751,40 +2775,38 @@ var CardSidebarView = class extends import_obsidian4.ItemView {
       sortBtn.textContent = "Sort";
     }
     sortBtn.addEventListener("click", (e) => {
-      void (async () => {
-        const menu = new import_obsidian4.Menu();
-        const modes = [
-          { key: "manual", label: "Manual" },
-          { key: "created", label: "Created Time" },
-          { key: "modified", label: "Modified Time" },
-          { key: "alpha", label: "A \u2192 Z" },
-          { key: "status", label: "Status" }
-        ];
-        modes.forEach((m) => {
-          menu.addItem((item) => {
-            item.setTitle(m.label);
-            if (this.currentSortMode === m.key)
-              item.setChecked(true);
-            item.onClick(async () => {
-              this.currentSortMode = m.key;
-              this.plugin.settings.sortMode = m.key;
-              await this.plugin.saveSettings();
-              await this.renderCards();
-            });
-          });
-        });
-        menu.addSeparator();
+      const menu = new import_obsidian4.Menu();
+      const modes = [
+        { key: "manual", label: "Manual" },
+        { key: "created", label: "Created Time" },
+        { key: "modified", label: "Modified Time" },
+        { key: "alpha", label: "A \u2192 Z" },
+        { key: "status", label: "Status" }
+      ];
+      modes.forEach((m) => {
         menu.addItem((item) => {
-          item.setTitle(this.sortAscending ? "Direction: Ascending" : "Direction: Descending");
+          item.setTitle(m.label);
+          if (this.currentSortMode === m.key)
+            item.setChecked(true);
           item.onClick(async () => {
-            this.sortAscending = !this.sortAscending;
-            this.plugin.settings.sortAscending = this.sortAscending;
+            this.currentSortMode = m.key;
+            this.plugin.settings.sortMode = m.key;
             await this.plugin.saveSettings();
             await this.renderCards();
           });
         });
-        menu.showAtMouseEvent(e);
-      })();
+      });
+      menu.addSeparator();
+      menu.addItem((item) => {
+        item.setTitle(this.sortAscending ? "Direction: Ascending" : "Direction: Descending");
+        item.onClick(async () => {
+          this.sortAscending = !this.sortAscending;
+          this.plugin.settings.sortAscending = this.sortAscending;
+          await this.plugin.saveSettings();
+          await this.renderCards();
+        });
+      });
+      menu.showAtMouseEvent(e);
     });
     const pinToggleBtn = buttonContainer.createEl("button");
     pinToggleBtn.addClass("sc-icon-btn");
@@ -2960,24 +2982,8 @@ var CardSidebarView = class extends import_obsidian4.ItemView {
       }
     );
   }
-  async onClose() {
-    var _a;
-    (_a = this.dragDropCleanup) == null ? void 0 : _a.call(this);
-    this.dragDropCleanup = null;
-    if (this._masonryObserver) {
-      this._masonryObserver.disconnect();
-      this._masonryObserver = null;
-    }
-    if (this._masonryMutationObserver) {
-      this._masonryMutationObserver.disconnect();
-      this._masonryMutationObserver = null;
-    }
-    if (this._masonryTimeout) {
-      clearTimeout(this._masonryTimeout);
-      this._masonryTimeout = null;
-    }
-    this.cardComponents.forEach((comp) => comp.destroy());
-    this.cardComponents.clear();
+  onClose() {
+    return Promise.resolve();
   }
   applyLayoutMode() {
     if (!this.cardsContainer)
@@ -3558,11 +3564,6 @@ var CardStore = class {
     await this.cleanupStaleTodayCards(todayStartMs);
   }
   async cleanupStaleTodayCards(todayStartMs) {
-    if (todayStartMs === void 0) {
-      const todayStart = new Date();
-      todayStart.setHours(0, 0, 0, 0);
-      todayStartMs = todayStart.getTime();
-    }
     const stale = this.getAll().filter((c) => {
       var _a, _b;
       if (String(c.category || "").toLowerCase() !== "today")
@@ -3790,7 +3791,6 @@ var SortService = class {
 // src/core/EventBus.ts
 var EventBus = class {
   constructor() {
-    // eslint-disable-next-line @typescript-eslint/no-unsafe-function-type
     this.listeners = /* @__PURE__ */ new Map();
   }
   on(event, callback) {
@@ -3807,7 +3807,7 @@ var EventBus = class {
     var _a;
     (_a = this.listeners.get(event)) == null ? void 0 : _a.forEach((cb) => {
       try {
-        cb(data);
+        void cb(data);
       } catch (e) {
         console.error(`Error in event handler for ${event}:`, e);
       }
@@ -3817,7 +3817,7 @@ var EventBus = class {
     const handlers = Array.from(this.listeners.get(event) || []);
     await Promise.all(handlers.map((cb) => {
       try {
-        return cb(data);
+        return Promise.resolve(cb(data));
       } catch (e) {
         console.error(`Error in async event handler for ${event}:`, e);
         return Promise.resolve();
@@ -4188,7 +4188,7 @@ var QuickCardWithFilterModal = class extends import_obsidian7.Modal {
     colors.forEach((color, idx) => {
       const swatch = colorContainer.createDiv("sc-modal-color-swatch");
       const hex = this.resolveColor(color.var);
-      swatch.style.backgroundColor = hex;
+      swatch.setCssProps({ "background-color": hex });
       swatch.title = this.store.settings.colorNames[idx] || color.name;
       if (selectedColor === color.var)
         swatch.addClass("is-selected");
@@ -4205,20 +4205,20 @@ var QuickCardWithFilterModal = class extends import_obsidian7.Modal {
       cls: "sc-modal-tags-input"
     });
     const tagsAutocomplete = tagsWrapper.createDiv("sc-modal-tags-autocomplete");
-    tagsAutocomplete.style.display = "none";
+    tagsAutocomplete.setCssProps({ "display": "none" });
     let selectedTagIdx = -1;
     const updateAutocomplete = () => {
       const val = tagsInput.value;
       const lastComma = val.lastIndexOf(",");
       const currentTag = val.substring(lastComma + 1).trim().toLowerCase();
       if (!currentTag) {
-        tagsAutocomplete.style.display = "none";
+        tagsAutocomplete.setCssProps({ "display": "none" });
         return;
       }
       const allTags = this.getAllTags();
       const suggestions = allTags.filter((t) => t.startsWith(currentTag)).slice(0, 8);
       if (suggestions.length === 0) {
-        tagsAutocomplete.style.display = "none";
+        tagsAutocomplete.setCssProps({ "display": "none" });
         return;
       }
       tagsAutocomplete.empty();
@@ -4229,11 +4229,11 @@ var QuickCardWithFilterModal = class extends import_obsidian7.Modal {
         item.addEventListener("click", () => {
           const before = val.substring(0, lastComma + 1);
           tagsInput.value = (before ? before + " " : "") + tag + ", ";
-          tagsAutocomplete.style.display = "none";
+          tagsAutocomplete.setCssProps({ "display": "none" });
           tagsInput.focus();
         });
       });
-      tagsAutocomplete.style.display = "block";
+      tagsAutocomplete.setCssProps({ "display": "block" });
     };
     tagsInput.addEventListener("input", updateAutocomplete);
     tagsInput.addEventListener("keydown", (e) => {
@@ -4283,7 +4283,7 @@ var QuickCardWithFilterModal = class extends import_obsidian7.Modal {
         const view = (_b = this.app.workspace.getLeavesOfType("card-sidebar")[0]) == null ? void 0 : _b.view;
         if (view) {
           view.activeFilters.category = category;
-          await view.renderCards();
+          view.renderCards();
         }
       }
       this.close();
@@ -4353,8 +4353,10 @@ var SearchModal = class extends import_obsidian8.Modal {
       cls: "sc-search-input"
     });
     this.resultsContainer = contentEl.createDiv("sc-search-results");
-    this.resultsContainer.style.maxHeight = "400px";
-    this.resultsContainer.style.overflow = "auto";
+    this.resultsContainer.setCssProps({
+      "max-height": "400px",
+      "overflow": "auto"
+    });
     this.searchInput.focus();
     this.searchInput.addEventListener("input", () => this.renderResults());
     this.searchInput.addEventListener("keydown", (e) => this.handleKeydown(e));
@@ -4369,9 +4371,11 @@ var SearchModal = class extends import_obsidian8.Modal {
     this.searchResults.forEach((card, idx) => {
       const result = this.resultsContainer.createDiv("sc-search-result");
       result.textContent = card.content.substring(0, 100) + (card.content.length > 100 ? "..." : "");
-      result.style.padding = "8px";
-      result.style.cursor = "pointer";
-      result.style.borderLeft = `4px solid ${card.color}`;
+      result.setCssProps({
+        "padding": "8px",
+        "cursor": "pointer",
+        "border-left": `4px solid ${card.color}`
+      });
       result.dataset.index = String(idx);
       result.addEventListener("click", () => this.selectResult(card));
       result.addEventListener("mouseenter", () => {
@@ -4385,10 +4389,10 @@ var SearchModal = class extends import_obsidian8.Modal {
     els.forEach((el, idx) => {
       if (idx === this.selectedIndex) {
         el.addClass("selected");
-        el.style.backgroundColor = "var(--background-modifier-hover)";
+        el.setCssProps({ "background-color": "var(--background-modifier-hover)" });
       } else {
         el.removeClass("selected");
-        el.style.backgroundColor = "";
+        el.setCssProps({ "background-color": "" });
       }
     });
   }
@@ -4680,7 +4684,7 @@ var SideCardsHomeView = class extends import_obsidian9.ItemView {
     return "sidecards-home";
   }
   getDisplayText() {
-    return "SideCards";
+    return "Sidecards";
   }
   getIcon() {
     return "home";
@@ -4698,7 +4702,8 @@ var SideCardsHomeView = class extends import_obsidian9.ItemView {
     const topMargin = (_b = this.plugin.settings.homepageTopMargin) != null ? _b : 70;
     container.style.setProperty("--sc-home-top-margin", `${topMargin}px`);
     const topSection = main.createDiv({ cls: "sc-home-top" });
-    topSection.createEl("h2", { text: this.plugin.settings.homepageName || "SideCards", cls: "sc-home-title" });
+    topSection.createEl("h2", { text: this.plugin.settings.homepageName || /*eslint-disable-next-line obsidianmd/ui/sentence-case*/
+    "SideCards", cls: "sc-home-title" });
     const paletteRow = topSection.createDiv({ cls: "sc-home-palette-row" });
     if (this.plugin.settings.hideCategoryDropdown && this.plugin.settings.hideColorSwatches) {
       paletteRow.addClass("sc-hidden");
@@ -4845,11 +4850,11 @@ var SideCardsHomeView = class extends import_obsidian9.ItemView {
     this.store.eventBus.on("card:added", onCardChange);
     this.store.eventBus.on("card:updated", onCardChange);
     this.store.eventBus.on("card:deleted", onCardChange);
-    await this.renderCards(cardList);
+    this.renderCards(cardList);
   }
   async renderFileList(container, type) {
     container.empty();
-    const files = type === "recent" ? await this.getRecentFiles() : await this.getPinnedFiles();
+    const files = type === "recent" ? this.getRecentFiles() : this.getPinnedFiles();
     if (files.length === 0) {
       container.createDiv({ text: `No ${type} notes found`, cls: "sc-home-empty-msg" });
       return;
@@ -4868,7 +4873,10 @@ var SideCardsHomeView = class extends import_obsidian9.ItemView {
         item.addEventListener("contextmenu", (e) => {
           e.preventDefault();
           const menu = new import_obsidian9.Menu();
-          menu.addItem((i) => i.setTitle("Unpin from SideCards").setIcon("pin-off").onClick(async () => {
+          menu.addItem((i) => i.setTitle(
+            /*eslint-disable-next-line obsidianmd/ui/sentence-case*/
+            "Unpin from SideCards"
+          ).setIcon("pin-off").onClick(async () => {
             this.plugin.settings.pinnedNotes = (this.plugin.settings.pinnedNotes || []).filter((p) => p !== file.path);
             await this.plugin.saveSettings();
             await this.renderFileList(container, "pinned");
@@ -4922,7 +4930,12 @@ var SideCardsHomeView = class extends import_obsidian9.ItemView {
       }
     }
     if (!rendered && iconValue.includes("<svg")) {
-      iconEl.innerHTML = iconValue;
+      iconEl.empty();
+      const parser = new DOMParser();
+      const doc = parser.parseFromString(iconValue, "image/svg+xml");
+      const svgEl = doc.querySelector("svg");
+      if (svgEl)
+        iconEl.appendChild(svgEl);
       rendered = true;
     }
     if (!rendered && /^:.*:$/.test(iconValue)) {
@@ -5050,12 +5063,12 @@ var SideCardsHomeView = class extends import_obsidian9.ItemView {
     const cache = this.iconicFileIconsCache || {};
     return this.resolveIconicIconEntry(cache[path]);
   }
-  async getRecentFiles() {
+  getRecentFiles() {
     var _a;
     const limit = (_a = this.plugin.settings.recentNotesLimit) != null ? _a : 5;
     return this.app.vault.getMarkdownFiles().sort((a, b) => b.stat.mtime - a.stat.mtime).slice(0, limit);
   }
-  async getPinnedFiles() {
+  getPinnedFiles() {
     const pinned = [];
     if (this.plugin.settings.pinnedNotes) {
       this.plugin.settings.pinnedNotes.forEach((path) => {
@@ -5079,7 +5092,7 @@ var SideCardsHomeView = class extends import_obsidian9.ItemView {
       return;
     const titleEl = main.querySelector(".sc-home-title");
     if (titleEl)
-      titleEl.textContent = this.plugin.settings.homepageName || "SideCards";
+      titleEl.textContent = this.plugin.settings.homepageName || "Sidecards";
     const maxW = (_a = this.plugin.settings.homepageMaxWidth) != null ? _a : 1e3;
     this.containerEl.style.setProperty("--sc-home-max-width", `${maxW}px`);
     const topMargin = (_b = this.plugin.settings.homepageTopMargin) != null ? _b : 70;
@@ -5095,13 +5108,13 @@ var SideCardsHomeView = class extends import_obsidian9.ItemView {
     if (recentList)
       await this.renderFileList(recentList, "recent");
     if (this.cardListEl)
-      await this.renderCards(this.cardListEl);
+      this.renderCards(this.cardListEl);
   }
   async refreshHomeContent(cardList, pinnedList, recentList) {
     this.iconicFileIconsCache = null;
     await this.renderFileList(pinnedList, "pinned");
     await this.renderFileList(recentList, "recent");
-    await this.renderCards(cardList);
+    this.renderCards(cardList);
   }
   renderToolbar(container, editorEl, cardList, pinnedList, recentList) {
     container.empty();
@@ -5126,7 +5139,7 @@ var SideCardsHomeView = class extends import_obsidian9.ItemView {
             this.currentSortMode = mode;
             this.plugin.settings.sortMode = mode;
             await this.plugin.saveSettings();
-            await this.renderCards(cardList);
+            this.renderCards(cardList);
           });
         });
       });
@@ -5136,7 +5149,7 @@ var SideCardsHomeView = class extends import_obsidian9.ItemView {
           this.sortAscending = !this.sortAscending;
           this.plugin.settings.sortAscending = this.sortAscending;
           await this.plugin.saveSettings();
-          await this.renderCards(cardList);
+          this.renderCards(cardList);
         });
       });
       menu.showAtMouseEvent(e);
@@ -5239,7 +5252,7 @@ var SideCardsHomeView = class extends import_obsidian9.ItemView {
       });
     });
   }
-  async renderCards(container) {
+  renderCards(container) {
     var _a;
     const gen = ++this.cardRenderGen;
     container.empty();
@@ -5382,12 +5395,8 @@ var SideCardsHomeView = class extends import_obsidian9.ItemView {
     this.selectedTags = [];
     new import_obsidian9.Notice("Card created");
   }
-  async onClose() {
-    var _a;
-    (_a = this.dragDropCleanup) == null ? void 0 : _a.call(this);
-    this.dragDropCleanup = null;
-    this.cardComponents.forEach((c) => c.destroy());
-    this.cardComponents.clear();
+  onClose() {
+    return Promise.resolve();
   }
 };
 
@@ -5396,18 +5405,19 @@ var SideCardsPlugin = class extends import_obsidian10.Plugin {
   async onload() {
     var _a;
     await this.loadSettings();
-    const root = document.documentElement;
-    root.style.setProperty("--card-color-1", this.settings.color1 || "#8392a4");
-    root.style.setProperty("--card-color-2", this.settings.color2 || "#eb3b5a");
-    root.style.setProperty("--card-color-3", this.settings.color3 || "#fa8231");
-    root.style.setProperty("--card-color-4", this.settings.color4 || "#e5a216");
-    root.style.setProperty("--card-color-5", this.settings.color5 || "#20bf6b");
-    root.style.setProperty("--card-color-6", this.settings.color6 || "#2d98da");
-    root.style.setProperty("--card-color-7", this.settings.color7 || "#8854d0");
-    root.style.setProperty("--card-color-8", this.settings.color8 || "#e832c1");
-    root.style.setProperty("--card-color-9", this.settings.color9 || "#e83289");
-    root.style.setProperty("--card-color-10", this.settings.color10 || "#965b3b");
-    root.style.setProperty("--card-border-radius", `${(_a = this.settings.borderRadius) != null ? _a : 6}px`);
+    document.documentElement.setCssProps({
+      "--card-color-1": this.settings.color1 || "#8392a4",
+      "--card-color-2": this.settings.color2 || "#eb3b5a",
+      "--card-color-3": this.settings.color3 || "#fa8231",
+      "--card-color-4": this.settings.color4 || "#e5a216",
+      "--card-color-5": this.settings.color5 || "#20bf6b",
+      "--card-color-6": this.settings.color6 || "#2d98da",
+      "--card-color-7": this.settings.color7 || "#8854d0",
+      "--card-color-8": this.settings.color8 || "#e832c1",
+      "--card-color-9": this.settings.color9 || "#e83289",
+      "--card-color-10": this.settings.color10 || "#965b3b",
+      "--card-border-radius": `${(_a = this.settings.borderRadius) != null ? _a : 6}px`
+    });
     this.eventBus = new EventBus();
     this.filterService = new FilterService();
     this.sortService = new SortService(this.settings);
@@ -5467,19 +5477,19 @@ var SideCardsPlugin = class extends import_obsidian10.Plugin {
             this.settings.pinnedNotes = [];
           if (isPinned) {
             this.settings.pinnedNotes = this.settings.pinnedNotes.filter((p) => p !== file.path);
-            new import_obsidian10.Notice(`Unpinned ${file.name} from Sidecards Homepage.`);
+            new import_obsidian10.Notice(`Unpinned ${file.name} from SideCards Homepage.`);
           } else {
             if (this.settings.showPinnedNotes !== false) {
               this.settings.pinnedNotes.push(file.path);
-              new import_obsidian10.Notice(`Pinned ${file.name} to Sidecards Homepage.`);
+              new import_obsidian10.Notice(`Pinned ${file.name} to SideCards Homepage.`);
             }
           }
           void this.saveSettings();
           const leaves = this.app.workspace.getLeavesOfType("sidecards-home");
           leaves.forEach((leaf) => {
-            if (leaf.view && typeof leaf.view.refreshPinnedNotes === "function") {
-              leaf.view.refreshPinnedNotes();
-            }
+            const v = leaf.view;
+            if (typeof v.refreshPinnedNotes === "function")
+              v.refreshPinnedNotes();
           });
         }
         return this.settings.showPinnedNotes !== false;
@@ -5541,9 +5551,24 @@ var SideCardsPlugin = class extends import_obsidian10.Plugin {
         return false;
       }
     });
-    this.addRibbonIcon("home", "Open sidecards homepage", () => void this.activateHomeView());
-    this.addRibbonIcon("rows-3", "Open sidecards sidebar", () => void this.activateView());
-    this.addRibbonIcon("rectangle-horizontal", "Add card to sidecards", () => new QuickCardWithFilterModal(this.app, this, this.store).open());
+    this.addRibbonIcon(
+      "home",
+      /*eslint-disable-next-line obsidianmd/ui/sentence-case*/
+      "Open SideCards homepage",
+      () => void this.activateHomeView()
+    );
+    this.addRibbonIcon(
+      "rows-3",
+      /*eslint-disable-next-line obsidianmd/ui/sentence-case*/
+      "Open SideCards sidebar",
+      () => void this.activateView()
+    );
+    this.addRibbonIcon(
+      "rectangle-horizontal",
+      /*eslint-disable-next-line obsidianmd/ui/sentence-case*/
+      "Add card to SideCards",
+      () => new QuickCardWithFilterModal(this.app, this, this.store).open()
+    );
     this.addSettingTab(new SideCardsSettingTab(this.app, this));
     this.registerEvent(
       this.app.vault.on("rename", (file, oldPath) => {
@@ -5562,7 +5587,13 @@ var SideCardsPlugin = class extends import_obsidian10.Plugin {
           menu.addItem((item) => {
             var _a2;
             const isPinned = (_a2 = this.settings.pinnedNotes) == null ? void 0 : _a2.includes(file.path);
-            item.setTitle(isPinned ? "Unpin from Sidecards Homepage" : "Pin to Sidecards Homepage").setIcon("pin").onClick(async () => {
+            item.setTitle(isPinned ? (
+              /*eslint-disable-next-line obsidianmd/ui/sentence-case*/
+              "Unpin from SideCards Homepage"
+            ) : (
+              /*eslint-disable-next-line obsidianmd/ui/sentence-case*/
+              "Pin to SideCards Homepage"
+            )).setIcon("pin").onClick(async () => {
               if (!this.settings.pinnedNotes)
                 this.settings.pinnedNotes = [];
               if (isPinned) {
@@ -5573,9 +5604,9 @@ var SideCardsPlugin = class extends import_obsidian10.Plugin {
               await this.saveSettings();
               const leaves = this.app.workspace.getLeavesOfType("sidecards-home");
               leaves.forEach((leaf) => {
-                if (leaf.view && typeof leaf.view.refreshPinnedNotes === "function") {
-                  leaf.view.refreshPinnedNotes();
-                }
+                const v = leaf.view;
+                if (typeof v.refreshPinnedNotes === "function")
+                  v.refreshPinnedNotes();
               });
             });
           });
@@ -5660,7 +5691,7 @@ var SideCardsPlugin = class extends import_obsidian10.Plugin {
       const cm = mdView.editor.cm;
       if (cm == null ? void 0 : cm.posAtCoords) {
         const pos = cm.posAtCoords({ x: ev.clientX, y: ev.clientY }, false);
-        if (pos != null)
+        if (pos != null && cm.dispatch)
           cm.dispatch({ selection: { anchor: pos } });
       }
       mdView.editor.replaceSelection(content);
@@ -5685,43 +5716,17 @@ var SideCardsPlugin = class extends import_obsidian10.Plugin {
     });
   }
   onunload() {
-    const el = document.getElementById("sc-status-colors");
-    if (el)
-      el.remove();
     if (this._cardDropCleanup)
       this._cardDropCleanup();
   }
   applyButtonPadding() {
     var _a;
     const paddingPx = (_a = this.settings.buttonPaddingBottom) != null ? _a : 26;
-    let styleEl = document.getElementById("card-button-padding");
-    if (!styleEl) {
-      styleEl = document.createElement("style");
-      styleEl.id = "card-button-padding";
-      document.head.appendChild(styleEl);
-    }
-    styleEl.textContent = `.sc-sidebar-button-container { padding-bottom: ${paddingPx}px !important; }`;
+    document.documentElement.setCssProps({
+      "--sc-button-padding-bottom": `${paddingPx}px`
+    });
   }
   injectStatusColors() {
-    let styleEl = document.getElementById("sc-status-colors");
-    if (!styleEl) {
-      styleEl = document.createElement("style");
-      styleEl.id = "sc-status-colors";
-      document.head.appendChild(styleEl);
-    }
-    const statuses = this.settings.cardStatuses || [];
-    const rules = statuses.filter((s) => s.name && !s.colorIndex).map((s) => {
-      const name = s.name.replace(/"/g, '\\"');
-      const color = s.color || "transparent";
-      const textColor = s.textColor || "#000";
-      const lines = [];
-      if (this.settings.inheritStatusColor) {
-        lines.push(`.sc-card[data-status="${name}"] { --sc-status-color: ${color}; }`);
-      }
-      lines.push(`.sc-card[data-status="${name}"] .sc-status-pill { background-color: ${color} !important; color: ${textColor} !important; }`);
-      return lines.join("\n");
-    });
-    styleEl.textContent = rules.join("\n");
   }
   async activateView() {
     const { workspace } = this.app;
@@ -5835,7 +5840,7 @@ var SideCardsPlugin = class extends import_obsidian10.Plugin {
   showStorageFolderSetupModal() {
     const modal = new import_obsidian10.Modal(this.app);
     modal.modalEl.addClass("sc-setup-modal");
-    modal.titleEl.setText("Welcome to SideCards");
+    modal.titleEl.setText("Welcome to sidecards");
     const content = modal.contentEl;
     content.createEl("p", { text: "Set a storage folder to save your cards as notes." });
     const folderRow = content.createDiv({ cls: "sc-setup-folder-row" });
@@ -5909,7 +5914,7 @@ var SideCardsPlugin = class extends import_obsidian10.Plugin {
           url,
           headers: {
             "Accept": "application/vnd.github.v3+json",
-            "User-Agent": "Obsidian-SideCards"
+            "User-Agent": "Obsidian-Sidecards"
           }
         });
         const data = res.json;
@@ -6043,7 +6048,7 @@ var SideCardsSettingTab = class extends import_obsidian10.PluginSettingTab {
       new FolderSuggest(this.app, cb.inputEl, folders);
     });
     new import_obsidian10.Setting(containerEl).setName("Behaviour").setDesc("").setHeading();
-    new import_obsidian10.Setting(containerEl).setName("Note title format").setDesc("Format used when creating a note from a card.").addDropdown((dd) => dd.addOption("words3_hhmm", "First 3 words + HHmm").addOption("words5_hhmm", "First 5 words + HHmm").addOption("datetime", "YYYYMMDD HHmm").setValue(this.plugin.settings.noteTitleFormat || "words3_hhmm").onChange(async (value) => {
+    new import_obsidian10.Setting(containerEl).setName("Note title format").setDesc("Format used when creating a note from a card.").addDropdown((dd) => dd.addOption("words3_hhmm", "First 3 words + hhmm").addOption("words5_hhmm", "First 5 words + hhmm").addOption("datetime", "Date and time").setValue(this.plugin.settings.noteTitleFormat || "words3_hhmm").onChange(async (value) => {
       this.plugin.settings.noteTitleFormat = value;
       await this.plugin.saveSettings();
     }));
@@ -6077,21 +6082,21 @@ var SideCardsSettingTab = class extends import_obsidian10.PluginSettingTab {
       await this.plugin.saveSettings();
       refreshSidebarCards();
     }));
-    new import_obsidian10.Setting(containerEl).setName("Homepage").setDesc("Configure the SideCards homepage tab.").setHeading();
-    new import_obsidian10.Setting(containerEl).setName("Replace default tab with homepage").setDesc("Open the SideCards homepage instead of the default new tab.").addToggle((toggle) => toggle.setValue(!!this.plugin.settings.replaceHomepageWithSidecards).onChange(async (value) => {
+    new import_obsidian10.Setting(containerEl).setName("Homepage").setDesc("Configure the sidecards homepage tab.").setHeading();
+    new import_obsidian10.Setting(containerEl).setName("Replace default tab with homepage").setDesc("Open the sidecards homepage instead of the default new tab.").addToggle((toggle) => toggle.setValue(!!this.plugin.settings.replaceHomepageWithSidecards).onChange(async (value) => {
       this.plugin.settings.replaceHomepageWithSidecards = value;
       await this.plugin.saveSettings();
     }));
-    new import_obsidian10.Setting(containerEl).setName('Replace "SideCards" name').setDesc("Title shown in the homepage.").addText((text) => {
-      text.setPlaceholder("SideCards").setValue(this.plugin.settings.homepageName || "SideCards").onChange(async (value) => {
-        this.plugin.settings.homepageName = value || "SideCards";
+    new import_obsidian10.Setting(containerEl).setName("Replace sidecards name").setDesc("Title shown in the homepage.").addText((text) => {
+      text.setPlaceholder("Sidecards").setValue(this.plugin.settings.homepageName || "Sidecards").onChange(async (value) => {
+        this.plugin.settings.homepageName = value || "Sidecards";
         await this.plugin.saveSettings();
         refreshHomepage();
       });
       text.inputEl.addClass("sc-full-width");
     }).addExtraButton((btn) => {
       btn.setIcon("rotate-ccw").setTooltip("Reset to default").onClick(async () => {
-        this.plugin.settings.homepageName = "SideCards";
+        this.plugin.settings.homepageName = "Sidecards";
         await this.plugin.saveSettings();
         refreshHomepage();
         this.display();
@@ -6181,8 +6186,14 @@ var SideCardsSettingTab = class extends import_obsidian10.PluginSettingTab {
       root.style.setProperty("--card-color-1", color1);
       previewCard.style.setProperty("border-radius", `${settings.borderRadius || 0}px`, "important");
       previewCard.style.setProperty("border-width", `${(_a2 = settings.borderThickness) != null ? _a2 : 2}px`, "important");
+      const colorSettings = {
+        cardStyle: settings.cardStyle,
+        cardBgOpacity: settings.cardBgOpacity,
+        borderThickness: settings.borderThickness,
+        cardBorderShadowOpacity: settings.cardBorderShadowOpacity
+      };
       void Promise.resolve().then(() => (init_dom(), dom_exports)).then(({ applyCardColorToElement: applyCardColorToElement2 }) => {
-        applyCardColorToElement2(previewCard, "var(--card-color-1)", settings);
+        applyCardColorToElement2(previewCard, "var(--card-color-1)", colorSettings);
       });
       previewCard.empty();
       previewCard.createDiv({ text: "This is how yours cards will look like!", cls: "sc-content" });
@@ -6245,10 +6256,9 @@ var SideCardsSettingTab = class extends import_obsidian10.PluginSettingTab {
       const styleId2 = "card-max-height-style";
       (_a2 = document.getElementById(styleId2)) == null ? void 0 : _a2.remove();
       if (this.plugin.settings.maxCardHeight && this.plugin.settings.maxCardHeight > 0) {
-        const s = document.createElement("style");
+        const s = document.head.createEl("style");
         s.id = styleId2;
         s.textContent = `.sc-card { max-height: ${this.plugin.settings.maxCardHeight}px !important; overflow: hidden !important; }`;
-        document.head.appendChild(s);
       }
     }));
     new import_obsidian10.Setting(containerEl).setName("Bottom space under input row").setDesc("Padding to accommodate the status bar").addSlider((slider) => slider.setLimits(0, 100, 1).setValue(this.plugin.settings.buttonPaddingBottom || 26).onChange(async (value) => {
@@ -6274,7 +6284,7 @@ var SideCardsSettingTab = class extends import_obsidian10.PluginSettingTab {
       await this.plugin.saveSettings();
       updatePreview();
     }));
-    const timestampSetting = new import_obsidian10.Setting(containerEl).setName("Timestamp date & time format").addText((text) => text.setPlaceholder("YYYY-MM-DD hh:mma").setValue(this.plugin.settings.datetimeFormat || "YYYY-MM-DD hh:mma").onChange(async (value) => {
+    const timestampSetting = new import_obsidian10.Setting(containerEl).setName("Date and time format for timestamps").addText((text) => text.setPlaceholder("Example format").setValue(this.plugin.settings.datetimeFormat || "YYYY-MM-DD hh:mma").onChange(async (value) => {
       this.plugin.settings.datetimeFormat = value;
       await this.plugin.saveSettings();
       updateTimestampPreview(value);
@@ -6329,10 +6339,9 @@ var SideCardsSettingTab = class extends import_obsidian10.PluginSettingTab {
     const styleId = "card-max-height-style";
     (_a = document.getElementById(styleId)) == null ? void 0 : _a.remove();
     if (this.plugin.settings.maxCardHeight && this.plugin.settings.maxCardHeight > 0) {
-      const s = document.createElement("style");
+      const s = document.head.createEl("style");
       s.id = styleId;
       s.textContent = `.sc-card { max-height: ${this.plugin.settings.maxCardHeight}px !important; overflow: hidden !important; }`;
-      document.head.appendChild(s);
     }
     new import_obsidian10.Setting(containerEl).setName("Colors").setDesc("Card colors used for tagging. Names are written to notes.").setHeading();
     new import_obsidian10.Setting(containerEl).setName("Two row color swatches in menu").setDesc("Show colors in 2 rows of 5 in the card menu.").addToggle((toggle) => toggle.setValue(!!this.plugin.settings.twoRowSwatches).onChange(async (value) => {
@@ -6353,7 +6362,7 @@ var SideCardsSettingTab = class extends import_obsidian10.PluginSettingTab {
     ];
     colorVars.forEach((color, i) => {
       const row = new import_obsidian10.Setting(containerEl).setName(color.name);
-      row.addText((txt) => txt.setPlaceholder("e.g. red").setValue(this.plugin.settings.colorNames && this.plugin.settings.colorNames[i] || "").onChange(async (v) => {
+      row.addText((txt) => txt.setPlaceholder("Example: red").setValue(this.plugin.settings.colorNames && this.plugin.settings.colorNames[i] || "").onChange(async (v) => {
         if (!this.plugin.settings.colorNames)
           this.plugin.settings.colorNames = [];
         this.plugin.settings.colorNames[i] = v || "";
@@ -6572,7 +6581,7 @@ var SideCardsSettingTab = class extends import_obsidian10.PluginSettingTab {
           };
           updateIconBtn();
           iconBtn.addEventListener("click", () => {
-            const modal = new SideCardsIconPickerModal(
+            const modal = new SidecardsIconPickerModal(
               this.plugin.app,
               (pickedIcon) => {
                 void (async () => {
@@ -6802,7 +6811,7 @@ var SideCardsSettingTab = class extends import_obsidian10.PluginSettingTab {
           });
           dropdown.selectEl.addClass("sc-dropdown-normal");
         }).addText((text) => {
-          text.setPlaceholder("match").setValue(r.match || "").onChange(async (value) => {
+          text.setPlaceholder("Match").setValue(r.match || "").onChange(async (value) => {
             this.plugin.settings.autoColorRules[idx].match = value;
             await this.plugin.saveSettings();
           });
@@ -6964,23 +6973,31 @@ var SideCardsSettingTab = class extends import_obsidian10.PluginSettingTab {
           dropdown.setValue(currentVal);
           const applyDropdownColors = (val) => {
             if (val === "custom") {
-              dropdown.selectEl.style.backgroundColor = "var(--background-modifier-form-field)";
-              dropdown.selectEl.style.color = "var(--text-normal)";
+              dropdown.selectEl.setCssProps({
+                "background-color": "var(--background-modifier-form-field)",
+                "color": "var(--text-normal)"
+              });
             } else {
               const colorKey = `color${val}`;
               const color = this.plugin.settings[colorKey];
-              dropdown.selectEl.style.backgroundColor = color;
-              dropdown.selectEl.style.color = this.getContrastColor(color);
+              dropdown.selectEl.setCssProps({
+                "background-color": color,
+                "color": this.getContrastColor(color)
+              });
             }
             Array.from(dropdown.selectEl.options).forEach((opt) => {
               if (opt.value === "custom") {
-                opt.style.backgroundColor = "var(--background-modifier-form-field)";
-                opt.style.color = "var(--text-normal)";
+                opt.setCssProps({
+                  "background-color": "var(--background-modifier-form-field)",
+                  "color": "var(--text-normal)"
+                });
               } else {
                 const cKey = `color${opt.value}`;
                 const c = this.plugin.settings[cKey];
-                opt.style.backgroundColor = c;
-                opt.style.color = "var(--text-normal)";
+                opt.setCssProps({
+                  "background-color": c,
+                  "color": "var(--text-normal)"
+                });
               }
             });
           };
@@ -7109,7 +7126,7 @@ var SideCardsSettingTab = class extends import_obsidian10.PluginSettingTab {
               new import_obsidian10.Notice(`Imported ${added} card${added !== 1 ? "s" : ""}.`);
             } catch (e) {
               new import_obsidian10.Notice("Import failed: invalid JSON file.");
-              console.error("SideCards import error:", e);
+              console.error("Sidecards import error:", e);
             }
           })();
         };
@@ -7166,7 +7183,7 @@ var ChangelogModal = class extends import_obsidian10.Modal {
       paddingBottom: "16px",
       borderBottom: "1px solid var(--divider-color)"
     });
-    const title = header.createEl("h2", { text: "SideCards" });
+    const title = header.createEl("h2", { text: "Sidecards" });
     title.setCssStyles({ margin: "0", fontSize: "1.5em", fontWeight: "600" });
     const link = header.createEl("a", { text: "View on GitHub" });
     link.href = "https://github.com/Kazi-Aidah/sidecards/releases";
@@ -7264,8 +7281,10 @@ var FolderSuggest = class {
     document.addEventListener("click", (event) => this.onClick(event));
   }
   onFocus() {
+    var _a;
     const foldersSet = /* @__PURE__ */ new Set(["/"]);
-    const root = this.app.vault.getRoot && this.app.vault.getRoot();
+    const vaultWithRoot = this.app.vault;
+    const root = (_a = vaultWithRoot.getRoot) == null ? void 0 : _a.call(vaultWithRoot);
     const walk = (node) => {
       if (!node)
         return;
@@ -7303,7 +7322,7 @@ var FolderSuggest = class {
   }
   updateSuggestions() {
     const inputValue = this.inputEl.value.toLowerCase();
-    this.suggestEl.innerHTML = "";
+    this.suggestEl.empty();
     const filtered = this.folders.filter((folder) => folder.toLowerCase().includes(inputValue)).slice(0, 100);
     filtered.forEach((folder) => {
       const item = document.createElement("div");
@@ -7318,7 +7337,7 @@ var FolderSuggest = class {
     });
   }
 };
-var SideCardsIconPickerModal = class extends import_obsidian10.Modal {
+var SidecardsIconPickerModal = class extends import_obsidian10.Modal {
   constructor(app, onPick, onRemove) {
     super(app);
     this.allIcons = [];

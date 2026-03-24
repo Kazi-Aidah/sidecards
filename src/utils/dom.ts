@@ -17,7 +17,16 @@ export function hexToRgba(hex: string, alpha = 1): string {
   return `rgba(${r}, ${g}, ${b}, ${alpha})`;
 }
 
-export function resolveColorVarToHex(colorVar: string, settings: any): string | null {
+interface ColorSettings {
+  cardStyle?: number;
+  cardBgOpacity?: number;
+  borderThickness?: number;
+  cardBorderShadowOpacity?: number;
+  borderRadius?: number;
+  [key: string]: unknown;
+}
+
+export function resolveColorVarToHex(colorVar: string, settings: ColorSettings): string | null {
   if (!colorVar) return null;
   if (colorVar.startsWith('#')) return colorVar;
   const m = colorVar.match(/--card-color-(\d+)/);
@@ -35,12 +44,12 @@ export function resolveColorVarToHex(colorVar: string, settings: any): string | 
     } catch { /* ignore */ }
     // Fallback to settings value
     const key = `color${m[1]}`;
-    return settings[key] || null;
+    return (settings[key] as string | null | undefined) || null;
   }
   return null;
 }
 
-export function applyCardColorToElement(cardEl: HTMLElement, colorVar: string, settings: any): void {
+export function applyCardColorToElement(cardEl: HTMLElement, colorVar: string, settings: ColorSettings): void {
   const style = Number(settings.cardStyle ?? 2);
   const opacity = Number(settings.cardBgOpacity ?? 0.08);
   const borderThickness = Number(settings.borderThickness ?? 2);

@@ -1,11 +1,15 @@
-
 import { Card } from "../../models/Card";
 import { CardStore } from "../../services/CardStore";
 import { applyCardColorToElement } from "../../utils/dom";
-import { App, MarkdownRenderer, Plugin, Menu, Notice, TFile, TFolder, setIcon, Scope, Editor, Platform } from "obsidian";
+import { App, MarkdownRenderer, Plugin, Menu, Notice, TFile, TFolder, setIcon, Scope, Editor, Platform, Component } from "obsidian";
 import { DateTimeModal } from "../modals/DateTimeModal";
 import { getWordRangeAtCaret, handleKeyWrap } from "../../utils/editor-utils";
 import { InlineAutocomplete } from "./InlineAutocomplete";
+
+interface AppWithInternals extends App {
+  keymap: { pushScope: (scope: Scope) => void; popScope: (scope: Scope) => void };
+  workspace: App['workspace'] & { activeEditor: { editor: Editor; editMode: boolean } | null };
+}
 
 export class CardComponent {
   public el: HTMLElement;
@@ -29,7 +33,7 @@ export class CardComponent {
   private expiryTickInterval: number | null = null;
   private scope: Scope;
   private editor!: Editor;
-  private owner!: any;
+  private owner!: { editor: Editor; editMode: boolean };
 
   constructor(
     private container: HTMLElement,
@@ -93,7 +97,7 @@ export class CardComponent {
       toggleItalic: () => this.toggleMarkdownWrapper("*"),
       toggleHighlight: () => this.toggleMarkdownWrapper("=="),
       toggleComment: () => this.toggleMarkdownWrapper("%%", "%%", true),
-    } as any;
+    } as unknown as Editor;
 
     this.owner = {
       editor: this.editor,
@@ -137,7 +141,7 @@ export class CardComponent {
 
 
   private getEffectiveHotkeys(commandId: string): Array<{ modifiers?: string[]; key?: string }> {
-    const appAny = this.app as any;
+    const appAny = this.app as unknown as { hotkeyManager?: { getHotkeys?: (id: string) => Array<{ modifiers?: string[]; key?: string }>; customKeys?: Record<string, Array<{ modifiers?: string[]; key?: string }>> }; commands?: { commands?: Record<string, { hotkeys?: Array<{ modifiers?: string[]; key?: string }> }> } };
     const fromManager = appAny.hotkeyManager?.getHotkeys?.(commandId);
     if (Array.isArray(fromManager) && fromManager.length > 0) return fromManager;
     const custom = appAny.hotkeyManager?.customKeys?.[commandId];
@@ -154,7 +158,7 @@ export class CardComponent {
       highlight: ["editor:toggle-highlight", "custom-wrap-highlight"],
       comment: ["editor:toggle-comment", "custom-wrap-comment"],
     };
-    const appAny = this.app as any;
+    const appAny = this.app as unknown as { commands?: { commands?: Record<string, { id?: string; name?: string }> } };
     const commands = appAny.commands?.commands || {};
     const matcher: Record<"bold" | "italic" | "highlight" | "comment", RegExp> = {
       bold: /bold/i,
@@ -163,9 +167,9 @@ export class CardComponent {
       comment: /comment/i,
     };
     const discovered = Object.values(commands)
-      .filter((cmd: any) => typeof cmd?.id === "string" && cmd.id.startsWith("editor:"))
-      .filter((cmd: any) => matcher[kind].test(String(cmd?.name || "")))
-      .map((cmd: any) => String(cmd.id));
+      .filter((cmd) => typeof cmd?.id === "string" && cmd.id.startsWith("editor:"))
+      .filter((cmd) => matcher[kind].test(String(cmd?.name || "")))
+      .map((cmd) => String(cmd.id));
     return Array.from(new Set([...defaults[kind], ...discovered]));
   }
 
@@ -227,7 +231,7 @@ export class CardComponent {
         existingContent.textContent = this.card.content;
         existingContent.addClass('is-editing');
         setTimeout(() => {
-          existingContent.focus();
+          (existingContent as HTMLElement).focus();
           const range = document.createRange();
           const sel = window.getSelection();
           range.selectNodeContents(existingContent);
@@ -236,18 +240,13 @@ export class CardComponent {
           sel?.addRange(range);
         }, 0);
         existingContent.addEventListener('focusin', () => {
-          // @ts-ignore
-          this.app.keymap.pushScope(this.scope);
-          // @ts-ignore
-          this.app.workspace.activeEditor = this.owner;
+          (this.app as unknown as AppWithInternals).keymap.pushScope(this.scope);
+          (this.app as unknown as AppWithInternals).workspace.activeEditor = this.owner as any;
         });
         existingContent.addEventListener('blur', () => {
-          // @ts-ignore
-          this.app.keymap.popScope(this.scope);
-          // @ts-ignore
-          if (this.app.workspace.activeEditor === this.owner) {
-            // @ts-ignore
-            this.app.workspace.activeEditor = null;
+          (this.app as unknown as AppWithInternals).keymap.popScope(this.scope);
+          if ((this.app as unknown as AppWithInternals).workspace.activeEditor === this.owner) {
+            (this.app as unknown as AppWithInternals).workspace.activeEditor = null;
           }
           if (this.isEditing) {
             void (async () => {
@@ -263,20 +262,21 @@ export class CardComponent {
             })();
           }
         });
-        existingContent.addEventListener('keydown', (e) => {
-          if (handleKeyWrap(e, existingContent, this.editor, (this.plugin as any).settings?.autoPairBrackets !== false)) {
+        existingContent.addEventListener('keydown', (e: Event) => {
+          const keyboardEvent = e as KeyboardEvent;
+          if (handleKeyWrap(keyboardEvent, existingContent as HTMLElement, this.editor, (this.plugin as Plugin & { settings?: { autoPairBrackets?: boolean } }).settings?.autoPairBrackets !== false)) {
             e.preventDefault(); e.stopPropagation(); return;
           }
-          if (this.applyFormattingHotkey(e, existingContent)) return;
+          if (this.applyFormattingHotkey(keyboardEvent, existingContent as HTMLElement)) return;
           const settings = this.store.settings;
           const normalizeKey = (v: string) => String(v || '').toLowerCase().replace(/[\s+_]+/g, '-').replace(/[^a-z0-9-]/g, '').replace(/-+/g, '-').replace(/^-|-$/g, '');
           const saveKey = normalizeKey(settings.saveKey || 'enter');
           let pressed = '';
-          if (e.ctrlKey) pressed += 'ctrl-';
-          if (e.shiftKey) pressed += 'shift-';
-          if (e.altKey) pressed += 'alt-';
-          if (e.key && e.key.toLowerCase() === 'enter') pressed += 'enter';
-          if (pressed === saveKey) { e.preventDefault(); existingContent.blur(); }
+          if (keyboardEvent.ctrlKey) pressed += 'ctrl-';
+          if (keyboardEvent.shiftKey) pressed += 'shift-';
+          if (keyboardEvent.altKey) pressed += 'alt-';
+          if (keyboardEvent.key && keyboardEvent.key.toLowerCase() === 'enter') pressed += 'enter';
+          if (pressed === saveKey) { e.preventDefault(); (existingContent as HTMLElement).blur(); }
         });
         return;
       }
@@ -295,7 +295,12 @@ export class CardComponent {
     const effectiveColor = useStatusColor && statusDef
       ? (statusDef.colorIndex ? `var(--card-color-${statusDef.colorIndex})` : statusDef.color)
       : this.card.color;
-    applyCardColorToElement(this.el, effectiveColor, this.store.settings);
+    applyCardColorToElement(this.el, effectiveColor, {
+      cardStyle: this.store.settings.cardStyle,
+      cardBgOpacity: this.store.settings.cardBgOpacity,
+      borderThickness: this.store.settings.borderThickness,
+      cardBorderShadowOpacity: this.store.settings.cardBorderShadowOpacity,
+    });
 
     if (this.card.status?.name) {
       this.el.dataset.status = this.card.status.name;
@@ -305,13 +310,15 @@ export class CardComponent {
 
     const maxH = this.store.settings.maxCardHeight;
     if (maxH && maxH > 0) {
-      /* eslint-disable obsidianmd/no-static-styles-assignment */
-      this.el.style.setProperty('max-height', `${maxH}px`, 'important');
-      this.el.style.setProperty('overflow', 'hidden', 'important');
-      /* eslint-enable obsidianmd/no-static-styles-assignment */
+      this.el.setCssProps({
+        'max-height': `${maxH}px`,
+        'overflow': 'hidden'
+      });
     } else {
-      this.el.style.removeProperty('max-height');
-      this.el.style.removeProperty('overflow');
+      this.el.setCssProps({
+        'max-height': '',
+        'overflow': ''
+      });
     }
     
     if (this.store.settings.cardStyle === 2) {
@@ -379,18 +386,22 @@ export class CardComponent {
       pill.textContent = this.card.status.name;
       const statusDef = (this.store.settings.cardStatuses || []).find(s => s.name === this.card.status!.name);
       if (statusDef?.colorIndex) {
-        pill.style.backgroundColor = `var(--card-color-${statusDef.colorIndex})`;
-        pill.style.color = statusDef.textColor || '#000';
+        pill.setCssProps({
+          'background-color': `var(--card-color-${statusDef.colorIndex})`,
+          'color': statusDef.textColor || '#000'
+        });
       } else {
-        pill.style.backgroundColor = this.card.status.color || 'transparent';
-        pill.style.color = this.card.status.textColor || '#000';
+        pill.setCssProps({
+          'background-color': this.card.status.color || 'transparent',
+          'color': this.card.status.textColor || '#000'
+        });
       }
     }
   }
 
   private async renderContent(container: HTMLElement): Promise<void> {
     if (this.isEditing || this.store.settings.disableCardRendering) {
-      container.setAttribute('contenteditable', 'true');
+      container.setAttr('contenteditable', 'true');
       container.textContent = this.card.content;
       container.addClass('is-editing');
 
@@ -409,19 +420,14 @@ export class CardComponent {
       }, 0);
 
       container.addEventListener('focusin', () => {
-        // @ts-ignore
-        this.app.keymap.pushScope(this.scope);
-        // @ts-ignore
-        this.app.workspace.activeEditor = this.owner;
+        (this.app as unknown as AppWithInternals).keymap.pushScope(this.scope);
+        (this.app as unknown as AppWithInternals).workspace.activeEditor = this.owner as any;
       });
 
       container.addEventListener('blur', () => {
-        // @ts-ignore
-        this.app.keymap.popScope(this.scope);
-        // @ts-ignore
-        if (this.app.workspace.activeEditor === this.owner) {
-          // @ts-ignore
-          this.app.workspace.activeEditor = null;
+        (this.app as unknown as AppWithInternals).keymap.popScope(this.scope);
+        if ((this.app as unknown as AppWithInternals).workspace.activeEditor === this.owner) {
+          (this.app as unknown as AppWithInternals).workspace.activeEditor = null;
         }
 
         if (this.isEditing) {
@@ -442,7 +448,7 @@ export class CardComponent {
 
       // Handle Enter and Shift+Enter according to settings
       container.addEventListener('keydown', (e) => {
-        if (handleKeyWrap(e, container, this.editor, (this.plugin as any).settings?.autoPairBrackets !== false)) {
+        if (handleKeyWrap(e, container, this.editor, (this.plugin as Plugin & { settings?: { autoPairBrackets?: boolean } }).settings?.autoPairBrackets !== false)) {
           e.preventDefault();
           e.stopPropagation();
           return;
@@ -472,8 +478,7 @@ export class CardComponent {
       container.setAttribute('contenteditable', 'false');
       container.removeClass('is-editing');
       const temp = document.createElement('div');
-      // eslint-disable-next-line obsidianmd/no-plugin-as-component
-      await MarkdownRenderer.render(this.app, this.card.content, temp, this.card.notePath || '', this.plugin);
+      await MarkdownRenderer.render(this.app, this.card.content, temp, this.card.notePath || '', this.app as unknown as Component);
       temp.querySelectorAll('mark').forEach(el => el.addClass('cm-highlight'));
       while (temp.firstChild) container.appendChild(temp.firstChild);
       this.attachInternalLinkHandlers(container);
@@ -508,14 +513,14 @@ export class CardComponent {
         : null);
 
     if (dest) {
-      await (this.app.workspace as any).openLinkText(fullLinkText, sourcePath, openInNewLeaf);
+      await (this.app.workspace as unknown as { openLinkText: (link: string, path: string, newLeaf: boolean) => Promise<void> }).openLinkText(fullLinkText, sourcePath, openInNewLeaf);
       return;
     }
 
     const created = await this.createFileForLinkTarget(filePart, sourcePath);
     if (!created) return;
 
-    await (this.app.workspace as any).openLinkText(fullLinkText, sourcePath, openInNewLeaf);
+    await (this.app.workspace as unknown as { openLinkText: (link: string, path: string, newLeaf: boolean) => Promise<void> }).openLinkText(fullLinkText, sourcePath, openInNewLeaf);
   }
 
   private parseLinkText(linkText: string): { filePart: string; fullLinkText: string } {
@@ -530,7 +535,7 @@ export class CardComponent {
     const filePart = this.sanitizePath(String(filePartRaw || '').trim());
     if (!filePart) return null;
 
-    const pluginFolderRaw = String((this.plugin as any)?.settings?.storageFolder || '').trim();
+    const pluginFolderRaw = String((this.plugin as Plugin & { settings?: { storageFolder?: string } })?.settings?.storageFolder || '').trim();
     const pluginFolder = pluginFolderRaw && pluginFolderRaw !== '/' ? pluginFolderRaw : '';
 
     const sourceFolder = sourcePath.includes('/') ? sourcePath.slice(0, sourcePath.lastIndexOf('/')) : '';
@@ -617,7 +622,6 @@ export class CardComponent {
           tagEl.textContent = settings.omitTagHash ? cleanTag : `#${cleanTag}`;
           tagEl.addEventListener('click', (e) => {
             e.stopPropagation();
-            // @ts-ignore
             this.store.eventBus.emit('filter:tag', cleanTag);
           });
         });
@@ -706,7 +710,7 @@ export class CardComponent {
           swatch.addEventListener('click', () => { void this.store.setColor(this.card.id, color); });
           container.appendChild(swatch);
         });
-        (item as any).titleEl?.appendChild(container);
+        (item as unknown as { titleEl?: HTMLElement }).titleEl?.appendChild(container);
       });
 
       // Categories
@@ -840,7 +844,6 @@ export class CardComponent {
     });
 
     // Store updates
-    // @ts-ignore
     const unbind = this.store.eventBus.on('card:updated', (updated: Card) => {
       if (updated.id === this.card.id) {
         this.card = updated;
@@ -865,8 +868,9 @@ export class CardComponent {
     // Prefer the file's actual creation time from Obsidian's metadata
     const created = this.getCreatedTime();
     const fmt = this.store.settings.datetimeFormat;
-    if (fmt && (window as any).moment) {
-      return (window as any).moment(created).format(fmt);
+    const momentFn = (window as unknown as { moment?: (ts: number) => { format: (f: string) => string } }).moment;
+    if (fmt && momentFn) {
+      return momentFn(created).format(fmt);
     }
     return new Date(created).toLocaleDateString() + ' ' + new Date(created).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
   }
@@ -955,3 +959,4 @@ export class CardComponent {
     }
   }
 }
+

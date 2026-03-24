@@ -1,4 +1,4 @@
-import { ItemView, WorkspaceLeaf, Menu, Notice, setIcon, Scope, Editor, TFile, Platform } from "obsidian";
+import { ItemView, WorkspaceLeaf, Menu, Notice, setIcon, Scope, Editor, TFile, Platform, App } from "obsidian";
 import type SideCardsPlugin from "../core/Plugin";
 import { CardStore } from "../services/CardStore";
 import { Card } from "../models/Card";
@@ -9,6 +9,13 @@ import { animateCardsEntrance } from "../utils/animations";
 import { InlineAutocomplete } from "./components/InlineAutocomplete";
 import { attachDragToReorder, attachPinnedListDragToReorder } from "../utils/drag-drop";
 
+interface AppWithInternals extends App {
+  keymap: { pushScope: (scope: Scope) => void; popScope: (scope: Scope) => void };
+  workspace: App['workspace'] & { activeEditor: { editor: Editor; editMode: boolean } | null };
+}
+
+type IconicIconEntry = { icon?: string; name?: string; value?: string; color?: string } | string;
+
 export class SideCardsHomeView extends ItemView {
   private selectedColor = 'var(--card-color-1)';
   private selectedTags: string[] = [];
@@ -17,7 +24,7 @@ export class SideCardsHomeView extends ItemView {
   private cardListEl: HTMLElement | null = null;
   private editorScope: Scope;
   private editor!: Editor;
-  private owner!: any;
+  private owner!: { editor: Editor; editMode: boolean };
   private recentFiles: TFile[] = [];
   private pinnedFiles: TFile[] = [];
   private cardComponents: Map<string, CardComponent> = new Map();
@@ -26,7 +33,7 @@ export class SideCardsHomeView extends ItemView {
   private pinnedOnly: boolean = false;
   private dragDropCleanup: (() => void) | null = null;
   private currentSearchQuery: string = '';
-  private iconicFileIconsCache: Record<string, any> | null = null;
+  private iconicFileIconsCache: Record<string, IconicIconEntry> | null = null;
 
   constructor(
     leaf: WorkspaceLeaf,
@@ -68,7 +75,7 @@ export class SideCardsHomeView extends ItemView {
       toggleItalic: () => this.toggleMarkdownWrapper("*"),
       toggleHighlight: () => this.toggleMarkdownWrapper("=="),
       toggleComment: () => this.toggleMarkdownWrapper("%%", "%%", true),
-    } as any;
+    } as unknown as Editor;
 
     this.owner = {
       editor: this.editor,
@@ -200,7 +207,7 @@ export class SideCardsHomeView extends ItemView {
   }
 
   private getEffectiveHotkeys(commandId: string): Array<{ modifiers?: string[]; key?: string }> {
-    const appAny = this.app as any;
+    const appAny = this.app as unknown as { hotkeyManager?: { getHotkeys?: (id: string) => Array<{ modifiers?: string[]; key?: string }>; customKeys?: Record<string, Array<{ modifiers?: string[]; key?: string }>> }; commands?: { commands?: Record<string, { hotkeys?: Array<{ modifiers?: string[]; key?: string }> }> } };
     const fromManager = appAny.hotkeyManager?.getHotkeys?.(commandId);
     if (Array.isArray(fromManager) && fromManager.length > 0) return fromManager;
     const custom = appAny.hotkeyManager?.customKeys?.[commandId];
@@ -217,7 +224,7 @@ export class SideCardsHomeView extends ItemView {
       highlight: ["editor:toggle-highlight", "custom-wrap-highlight"],
       comment: ["editor:toggle-comment", "custom-wrap-comment"],
     };
-    const appAny = this.app as any;
+    const appAny = this.app as unknown as { commands?: { commands?: Record<string, { id?: string; name?: string }> } };
     const commands = appAny.commands?.commands || {};
     const matcher: Record<"bold" | "italic" | "highlight" | "comment", RegExp> = {
       bold: /bold/i,
@@ -226,9 +233,9 @@ export class SideCardsHomeView extends ItemView {
       comment: /comment/i,
     };
     const discovered = Object.values(commands)
-      .filter((cmd: any) => typeof cmd?.id === "string" && cmd.id.startsWith("editor:"))
-      .filter((cmd: any) => matcher[kind].test(String(cmd?.name || "")))
-      .map((cmd: any) => String(cmd.id));
+      .filter((cmd) => typeof cmd?.id === "string" && cmd.id.startsWith("editor:"))
+      .filter((cmd) => matcher[kind].test(String(cmd?.name || "")))
+      .map((cmd) => String(cmd.id));
     return Array.from(new Set([...defaults[kind], ...discovered]));
   }
 
@@ -281,7 +288,7 @@ export class SideCardsHomeView extends ItemView {
   }
 
   getDisplayText(): string {
-    return 'SideCards'; // eslint-disable-line obsidianmd/ui/sentence-case
+    return 'Sidecards';
   }
 
   getIcon(): string {
@@ -304,7 +311,7 @@ export class SideCardsHomeView extends ItemView {
     
     // Top Section
     const topSection = main.createDiv({ cls: 'sc-home-top' });
-    topSection.createEl('h2', { text: this.plugin.settings.homepageName || 'SideCards', cls: 'sc-home-title' });
+    topSection.createEl('h2', { text: this.plugin.settings.homepageName || /*eslint-disable-next-line obsidianmd/ui/sentence-case*/ 'SideCards', cls: 'sc-home-title' });
 
     const paletteRow = topSection.createDiv({ cls: 'sc-home-palette-row' });
 
@@ -377,16 +384,12 @@ export class SideCardsHomeView extends ItemView {
     updatePlaceholder();
     editorEl.addEventListener('input', updatePlaceholder);
     editorEl.addEventListener('focusin', () => {
-      // @ts-ignore
-      this.app.keymap.pushScope(this.editorScope);
-      // @ts-ignore
-      this.app.workspace.activeEditor = this.owner;
+      (this.app as unknown as AppWithInternals).keymap.pushScope(this.editorScope);
+      (this.app as unknown as AppWithInternals).workspace.activeEditor = this.owner as any;
     });
     editorEl.addEventListener('blur', () => {
-      // @ts-ignore
-      this.app.keymap.popScope(this.editorScope);
-      // @ts-ignore
-      if (this.app.workspace.activeEditor === this.owner) this.app.workspace.activeEditor = null;
+      (this.app as unknown as AppWithInternals).keymap.popScope(this.editorScope);
+      if ((this.app as unknown as AppWithInternals).workspace.activeEditor === this.owner) (this.app as unknown as AppWithInternals).workspace.activeEditor = null;
     });
 
     // Keydown for input
@@ -479,12 +482,12 @@ export class SideCardsHomeView extends ItemView {
     this.store.eventBus.on('card:updated', onCardChange);
     this.store.eventBus.on('card:deleted', onCardChange);
 
-    await this.renderCards(cardList);
+    this.renderCards(cardList);
   }
 
   private async renderFileList(container: HTMLElement, type: 'recent' | 'pinned') {
     container.empty();
-    const files = type === 'recent' ? await this.getRecentFiles() : await this.getPinnedFiles();
+    const files = type === 'recent' ? this.getRecentFiles() : this.getPinnedFiles();
     
     if (files.length === 0) {
       container.createDiv({ text: `No ${type} notes found`, cls: 'sc-home-empty-msg' });
@@ -506,7 +509,8 @@ export class SideCardsHomeView extends ItemView {
         item.addEventListener('contextmenu', (e) => {
           e.preventDefault();
           const menu = new Menu();
-          menu.addItem(i => i.setTitle('Unpin from SideCards').setIcon('pin-off').onClick(async () => { // eslint-disable-line obsidianmd/ui/sentence-case
+          menu.addItem(i => i
+            .setTitle(/*eslint-disable-next-line obsidianmd/ui/sentence-case*/ 'Unpin from SideCards').setIcon('pin-off').onClick(async () => {
             this.plugin.settings.pinnedNotes = (this.plugin.settings.pinnedNotes || []).filter(p => p !== file.path);
             await this.plugin.saveSettings();
             await this.renderFileList(container, 'pinned');
@@ -552,8 +556,11 @@ export class SideCardsHomeView extends ItemView {
     }
 
     if (!rendered && iconValue.includes('<svg')) {
-      // eslint-disable-next-line @microsoft/sdl/no-inner-html
-      iconEl.innerHTML = iconValue;
+      iconEl.empty();
+      const parser = new DOMParser();
+      const doc = parser.parseFromString(iconValue, 'image/svg+xml');
+      const svgEl = doc.querySelector('svg');
+      if (svgEl) iconEl.appendChild(svgEl);
       rendered = true;
     }
 
@@ -620,7 +627,7 @@ export class SideCardsHomeView extends ItemView {
     return iconName.toLowerCase();
   }
 
-  private resolveIconicIconEntry(entry: any): { icon: string; color?: string } | null {
+  private resolveIconicIconEntry(entry: IconicIconEntry | null | undefined): { icon: string; color?: string } | null {
     if (!entry) return null;
     if (typeof entry === 'string') {
       return { icon: entry };
@@ -637,7 +644,15 @@ export class SideCardsHomeView extends ItemView {
   }
 
   private async getIconicFileIcon(file: TFile): Promise<{ icon: string; color?: string } | null> {
-    const iconicPlugin = (this.app as any).plugins?.getPlugin?.('iconic');
+    type IconicPlugin = {
+      ruleManager?: { checkRuling?: (type: string, path: string) => { icon?: string; iconDefault?: string; color?: string } | null };
+      getFileItem?: (path: string) => { icon?: string; iconDefault?: string; color?: string } | null;
+      settings?: { fileIcons?: Record<string, IconicIconEntry> };
+      data?: { fileIcons?: Record<string, IconicIconEntry> };
+      fileIcons?: Record<string, IconicIconEntry>;
+      loadData?: () => Promise<{ fileIcons?: Record<string, IconicIconEntry> }>;
+    };
+    const iconicPlugin = ((this.app as unknown as { plugins?: { getPlugin?: (id: string) => IconicPlugin | null } }).plugins?.getPlugin?.('iconic')) as IconicPlugin | null;
     if (!iconicPlugin) return null;
 
     const path = file.path;
@@ -687,14 +702,14 @@ export class SideCardsHomeView extends ItemView {
     return this.resolveIconicIconEntry(cache[path]);
   }
 
-  private async getRecentFiles(): Promise<TFile[]> {
+  private getRecentFiles(): TFile[] {
     const limit = this.plugin.settings.recentNotesLimit ?? 5;
     return this.app.vault.getMarkdownFiles()
       .sort((a, b) => b.stat.mtime - a.stat.mtime)
       .slice(0, limit);
   }
 
-  private async getPinnedFiles(): Promise<TFile[]> {
+  private getPinnedFiles(): TFile[] {
     const pinned: TFile[] = [];
     if (this.plugin.settings.pinnedNotes) {
       this.plugin.settings.pinnedNotes.forEach(path => {
@@ -718,7 +733,7 @@ export class SideCardsHomeView extends ItemView {
 
     // Refresh title and max width
     const titleEl = main.querySelector('.sc-home-title');
-    if (titleEl) titleEl.textContent = this.plugin.settings.homepageName || 'SideCards';
+    if (titleEl) titleEl.textContent = this.plugin.settings.homepageName || 'Sidecards';
     const maxW = this.plugin.settings.homepageMaxWidth ?? 1000;
     this.containerEl.style.setProperty('--sc-home-max-width', `${maxW}px`);
     const topMargin = this.plugin.settings.homepageTopMargin ?? 70;
@@ -737,14 +752,14 @@ export class SideCardsHomeView extends ItemView {
     if (recentList) await this.renderFileList(recentList, 'recent');
 
     // Refresh cards
-    if (this.cardListEl) await this.renderCards(this.cardListEl);
+    if (this.cardListEl) this.renderCards(this.cardListEl);
   }
 
   private async refreshHomeContent(cardList: HTMLElement, pinnedList: HTMLElement, recentList: HTMLElement): Promise<void> {
     this.iconicFileIconsCache = null;
     await this.renderFileList(pinnedList, 'pinned');
     await this.renderFileList(recentList, 'recent');
-    await this.renderCards(cardList);
+    this.renderCards(cardList);
   }
 
   private renderToolbar(container: HTMLElement, editorEl: HTMLElement, cardList: HTMLElement, pinnedList: HTMLElement, recentList: HTMLElement) {
@@ -777,7 +792,7 @@ export class SideCardsHomeView extends ItemView {
                 this.currentSortMode = mode;
                 this.plugin.settings.sortMode = mode;
                 await this.plugin.saveSettings();
-                await this.renderCards(cardList);
+                this.renderCards(cardList);
               });
         });
       });
@@ -790,7 +805,7 @@ export class SideCardsHomeView extends ItemView {
               this.sortAscending = !this.sortAscending;
               this.plugin.settings.sortAscending = this.sortAscending;
               await this.plugin.saveSettings();
-              await this.renderCards(cardList);
+              this.renderCards(cardList);
             });
       });
 
@@ -907,7 +922,7 @@ export class SideCardsHomeView extends ItemView {
 
   private cardRenderGen = 0;
 
-  private async renderCards(container: HTMLElement) {
+  private renderCards(container: HTMLElement): void {
     const gen = ++this.cardRenderGen;
     container.empty();
     this.cardComponents.forEach(c => c.destroy());
@@ -1073,7 +1088,6 @@ export class SideCardsHomeView extends ItemView {
     });
     await this.store.add(card);
     editorEl.textContent = '';
-    // @ts-ignore
     editorEl.dispatchEvent(new Event('input')); // trigger placeholder
     
     // Clear selection state
@@ -1081,10 +1095,7 @@ export class SideCardsHomeView extends ItemView {
     
     new Notice('Card created');
   }
-  async onClose(): Promise<void> {
-      this.dragDropCleanup?.();
-      this.dragDropCleanup = null;
-      this.cardComponents.forEach(c => c.destroy());
-      this.cardComponents.clear();
-    }
+  onClose() {
+    return Promise.resolve();
+  }
 }

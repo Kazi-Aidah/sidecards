@@ -1,6 +1,6 @@
 
-import { Card } from "../models/Card";
 import { SideCardsSettings } from "../core/Settings";
+import { Card } from "../models/Card";
 import { App, TFile } from "obsidian";
 
 export type SortMode = 'manual' | 'created' | 'modified' | 'alpha' | 'status';

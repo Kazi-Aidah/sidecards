@@ -1,6 +1,3 @@
-
-/* eslint-disable obsidianmd/no-static-styles-assignment */
-
 import { App, Editor, Modal, Notice, Platform, Plugin, Scope } from "obsidian";
 import { handleKeyWrap } from "../../utils/editor-utils";
 import { resolveAutoColor } from "../../utils/dom";
@@ -8,10 +5,15 @@ import { CardStore } from "../../services/CardStore";
 import { Card } from "../../models/Card";
 import { InlineAutocomplete } from "../components/InlineAutocomplete";
 
+interface AppWithInternals extends App {
+  keymap: { pushScope: (scope: Scope) => void; popScope: (scope: Scope) => void };
+  workspace: App['workspace'] & { activeEditor: { editor: Editor; editMode: boolean } | null };
+}
+
 export class QuickCardWithFilterModal extends Modal {
   private editorScope: Scope;
   private editor!: Editor;
-  private owner!: any;
+  private owner!: { editor: Editor; editMode: boolean };
 
   constructor(
     app: App,
@@ -52,7 +54,7 @@ export class QuickCardWithFilterModal extends Modal {
       toggleItalic: () => this.toggleMarkdownWrapper("*"),
       toggleHighlight: () => this.toggleMarkdownWrapper("=="),
       toggleComment: () => this.toggleMarkdownWrapper("%%", "%%", true),
-    } as any;
+    } as unknown as Editor;
 
     this.owner = {
       editor: this.editor,
@@ -140,7 +142,7 @@ export class QuickCardWithFilterModal extends Modal {
   }
 
   private getEffectiveHotkeys(commandId: string): Array<{ modifiers?: string[]; key?: string }> {
-    const appAny = this.app as any;
+    const appAny = this.app as unknown as { hotkeyManager?: { getHotkeys?: (id: string) => Array<{ modifiers?: string[]; key?: string }>; customKeys?: Record<string, Array<{ modifiers?: string[]; key?: string }>> }; commands?: { commands?: Record<string, { hotkeys?: Array<{ modifiers?: string[]; key?: string }> }> } };
     const fromManager = appAny.hotkeyManager?.getHotkeys?.(commandId);
     if (Array.isArray(fromManager) && fromManager.length > 0) return fromManager;
     const custom = appAny.hotkeyManager?.customKeys?.[commandId];
@@ -157,7 +159,7 @@ export class QuickCardWithFilterModal extends Modal {
       highlight: ["editor:toggle-highlight", "custom-wrap-highlight"],
       comment: ["editor:toggle-comment", "custom-wrap-comment"],
     };
-    const appAny = this.app as any;
+    const appAny = this.app as unknown as { commands?: { commands?: Record<string, { id?: string; name?: string }> } };
     const commands = appAny.commands?.commands || {};
     const matcher: Record<"bold" | "italic" | "highlight" | "comment", RegExp> = {
       bold: /bold/i,
@@ -166,9 +168,9 @@ export class QuickCardWithFilterModal extends Modal {
       comment: /comment/i,
     };
     const discovered = Object.values(commands)
-      .filter((cmd: any) => typeof cmd?.id === "string" && cmd.id.startsWith("editor:"))
-      .filter((cmd: any) => matcher[kind].test(String(cmd?.name || "")))
-      .map((cmd: any) => String(cmd.id));
+      .filter((cmd) => typeof cmd?.id === "string" && cmd.id.startsWith("editor:"))
+      .filter((cmd) => matcher[kind].test(String(cmd?.name || "")))
+      .map((cmd) => String(cmd.id));
     return Array.from(new Set([...defaults[kind], ...discovered]));
   }
 
@@ -277,19 +279,14 @@ export class QuickCardWithFilterModal extends Modal {
     editorEl.focus();
 
     editorEl.addEventListener('focusin', () => {
-      // @ts-ignore
-      this.app.keymap.pushScope(this.editorScope);
-      // @ts-ignore
-      this.app.workspace.activeEditor = this.owner;
+      (this.app as unknown as AppWithInternals).keymap.pushScope(this.editorScope);
+      (this.app as unknown as AppWithInternals).workspace.activeEditor = this.owner as any;
     });
 
     editorEl.addEventListener('blur', () => {
-      // @ts-ignore
-      this.app.keymap.popScope(this.editorScope);
-      // @ts-ignore
-      if (this.app.workspace.activeEditor === this.owner) {
-        // @ts-ignore
-        this.app.workspace.activeEditor = null;
+      (this.app as unknown as AppWithInternals).keymap.popScope(this.editorScope);
+      if ((this.app as unknown as AppWithInternals).workspace.activeEditor === this.owner) {
+        (this.app as unknown as AppWithInternals).workspace.activeEditor = null;
       }
     });
 
@@ -313,7 +310,7 @@ export class QuickCardWithFilterModal extends Modal {
     colors.forEach((color, idx) => {
       const swatch = colorContainer.createDiv('sc-modal-color-swatch');
       const hex = this.resolveColor(color.var);
-      swatch.style.backgroundColor = hex;
+      (swatch as HTMLElement).setCssProps({ 'background-color': hex });
       swatch.title = this.store.settings.colorNames[idx] || color.name;
       
       if (selectedColor === color.var) swatch.addClass('is-selected');
@@ -333,7 +330,7 @@ export class QuickCardWithFilterModal extends Modal {
       cls: 'sc-modal-tags-input'
     });
     const tagsAutocomplete = tagsWrapper.createDiv('sc-modal-tags-autocomplete');
-    tagsAutocomplete.style.display = 'none';
+    (tagsAutocomplete as HTMLElement).setCssProps({ 'display': 'none' });
 
     // Tag Autocomplete Logic
     let selectedTagIdx = -1;
@@ -343,7 +340,7 @@ export class QuickCardWithFilterModal extends Modal {
       const currentTag = val.substring(lastComma + 1).trim().toLowerCase();
 
       if (!currentTag) {
-        tagsAutocomplete.style.display = 'none';
+        (tagsAutocomplete as HTMLElement).setCssProps({ 'display': 'none' });
         return;
       }
 
@@ -351,7 +348,7 @@ export class QuickCardWithFilterModal extends Modal {
       const suggestions = allTags.filter(t => t.startsWith(currentTag)).slice(0, 8);
 
       if (suggestions.length === 0) {
-        tagsAutocomplete.style.display = 'none';
+        (tagsAutocomplete as HTMLElement).setCssProps({ 'display': 'none' });
         return;
       }
 
@@ -363,16 +360,16 @@ export class QuickCardWithFilterModal extends Modal {
         item.addEventListener('click', () => {
           const before = val.substring(0, lastComma + 1);
           tagsInput.value = (before ? before + ' ' : '') + tag + ', ';
-          tagsAutocomplete.style.display = 'none';
+          (tagsAutocomplete as HTMLElement).setCssProps({ 'display': 'none' });
           tagsInput.focus();
         });
       });
-      tagsAutocomplete.style.display = 'block';
+      (tagsAutocomplete as HTMLElement).setCssProps({ 'display': 'block' });
     };
 
     tagsInput.addEventListener('input', updateAutocomplete);
     tagsInput.addEventListener('keydown', (e) => {
-      if (tagsAutocomplete.style.display === 'none') return;
+      if ((tagsAutocomplete as HTMLElement).style.display === 'none') return;
       const items = tagsAutocomplete.querySelectorAll('.sc-modal-autocomplete-item');
       if (e.key === 'ArrowDown') {
         e.preventDefault();
@@ -393,7 +390,6 @@ export class QuickCardWithFilterModal extends Modal {
     const select = contentEl.createEl('select', { cls: 'sc-modal-select' });
     this.getAvailableFilters().forEach(f => {
       const opt = select.createEl('option', { value: f.value, text: f.label });
-      // @ts-ignore
       opt.dataset.type = f.type;
     });
 
@@ -425,10 +421,10 @@ export class QuickCardWithFilterModal extends Modal {
       
       // If we chose a specific category, try to filter the sidebar to it
       if (category) {
-        const view = this.app.workspace.getLeavesOfType('card-sidebar')[0]?.view as any;
+        const view = this.app.workspace.getLeavesOfType('card-sidebar')[0]?.view as unknown as { activeFilters: { category: string }; renderCards: () => void } | undefined;
         if (view) {
           view.activeFilters.category = category;
-          await view.renderCards();
+          view.renderCards();
         }
       }
 
@@ -440,7 +436,7 @@ export class QuickCardWithFilterModal extends Modal {
     // Keyboard Shortcuts
     editorEl.addEventListener('keydown', (e) => {
       if (this.applyFormattingHotkey(e, editorEl)) return;
-      if (handleKeyWrap(e, editorEl, this.editor, (this.plugin as any).settings?.autoPairBrackets !== false)) {
+      if (handleKeyWrap(e, editorEl, this.editor, (this.plugin as Plugin & { settings?: { autoPairBrackets?: boolean } }).settings?.autoPairBrackets !== false)) {
         editorEl.dispatchEvent(new Event('input'));
         return;
       }

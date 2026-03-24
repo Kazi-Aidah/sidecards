@@ -1,5 +1,3 @@
-/* eslint-disable obsidianmd/no-static-styles-assignment */
-
 export interface FlipOptions {
   duration?: number;
   easing?: string;
@@ -7,11 +5,16 @@ export interface FlipOptions {
   offset?: number;
 }
 
+interface AnimationSettings {
+  animatedCards: boolean;
+  disableCardFadeIn?: boolean;
+}
+
 export async function flipAnimateAsync(
   container: HTMLElement,
   asyncDomChange: () => Promise<void>,
   opts: FlipOptions = {},
-  settings: any
+  settings: AnimationSettings
 ): Promise<void> {
   if (!settings.animatedCards) {
     await asyncDomChange();
@@ -56,16 +59,20 @@ export async function flipAnimateAsync(
       const dx = oldRect.left - newRect.left;
       const dy = oldRect.top - newRect.top;
       if (dx !== 0 || dy !== 0) {
-        el.style.transition = 'none';
-        el.style.transform = `translateY(${dy}px)`;
-        el.style.willChange = 'transform';
+        el.setCssProps({
+          'transition': 'none',
+          'transform': `translateY(${dy}px)`,
+          'will-change': 'transform'
+        });
       }
     } else if (el) {
-      el.style.transition = 'none';
-      el.style.transform = `translateY(${entranceOffset}px)`;
-      el.style.willChange = 'transform';
+      el.setCssProps({
+        'transition': 'none',
+        'transform': `translateY(${entranceOffset}px)`,
+        'will-change': 'transform'
+      });
       if (!settings.disableCardFadeIn) {
-        el.style.opacity = '0';
+        el.setCssProps({ 'opacity': '0' });
       }
     }
   });
@@ -78,10 +85,12 @@ export async function flipAnimateAsync(
     if (!el) return;
     const delay = i * stagger;
     setTimeout(() => {
-      el.style.transition = `transform ${duration}ms ease-out, opacity ${duration}ms ease-out`;
-      el.style.transform = '';
+      el.setCssProps({
+        'transition': `transform ${duration}ms ease-out, opacity ${duration}ms ease-out`,
+        'transform': ''
+      });
       if (!settings.disableCardFadeIn) {
-        el.style.opacity = '1';
+        el.setCssProps({ 'opacity': '1' });
       }
     }, delay);
   });
@@ -90,7 +99,7 @@ export async function flipAnimateAsync(
     ids.forEach(id => {
       const el = elById.get(id);
       if (el) {
-        el.style.transition = '';
+        el.setCssProps({ 'transition': '' });
       }
     });
   }, duration + (ids.length * stagger) + 50);
@@ -99,7 +108,7 @@ export async function flipAnimateAsync(
 export function animateCardsEntrance(
   container: HTMLElement,
   opts: FlipOptions = {},
-  settings: any
+  settings: AnimationSettings
 ): void {
   if (!settings.animatedCards) return;
   if (window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
@@ -113,34 +122,36 @@ export function animateCardsEntrance(
   const offsetPx = opts.offset ?? 28;
 
   els.forEach(el => {
-    el.style.transition = 'none';
-    el.style.transform = `translateY(${offsetPx}px)`;
-    el.style.opacity = settings.disableCardFadeIn ? '1' : '0';
-    el.style.willChange = 'transform, opacity';
+    el.setCssProps({
+      'transition': 'none',
+      'transform': `translateY(${offsetPx}px)`,
+      'opacity': settings.disableCardFadeIn ? '1' : '0',
+      'will-change': 'transform, opacity'
+    });
   });
 
+  // Force reflow
   void container.offsetHeight;
 
   els.forEach((el, i) => {
     const delay = i * stagger;
     setTimeout(() => {
-      const transitions = [`transform ${duration}ms ease-out`];
-      if (!settings.disableCardFadeIn) {
-        transitions.push(`opacity ${duration}ms ease-out`);
-      }
-      el.style.transition = transitions.join(', ');
-      el.style.transform = '';
-      el.style.opacity = '1';
+      el.setCssProps({
+        'transition': `transform ${duration}ms cubic-bezier(0.2, 0, 0, 1), opacity ${duration}ms cubic-bezier(0.2, 0, 0, 1)`,
+        'transform': 'translateY(0)',
+        'opacity': '1'
+      });
     }, delay);
   });
 
-  const total = duration + (els.length * stagger) + 50;
   setTimeout(() => {
     els.forEach(el => {
-      el.style.transition = '';
-      el.style.willChange = '';
-      el.style.transform = '';
-      el.style.opacity = '';
+      el.setCssProps({
+        'transition': '',
+        'transform': '',
+        'opacity': '',
+        'will-change': ''
+      });
     });
-  }, total);
+  }, duration + (els.length * stagger) + 50);
 }

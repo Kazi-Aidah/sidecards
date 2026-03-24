@@ -3,13 +3,14 @@ import { Card } from "../models/Card";
 import { SideCardsSettings } from "../core/Settings";
 import { EventBus } from "../core/EventBus";
 import { App, Plugin, TFile, TFolder, Notice } from "obsidian";
+import type SideCardsPlugin from "../core/Plugin";
 
 import { parseTagsFromFrontmatter, updateFrontmatter } from "../utils/frontmatter";
 
 export class CardStore {
   private cards: Map<string, Card> = new Map();
   private pendingWrites: Map<string, Promise<void>> = new Map();
-  private _pendingTagWrites: Map<string, { tags: string[], expiresAt: number }> = new Map();
+  public _pendingTagWrites: Map<string, { tags: string[], expiresAt: number }> = new Map();
   private _reapplyingTags: Set<string> = new Set();
   // Paths currently being written by syncCardToFrontmatter — skip vault modify re-reads for these
   public _syncingPaths: Set<string> = new Set();
@@ -31,7 +32,7 @@ export class CardStore {
   private loadFromSettings() {
     this.cards.clear();
     const rawCards = this.settings.cards || [];
-    rawCards.forEach((data: any) => {
+    rawCards.forEach((data: Record<string, unknown>) => {
       const card = new Card(data);
       this.cards.set(card.id, card);
     });
@@ -93,7 +94,7 @@ export class CardStore {
     const card = this.cards.get(id);
     if (!card) throw new Error('Card not found');
     Object.assign(card, updates);
-    (card as any).modified = Date.now();
+    card.modified = Date.now();
     this.eventBus.emit('card:updated', card);
     await this.persist();
     return card;
@@ -232,8 +233,7 @@ export class CardStore {
   private async saveToStorage(): Promise<void> {
     // Convert Map back to array for settings
     this.settings.cards = this.getAll().map(c => c.toJSON());
-    // @ts-ignore
-    await this.plugin.saveSettings();
+    await (this.plugin as SideCardsPlugin).saveSettings();
   }
 
   async importNotesFromFolderToSettings(folder: string, silent = false): Promise<void> {
@@ -397,7 +397,6 @@ export class CardStore {
 
       await this.app.vault.modify(file, content);
     } catch (e) {
-      // eslint-disable-next-line no-undef
       console.error('Error reapplying tags:', e);
     } finally {
       this._reapplyingTags.delete(file.path);
@@ -449,17 +448,11 @@ export class CardStore {
     await this.cleanupStaleTodayCards(todayStartMs);
   }
 
-  private async cleanupStaleTodayCards(todayStartMs?: number): Promise<void> {
-    if (todayStartMs === undefined) {
-      const todayStart = new Date();
-      todayStart.setHours(0, 0, 0, 0);
-      todayStartMs = todayStart.getTime();
-    }
-
+  private async cleanupStaleTodayCards(todayStartMs: number): Promise<void> {
     const stale = this.getAll().filter(c => {
       if (String(c.category || '').toLowerCase() !== 'today') return false;
       const lastActivity = Math.max(c.modified ?? 0, c.created ?? 0);
-      return lastActivity < todayStartMs!;
+      return lastActivity < todayStartMs;
     });
 
     for (const card of stale) {
@@ -503,7 +496,7 @@ export class CardStore {
         text = updateFrontmatter(text, 'Expires-At', updates.expiresAt ? new Date(updates.expiresAt).toISOString() : null);
       }
       if (typeof updates.color !== 'undefined') {
-        const normalizedColor = this.normalizeCardColorValue(updates.color as any, card.color);
+        const normalizedColor = this.normalizeCardColorValue(updates.color, card.color);
         text = updateFrontmatter(text, 'card-color', normalizedColor.frontmatterColor ?? normalizedColor.color);
       }
       if (typeof updates.status !== 'undefined') {

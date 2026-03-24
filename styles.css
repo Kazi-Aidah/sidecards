@@ -28,6 +28,10 @@
     min-width: 0;
   }
 
+.sc-sidebar-button-container {
+  padding-bottom: var(--sc-button-padding-bottom, 26px) !important;
+}
+
 .sc-content p {
   margin: 0;
 }

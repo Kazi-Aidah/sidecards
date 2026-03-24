@@ -1,5 +1,3 @@
-
-/* eslint-disable obsidianmd/no-static-styles-assignment */
 import { Modal, App, Plugin } from "obsidian";
 import { CardStore } from "../../services/CardStore";
 import { Card } from "../../models/Card";
@@ -31,8 +29,10 @@ export class SearchModal extends Modal {
     });
 
     this.resultsContainer = contentEl.createDiv('sc-search-results');
-    this.resultsContainer.style.maxHeight = '400px';
-    this.resultsContainer.style.overflow = 'auto';
+    this.resultsContainer.setCssProps({
+      'max-height': '400px',
+      'overflow': 'auto'
+    });
 
     this.searchInput.focus();
     this.searchInput.addEventListener('input', () => this.renderResults());
@@ -50,9 +50,11 @@ export class SearchModal extends Modal {
     this.searchResults.forEach((card, idx) => {
       const result = this.resultsContainer.createDiv('sc-search-result');
       result.textContent = card.content.substring(0, 100) + (card.content.length > 100 ? '...' : '');
-      result.style.padding = '8px';
-      result.style.cursor = 'pointer';
-      result.style.borderLeft = `4px solid ${card.color}`;
+      result.setCssProps({
+        'padding': '8px',
+        'cursor': 'pointer',
+        'border-left': `4px solid ${card.color}`
+      });
       result.dataset.index = String(idx);
 
       result.addEventListener('click', () => this.selectResult(card));
@@ -68,10 +70,10 @@ export class SearchModal extends Modal {
     els.forEach((el, idx) => {
       if (idx === this.selectedIndex) {
         el.addClass('selected');
-        el.style.backgroundColor = 'var(--background-modifier-hover)';
+        el.setCssProps({ 'background-color': 'var(--background-modifier-hover)' });
       } else {
         el.removeClass('selected');
-        el.style.backgroundColor = '';
+        el.setCssProps({ 'background-color': '' });
       }
     });
   }
@@ -97,7 +99,6 @@ export class SearchModal extends Modal {
     // Focus the card in the sidebar or do something else
     // For now, just close the modal
     this.close();
-    // @ts-ignore
     this.store.eventBus.emit('card:focus', card.id);
   }
 }

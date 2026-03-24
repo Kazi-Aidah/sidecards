@@ -1,4 +1,3 @@
-/* eslint-disable obsidianmd/no-static-styles-assignment */
 import SideCardsPlugin from "../core/Plugin";
 
 /**
@@ -15,7 +14,7 @@ export function attachDragToReorder(
   container: HTMLElement,
   plugin: SideCardsPlugin,
   getSortMode: () => string,
-  onReorder: (newOrder: string[]) => void | Promise<void>,
+  onReorder: (newIds: string[]) => Promise<void>,
   onPlaceholderMoved?: () => void
 ): () => void {
   let ghost: HTMLElement | null = null;
@@ -88,7 +87,12 @@ export function attachDragToReorder(
     newOrder.splice(targetIdx, 0, draggedEl!);
 
     // Suppress transitions during DOM manipulation
-    originalOrder.forEach(c => { c.style.transition = 'none'; c.style.transform = ''; });
+    originalOrder.forEach(c => {
+      c.setCssProps({
+        'transition': 'none',
+        'transform': ''
+      });
+    });
 
     // Temporarily reorder DOM
     newOrder.forEach(card => container.appendChild(card));
@@ -110,16 +114,14 @@ export function attachDragToReorder(
     // the current visual position before animating to the new one.
     for (const card of originalOrder) {
       if (card === draggedEl) continue;
-      card.style.transition = 'none';
-      // Current visual position is snapRects (home), which is where the card
-      // physically sits in the DOM right now — so transform is already '' (identity).
-      // We just need to make sure transition is off before we set the new value.
-      card.style.transform = card.style.transform || '';
+      card.setCssProps({
+        'transition': 'none',
+        'transform': card.style.transform || ''
+      });
     }
 
     // Step 2: force a reflow so the browser registers the transition:none state
-    // eslint-disable-next-line @typescript-eslint/no-unused-expressions
-    container.offsetHeight;
+    void container.offsetHeight;
 
     // Step 3: set target transforms with transition — browser will animate from current → target
     for (const card of originalOrder) {
@@ -130,15 +132,19 @@ export function attachDragToReorder(
       const dx = to.left - from.left;
       const dy = to.top - from.top;
 
-      card.style.transition = 'transform 150ms cubic-bezier(0.25,0.46,0.45,0.94)';
-      card.style.transform = (dx === 0 && dy === 0) ? '' : `translate(${dx}px,${dy}px)`;
+      card.setCssProps({
+        'transition': 'transform 150ms cubic-bezier(0.25,0.46,0.45,0.94)',
+        'transform': (dx === 0 && dy === 0) ? '' : `translate(${dx}px,${dy}px)`
+      });
     }
   }
 
   function clearTransforms() {
     getCards().forEach(c => {
-      c.style.transition = '';
-      c.style.transform = '';
+      c.setCssProps({
+        'transition': '',
+        'transform': ''
+      });
     });
   }
 
@@ -157,8 +163,10 @@ export function attachDragToReorder(
     ghost?.remove();
     ghost = null;
     if (draggedEl) {
-      draggedEl.style.opacity = '';
-      draggedEl.style.pointerEvents = '';
+      draggedEl.setCssProps({
+        'opacity': '',
+        'pointer-events': ''
+      });
     }
     clearTransforms();
     draggedEl = null; active = false; dragPending = false;
@@ -201,36 +209,40 @@ export function attachDragToReorder(
     const rect = snapRects.get(draggedEl)!;
 
     // Hide source card in-place (keeps its grid slot)
-    draggedEl.style.opacity = '0';
-    draggedEl.style.pointerEvents = 'none';
+    draggedEl.setCssProps({
+      'opacity': '0',
+      'pointer-events': 'none'
+    });
 
     // Ghost: clone with resolved computed styles so CSS vars work on document.body
     ghost = draggedEl.cloneNode(true) as HTMLElement;
     ghost.classList.add('sc-drag-ghost');
     const cs = getComputedStyle(draggedEl);
-    ghost.style.background = cs.background;
-    ghost.style.backgroundColor = cs.backgroundColor;
-    ghost.style.borderColor = cs.borderColor;
-    ghost.style.borderWidth = cs.borderWidth;
-    ghost.style.borderStyle = cs.borderStyle;
-    ghost.style.borderRadius = cs.borderRadius;
-    ghost.style.color = cs.color;
-    ghost.style.fontSize = cs.fontSize;
-    ghost.style.lineHeight = cs.lineHeight;
-    ghost.style.padding = cs.padding;
-    ghost.style.position = 'fixed';
-    ghost.style.zIndex = '9999';
-    ghost.style.pointerEvents = 'none';
-    ghost.style.width = rect.width + 'px';
-    ghost.style.height = rect.height + 'px';
-    ghost.style.left = (e.clientX - offsetX) + 'px';
-    ghost.style.top = (e.clientY - offsetY) + 'px';
-    ghost.style.margin = '0';
-    ghost.style.boxShadow = '0 8px 24px rgba(0,0,0,0.25)';
-    ghost.style.opacity = '1';
-    ghost.style.cursor = 'grabbing';
-    ghost.style.transform = '';
-    ghost.style.transition = '';
+    ghost.setCssProps({
+      'background': cs.background,
+      'background-color': cs.backgroundColor,
+      'border-color': cs.borderColor,
+      'border-width': cs.borderWidth,
+      'border-style': cs.borderStyle,
+      'border-radius': cs.borderRadius,
+      'color': cs.color,
+      'font-size': cs.fontSize,
+      'line-height': cs.lineHeight,
+      'padding': cs.padding,
+      'position': 'fixed',
+      'z-index': '9999',
+      'pointer-events': 'none',
+      'width': rect.width + 'px',
+      'height': rect.height + 'px',
+      'left': (e.clientX - offsetX) + 'px',
+      'top': (e.clientY - offsetY) + 'px',
+      'margin': '0',
+      'box-shadow': '0 8px 24px rgba(0,0,0,0.25)',
+      'opacity': '1',
+      'cursor': 'grabbing',
+      'transform': '',
+      'transition': ''
+    });
     document.body.appendChild(ghost);
   }
   const onMouseMove = (e: MouseEvent) => {
@@ -246,8 +258,10 @@ export function attachDragToReorder(
 
     if (!active || !ghost || !draggedEl) return;
 
-    ghost.style.left = (e.clientX - offsetX) + 'px';
-    ghost.style.top = (e.clientY - offsetY) + 'px';
+    ghost.setCssProps({
+      'left': (e.clientX - offsetX) + 'px',
+      'top': (e.clientY - offsetY) + 'px'
+    });
 
     const newTarget = computeTargetIndex(e.clientX, e.clientY);
     if (newTarget !== currentTargetIndex) {
@@ -276,8 +290,10 @@ export function attachDragToReorder(
     ghost?.remove();
     ghost = null;
 
-    draggedEl.style.opacity = '';
-    draggedEl.style.pointerEvents = '';
+    draggedEl.setCssProps({
+      'opacity': '',
+      'pointer-events': ''
+    });
 
     // Commit: clear transforms, reorder DOM permanently
     clearTransforms();
@@ -310,8 +326,10 @@ export function attachDragToReorder(
     document.removeEventListener('mouseup', onMouseUp);
     ghost?.remove();
     if (draggedEl) {
-      draggedEl.style.opacity = '';
-      draggedEl.style.pointerEvents = '';
+      draggedEl.setCssProps({
+        'opacity': '',
+        'pointer-events': ''
+      });
     }
     clearTransforms();
     ghost = null; draggedEl = null; active = false; dragPending = false;
@@ -351,7 +369,7 @@ export function attachPinnedListDragToReorder(
     if (!indicator) {
       indicator = document.createElement('div');
       indicator.className = 'sc-pinned-drop-indicator';
-      indicator.style.cssText = 'position:absolute;left:0;right:0;height:2px;background:var(--interactive-accent);border-radius:2px;pointer-events:none;z-index:100;display:none;';
+      indicator.setCssStyles({ position: 'absolute', left: '0', right: '0', height: '2px', background: 'var(--interactive-accent)', borderRadius: '2px', pointerEvents: 'none', zIndex: '100', display: 'none' });
     }
     return indicator;
   }
@@ -382,11 +400,13 @@ export function attachPinnedListDragToReorder(
       top = target.top - containerRect.top;
     }
 
-    ind.style.display = 'block';
-    ind.style.top = (top - 1) + 'px';
+    ind.setCssProps({
+      'display': 'block',
+      'top': (top - 1) + 'px'
+    });
 
     if (!ind.parentElement) {
-      container.style.position = 'relative';
+      container.setCssProps({ 'position': 'relative' });
       container.appendChild(ind);
     }
   }
@@ -407,18 +427,27 @@ export function attachPinnedListDragToReorder(
     ghost = item.cloneNode(true) as HTMLElement;
     ghost.classList.add('sc-drag-ghost');
     const cs = getComputedStyle(item);
-    ghost.style.cssText = `
-      position:fixed;z-index:9999;pointer-events:none;
-      width:${rect.width}px;height:${rect.height}px;
-      left:${rect.left}px;top:${rect.top}px;
-      background:${cs.background};background-color:${cs.backgroundColor};
-      border-radius:${cs.borderRadius};padding:${cs.padding};
-      font-size:${cs.fontSize};color:${cs.color};
-      box-shadow:0 4px 16px rgba(0,0,0,0.2);opacity:0.9;cursor:grabbing;
-    `;
+    ghost.setCssStyles({
+      position: 'fixed',
+      zIndex: '9999',
+      pointerEvents: 'none',
+      width: rect.width + 'px',
+      height: rect.height + 'px',
+      left: rect.left + 'px',
+      top: rect.top + 'px',
+      background: cs.background,
+      backgroundColor: cs.backgroundColor,
+      borderRadius: cs.borderRadius,
+      padding: cs.padding,
+      fontSize: cs.fontSize,
+      color: cs.color,
+      boxShadow: '0 4px 16px rgba(0,0,0,0.2)',
+      opacity: '0.9',
+      cursor: 'grabbing',
+    });
     document.body.appendChild(ghost);
 
-    item.style.opacity = '0.3';
+    item.setCssProps({ 'opacity': '0.3' });
     active = true;
     dropIndex = computeDropIndex(e.clientY);
     positionIndicator(dropIndex);
@@ -430,7 +459,7 @@ export function attachPinnedListDragToReorder(
 
   const onMouseMove = (e: MouseEvent) => {
     if (!active || !ghost) return;
-    ghost.style.top = (e.clientY - offsetY) + 'px';
+    ghost.setCssProps({ 'top': (e.clientY - offsetY) + 'px' });
     dropIndex = computeDropIndex(e.clientY);
     positionIndicator(dropIndex);
   };
@@ -443,8 +472,8 @@ export function attachPinnedListDragToReorder(
 
     ghost?.remove();
     ghost = null;
-    if (indicator) indicator.style.display = 'none';
-    if (draggedEl) draggedEl.style.opacity = '';
+    if (indicator) indicator.setCssProps({ 'display': 'none' });
+    if (draggedEl) draggedEl.setCssProps({ 'opacity': '' });
 
     // Commit new order
     const paths = getPaths().slice();
@@ -470,7 +499,7 @@ export function attachPinnedListDragToReorder(
     document.removeEventListener('mouseup', onMouseUp);
     ghost?.remove();
     indicator?.remove();
-    if (draggedEl) draggedEl.style.opacity = '';
+    if (draggedEl) draggedEl.setCssProps({ 'opacity': '' });
     ghost = null; draggedEl = null; active = false; indicator = null;
   };
 }

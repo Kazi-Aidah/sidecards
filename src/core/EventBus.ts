@@ -1,19 +1,23 @@
 
+import type { Card } from "../models/Card";
+
 type EventMap = {
-  'card:added': any;
-  'card:updated': any;
+  'card:added': Card;
+  'card:updated': Card;
   'card:deleted': string;
-  'card:contextmenu': { card: any; event: MouseEvent };
-  'card:dragstart': { card: any; event: DragEvent };
-  'filter:changed': any;
+  'card:contextmenu': { card: Card; event: MouseEvent };
+  'card:dragstart': { card: Card; event: DragEvent };
+  'filter:changed': { type: string; value: string };
   'filter:tag': string;
   'sort:changed': { mode: string; ascending: boolean };
-  'settings:changed': any;
+  'settings:changed': Record<string, unknown>;
+  'card:focus': string;
 };
 
+type EventCallback<T> = (data: T) => void | Promise<void>;
+
 export class EventBus {
-  // eslint-disable-next-line @typescript-eslint/no-unsafe-function-type
-  private listeners = new Map<keyof EventMap, Set<Function>>();
+  private listeners = new Map<keyof EventMap, Set<EventCallback<EventMap[keyof EventMap]>>>();
 
   on<K extends keyof EventMap>(
     event: K,
@@ -22,17 +26,16 @@ export class EventBus {
     if (!this.listeners.has(event)) {
       this.listeners.set(event, new Set());
     }
-    this.listeners.get(event)!.add(callback);
+    this.listeners.get(event)!.add(callback as EventCallback<EventMap[keyof EventMap]>);
     
-    return () => this.listeners.get(event)?.delete(callback);
+    return () => this.listeners.get(event)?.delete(callback as EventCallback<EventMap[keyof EventMap]>);
   }
 
   emit<K extends keyof EventMap>(event: K, data: EventMap[K]): void {
     this.listeners.get(event)?.forEach(cb => {
       try {
-        cb(data);
+        void cb(data);
       } catch (e) {
-        // eslint-disable-next-line no-undef
         console.error(`Error in event handler for ${event}:`, e);
       }
     });
@@ -45,9 +48,8 @@ export class EventBus {
     const handlers = Array.from(this.listeners.get(event) || []);
     await Promise.all(handlers.map(cb => {
       try {
-        return cb(data);
+        return Promise.resolve(cb(data));
       } catch (e) {
-        // eslint-disable-next-line no-undef
         console.error(`Error in async event handler for ${event}:`, e);
         return Promise.resolve();
       }

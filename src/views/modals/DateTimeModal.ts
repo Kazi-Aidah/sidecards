@@ -1,4 +1,3 @@
-/* eslint-disable obsidianmd/no-static-styles-assignment */
 import { App, Modal } from "obsidian";
 import { Card } from "../../models/Card";
 import { CardStore } from "../../services/CardStore";
@@ -50,7 +49,7 @@ export class DateTimeModal extends Modal {
     this.slotsContainer = relPanel.createDiv('sc-dt-slots');
     this.addSlot(); // start with one slot
 
-    const addSlotBtn = relPanel.createEl('button', { text: '+ Add time unit', cls: 'sc-dt-add-slot-btn' }); // eslint-disable-line obsidianmd/ui/sentence-case
+    const addSlotBtn = relPanel.createEl('button', { text: 'Add time unit', cls: 'sc-dt-add-slot-btn' });
     addSlotBtn.addEventListener('click', () => this.addSlot());
 
     // Quick presets
@@ -75,7 +74,7 @@ export class DateTimeModal extends Modal {
 
     // --- Exact panel ---
     const exactPanel = contentEl.createDiv('sc-dt-panel sc-dt-panel-exact');
-    exactPanel.style.display = 'none';
+    exactPanel.setCssProps({ 'display': 'none' });
 
     const exactInput = exactPanel.createEl('input', { type: 'datetime-local', cls: 'sc-dt-exact-input' });
     if (this.card.expiresAt) {
@@ -95,103 +94,67 @@ export class DateTimeModal extends Modal {
     relRadio.addEventListener('change', () => {
       if (relRadio.checked) {
         this.mode = 'relative';
-        relPanel.style.display = '';
-        exactPanel.style.display = 'none';
+        relPanel.setCssProps({ 'display': '' });
+        exactPanel.setCssProps({ 'display': 'none' });
       }
     });
     exactRadio.addEventListener('change', () => {
       if (exactRadio.checked) {
         this.mode = 'exact';
-        relPanel.style.display = 'none';
-        exactPanel.style.display = '';
+        relPanel.setCssProps({ 'display': 'none' });
+        exactPanel.setCssProps({ 'display': '' });
       }
     });
 
-    // If card already has an expiry, default to exact mode
-    if (this.card.expiresAt) {
-      exactRadio.checked = true;
-      this.mode = 'exact';
-      relPanel.style.display = 'none';
-      exactPanel.style.display = '';
-    }
+    // --- Actions ---
+    const actionsRow = contentEl.createDiv('sc-dt-actions-row');
+    const cancelBtn = actionsRow.createEl('button', { text: 'Cancel', cls: 'sc-dt-cancel-btn' });
+    cancelBtn.addEventListener('click', () => this.close());
 
-    // --- Action buttons ---
-    const actions = contentEl.createDiv('sc-dt-actions');
-    const clearBtn = actions.createEl('button', { text: 'Clear' });
-    const saveBtn = actions.createEl('button', { text: 'Save', cls: 'mod-cta' });
-
-    clearBtn.addEventListener('click', () => {
-      void (async () => {
-        await this.store.setExpiry(this.card.id, null);
-        this.close();
-      })();
-    });
-
+    const saveBtn = actionsRow.createEl('button', { text: 'Save', cls: 'sc-dt-save-btn mod-cta' });
     saveBtn.addEventListener('click', () => {
       void (async () => {
-        let ms: number | null = null;
-
-        if (this.mode === 'exact') {
-          const raw = exactInput.value.trim();
-          if (raw) {
-            const parsed = new Date(raw).getTime();
-            if (!Number.isNaN(parsed)) ms = parsed;
-          }
-        } else {
-          // Sum all slots into total milliseconds from now
-          // Read numInput.value directly at save time to avoid stale slot.value
+        let expiresAt: number | null = null;
+        if (this.mode === 'relative') {
           let totalMs = 0;
-          for (const slot of this.slots) {
-            const v = parseFloat(slot.numInput.value) || 0;
-            if (v <= 0) continue;
-            if (slot.unit === 'seconds') totalMs += v * 1000;
-            else if (slot.unit === 'minutes') totalMs += v * 60 * 1000;
-            else if (slot.unit === 'hours') totalMs += v * 3600 * 1000;
-            else if (slot.unit === 'days') totalMs += v * 86400 * 1000;
-            else if (slot.unit === 'weeks') totalMs += v * 7 * 86400 * 1000;
-          }
-          if (totalMs > 0) ms = Date.now() + totalMs;
+          this.slots.forEach(s => {
+            const val = Number(s.numInput.value) || 0;
+            const unit = (s.el.querySelector('select') as HTMLSelectElement).value;
+            if (unit === 'seconds') totalMs += val * 1000;
+            else if (unit === 'minutes') totalMs += val * 60 * 1000;
+            else if (unit === 'hours') totalMs += val * 60 * 60 * 1000;
+            else if (unit === 'days') totalMs += val * 24 * 60 * 60 * 1000;
+            else if (unit === 'weeks') totalMs += val * 7 * 24 * 60 * 60 * 1000;
+          });
+          if (totalMs > 0) expiresAt = Date.now() + totalMs;
+        } else {
+          const val = exactInput.value;
+          if (val) expiresAt = new Date(val).getTime();
         }
-
-        await this.store.setExpiry(this.card.id, ms);
+        await this.store.update(this.card.id, { expiresAt });
         this.close();
       })();
     });
   }
 
-  private addSlot(defaultValue = 1, defaultUnit: 'seconds' | 'minutes' | 'hours' | 'days' | 'weeks' = 'hours'): void {
-    const row = this.slotsContainer.createDiv('sc-dt-slot-row');
+  private addSlot(val: number = 1, unit: string = 'minutes'): void {
+    const slotEl = this.slotsContainer.createDiv('sc-dt-slot');
+    const numInput = slotEl.createEl('input', { type: 'number', cls: 'sc-dt-slot-num' });
+    numInput.value = String(val);
 
-    const numInput = row.createEl('input', { type: 'number', cls: 'sc-dt-slot-num' });
-    numInput.min = '1';
-    numInput.value = String(defaultValue);
-
-    const unitSelect = row.createEl('select', { cls: 'sc-dt-slot-unit' });
-    (['seconds', 'minutes', 'hours', 'days', 'weeks'] as const).forEach(u => {
-      const opt = unitSelect.createEl('option', { value: u, text: u });
-      if (u === defaultUnit) opt.selected = true;
+    const unitSelect = slotEl.createEl('select', { cls: 'sc-dt-slot-unit' });
+    ['seconds', 'minutes', 'hours', 'days', 'weeks'].forEach(u => {
+      const opt = unitSelect.createEl('option', { text: u, value: u });
+      if (u === unit) opt.selected = true;
     });
 
-    const removeBtn = row.createEl('button', { text: '✕', cls: 'sc-dt-slot-remove' });
+    const removeBtn = slotEl.createEl('button', { text: '×', cls: 'sc-dt-slot-remove' });
+    const slotObj: DurationSlot = { value: val, unit: unit as any, el: slotEl, numInput };
+    this.slots.push(slotObj);
 
-    const slot: DurationSlot = {
-      value: defaultValue,
-      unit: defaultUnit,
-      el: row,
-      numInput,
-    };
-    this.slots.push(slot);
-
-    numInput.addEventListener('input', () => {
-      slot.value = parseFloat(numInput.value) || 0;
-    });
-    unitSelect.addEventListener('change', () => {
-      slot.unit = unitSelect.value as 'seconds' | 'minutes' | 'hours' | 'days' | 'weeks';
-    });
     removeBtn.addEventListener('click', () => {
-      if (this.slots.length <= 1) return; // keep at least one
-      this.slots = this.slots.filter(s => s !== slot);
-      row.remove();
+      this.slots = this.slots.filter(s => s !== slotObj);
+      slotEl.remove();
     });
   }
 
