@@ -173,9 +173,12 @@ export default class SideCardsPlugin extends Plugin {
       },
     });
 
-    this.addRibbonIcon('home', /*eslint-disable-next-line obsidianmd/ui/sentence-case*/ 'Open SideCards homepage', () => void this.activateHomeView());
-    this.addRibbonIcon('rows-3', /*eslint-disable-next-line obsidianmd/ui/sentence-case*/ 'Open SideCards sidebar', () => void this.activateView());
-    this.addRibbonIcon('rectangle-horizontal', /*eslint-disable-next-line obsidianmd/ui/sentence-case*/ 'Add card to SideCards', () => new QuickCardWithFilterModal(this.app, this, this.store).open());
+        /*eslint-disable-next-line obsidianmd/ui/sentence-case*/
+    this.addRibbonIcon('home', 'Open SideCards homepage', () => void this.activateHomeView());
+        /*eslint-disable-next-line obsidianmd/ui/sentence-case*/
+    this.addRibbonIcon('rows-3', 'Open SideCards sidebar', () => void this.activateView());
+        /*eslint-disable-next-line obsidianmd/ui/sentence-case*/
+    this.addRibbonIcon('rectangle-horizontal', 'Add card to SideCards', () => new QuickCardWithFilterModal(this.app, this, this.store).open());
 
     this.addSettingTab(new SideCardsSettingTab(this.app, this));
 
@@ -197,7 +200,7 @@ export default class SideCardsPlugin extends Plugin {
           menu.addItem((item) => {
             const isPinned = this.settings.pinnedNotes?.includes(file.path);
             item
-              .setTitle(isPinned ? /*eslint-disable-next-line obsidianmd/ui/sentence-case*/ "Unpin from SideCards Homepage" : /*eslint-disable-next-line obsidianmd/ui/sentence-case*/ "Pin to SideCards Homepage")
+                            .setTitle(isPinned ? "Unpin from SideCards Homepage" : "Pin to SideCards Homepage")
               .setIcon("pin")
               .onClick(async () => {
                 if (!this.settings.pinnedNotes) this.settings.pinnedNotes = [];

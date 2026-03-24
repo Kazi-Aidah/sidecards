@@ -311,7 +311,7 @@ export class SideCardsHomeView extends ItemView {
     
     // Top Section
     const topSection = main.createDiv({ cls: 'sc-home-top' });
-    topSection.createEl('h2', { text: this.plugin.settings.homepageName || /*eslint-disable-next-line obsidianmd/ui/sentence-case*/ 'SideCards', cls: 'sc-home-title' });
+        topSection.createEl('h2', { text: this.plugin.settings.homepageName || 'SideCards', cls: 'sc-home-title' });
 
     const paletteRow = topSection.createDiv({ cls: 'sc-home-palette-row' });
 
@@ -510,7 +510,8 @@ export class SideCardsHomeView extends ItemView {
           e.preventDefault();
           const menu = new Menu();
           menu.addItem(i => i
-            .setTitle(/*eslint-disable-next-line obsidianmd/ui/sentence-case*/ 'Unpin from SideCards').setIcon('pin-off').onClick(async () => {
+                        /*eslint-disable-next-line obsidianmd/ui/sentence-case*/
+            .setTitle('Unpin from SideCards').setIcon('pin-off').onClick(async () => {
             this.plugin.settings.pinnedNotes = (this.plugin.settings.pinnedNotes || []).filter(p => p !== file.path);
             await this.plugin.saveSettings();
             await this.renderFileList(container, 'pinned');
