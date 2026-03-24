@@ -137,7 +137,7 @@ export class DateTimeModal extends Modal {
     });
   }
 
-  private addSlot(val: number = 1, unit: string = 'minutes'): void {
+  private addSlot(val: number = 1, unit: DurationSlot['unit'] = 'minutes'): void {
     const slotEl = this.slotsContainer.createDiv('sc-dt-slot');
     const numInput = slotEl.createEl('input', { type: 'number', cls: 'sc-dt-slot-num' });
     numInput.value = String(val);
@@ -149,7 +149,7 @@ export class DateTimeModal extends Modal {
     });
 
     const removeBtn = slotEl.createEl('button', { text: '×', cls: 'sc-dt-slot-remove' });
-    const slotObj: DurationSlot = { value: val, unit: unit as any, el: slotEl, numInput };
+    const slotObj: DurationSlot = { value: val, unit: unit, el: slotEl, numInput };
     this.slots.push(slotObj);
 
     removeBtn.addEventListener('click', () => {

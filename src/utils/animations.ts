@@ -12,7 +12,7 @@ interface AnimationSettings {
 
 export async function flipAnimateAsync(
   container: HTMLElement,
-  asyncDomChange: () => Promise<void>,
+  asyncDomChange: () => void | Promise<void>,
   opts: FlipOptions = {},
   settings: AnimationSettings
 ): Promise<void> {
@@ -84,7 +84,7 @@ export async function flipAnimateAsync(
     const el = elById.get(id);
     if (!el) return;
     const delay = i * stagger;
-    setTimeout(() => {
+    window.setTimeout(() => {
       el.setCssProps({
         'transition': `transform ${duration}ms ease-out, opacity ${duration}ms ease-out`,
         'transform': ''
@@ -95,7 +95,7 @@ export async function flipAnimateAsync(
     }, delay);
   });
 
-  setTimeout(() => {
+  window.setTimeout(() => {
     ids.forEach(id => {
       const el = elById.get(id);
       if (el) {
@@ -135,7 +135,7 @@ export function animateCardsEntrance(
 
   els.forEach((el, i) => {
     const delay = i * stagger;
-    setTimeout(() => {
+    window.setTimeout(() => {
       el.setCssProps({
         'transition': `transform ${duration}ms cubic-bezier(0.2, 0, 0, 1), opacity ${duration}ms cubic-bezier(0.2, 0, 0, 1)`,
         'transform': 'translateY(0)',
@@ -144,7 +144,7 @@ export function animateCardsEntrance(
     }, delay);
   });
 
-  setTimeout(() => {
+  window.setTimeout(() => {
     els.forEach(el => {
       el.setCssProps({
         'transition': '',

@@ -1,4 +1,4 @@
-import { ItemView, WorkspaceLeaf, Menu, Notice, setIcon, Scope, Editor, TFile, Platform, App } from "obsidian";
+import { ItemView, WorkspaceLeaf, Menu, Notice, setIcon, Scope, Editor, TFile, Platform, App, MarkdownFileInfo } from "obsidian";
 import type SideCardsPlugin from "../core/Plugin";
 import { CardStore } from "../services/CardStore";
 import { Card } from "../models/Card";
@@ -11,7 +11,7 @@ import { attachDragToReorder, attachPinnedListDragToReorder } from "../utils/dra
 
 interface AppWithInternals extends App {
   keymap: { pushScope: (scope: Scope) => void; popScope: (scope: Scope) => void };
-  workspace: App['workspace'] & { activeEditor: { editor: Editor; editMode: boolean } | null };
+  workspace: App['workspace'] & { activeEditor: (MarkdownFileInfo & { editor: Editor; editMode: boolean }) | null };
 }
 
 type IconicIconEntry = { icon?: string; name?: string; value?: string; color?: string } | string;
@@ -385,7 +385,7 @@ export class SideCardsHomeView extends ItemView {
     editorEl.addEventListener('input', updatePlaceholder);
     editorEl.addEventListener('focusin', () => {
       (this.app as unknown as AppWithInternals).keymap.pushScope(this.editorScope);
-      (this.app as unknown as AppWithInternals).workspace.activeEditor = this.owner as any;
+      (this.app as unknown as AppWithInternals).workspace.activeEditor = this.owner as unknown as MarkdownFileInfo & { editor: Editor; editMode: boolean };
     });
     editorEl.addEventListener('blur', () => {
       (this.app as unknown as AppWithInternals).keymap.popScope(this.editorScope);
@@ -510,8 +510,7 @@ export class SideCardsHomeView extends ItemView {
           e.preventDefault();
           const menu = new Menu();
           menu.addItem(i => i
-                        /*eslint-disable-next-line obsidianmd/ui/sentence-case*/
-            .setTitle('Unpin from SideCards').setIcon('pin-off').onClick(async () => {
+            .setTitle('Unpin from homepage').setIcon('pin-off').onClick(async () => {
             this.plugin.settings.pinnedNotes = (this.plugin.settings.pinnedNotes || []).filter(p => p !== file.path);
             await this.plugin.saveSettings();
             await this.renderFileList(container, 'pinned');
@@ -892,9 +891,9 @@ export class SideCardsHomeView extends ItemView {
       btn.dataset.filterColorKey = colorKey;
 
       const customColors = this.plugin.settings.filterColors?.[colorKey];
-      if (customColors?.bgColor) btn.style.setProperty('background-color', customColors.bgColor, 'important');
+      if (customColors?.bgColor) btn.style.setProperty('background-color', customColors.bgColor);
       if (customColors?.textColor) {
-        btn.style.setProperty('color', customColors.textColor, 'important');
+        btn.style.setProperty('color', customColors.textColor);
         btn.style.setProperty('--sc-btn-text-color', customColors.textColor);
       }
 
@@ -903,10 +902,10 @@ export class SideCardsHomeView extends ItemView {
           (b as HTMLElement).removeClass('active');
           const bColorKey = (b as HTMLElement).dataset.filterColorKey || '';
           const bColors = this.plugin.settings.filterColors?.[bColorKey];
-          if (bColors?.bgColor) (b as HTMLElement).style.setProperty('background-color', bColors.bgColor, 'important');
+          if (bColors?.bgColor) (b as HTMLElement).style.setProperty('background-color', bColors.bgColor);
           else (b as HTMLElement).style.removeProperty('background-color');
           if (bColors?.textColor) {
-            (b as HTMLElement).style.setProperty('color', bColors.textColor, 'important');
+            (b as HTMLElement).style.setProperty('color', bColors.textColor);
             (b as HTMLElement).style.setProperty('--sc-btn-text-color', bColors.textColor);
           } else {
             (b as HTMLElement).style.removeProperty('color');

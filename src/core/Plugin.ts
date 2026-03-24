@@ -173,12 +173,9 @@ export default class SideCardsPlugin extends Plugin {
       },
     });
 
-        /*eslint-disable-next-line obsidianmd/ui/sentence-case*/
-    this.addRibbonIcon('home', 'Open SideCards homepage', () => void this.activateHomeView());
-        /*eslint-disable-next-line obsidianmd/ui/sentence-case*/
-    this.addRibbonIcon('rows-3', 'Open SideCards sidebar', () => void this.activateView());
-        /*eslint-disable-next-line obsidianmd/ui/sentence-case*/
-    this.addRibbonIcon('rectangle-horizontal', 'Add card to SideCards', () => new QuickCardWithFilterModal(this.app, this, this.store).open());
+    this.addRibbonIcon('home', 'Open homepage (SideCards)', () => void this.activateHomeView());
+    this.addRibbonIcon('rows-3', 'Open sidebar (SideCards)', () => void this.activateView());
+    this.addRibbonIcon('rectangle-horizontal', 'Add a card (SideCards)', () => new QuickCardWithFilterModal(this.app, this, this.store).open());
 
     this.addSettingTab(new SideCardsSettingTab(this.app, this));
 
@@ -242,6 +239,7 @@ export default class SideCardsPlugin extends Plugin {
     // Apply styles immediately (don't wait for layout ready)
     this.injectStatusColors();
     this.applyButtonPadding();
+    this.applyMaxCardHeight();
 
     // Allow drop on any element — needed so the browser accepts the drop
     this.registerDomEvent(document, 'dragover', (ev: DragEvent) => {
@@ -330,6 +328,17 @@ export default class SideCardsPlugin extends Plugin {
     (document.documentElement).setCssProps({
       '--sc-button-padding-bottom': `${paddingPx}px`
     });
+  }
+
+  applyMaxCardHeight(): void {
+    const h = this.settings.maxCardHeight;
+    if (h && h > 0) {
+      document.documentElement.style.setProperty('--sc-max-card-height', `${h}px`);
+      document.body.addClass('sc-max-card-height-active');
+    } else {
+      document.documentElement.style.removeProperty('--sc-max-card-height');
+      document.body.removeClass('sc-max-card-height-active');
+    }
   }
 
   injectStatusColors(): void {
@@ -502,7 +511,7 @@ export default class SideCardsPlugin extends Plugin {
 
     folderInput.addEventListener('focus', () => renderSuggestions(folderInput.value));
     folderInput.addEventListener('input', () => renderSuggestions(folderInput.value));
-    folderInput.addEventListener('blur', () => setTimeout(() => suggestEl.removeClass('is-visible'), 150));
+    folderInput.addEventListener('blur', () => window.setTimeout(() => suggestEl.removeClass('is-visible'), 150));
 
     const btnRow = content.createDiv({ cls: 'sc-setup-btn-row' });
 
@@ -528,7 +537,7 @@ export default class SideCardsPlugin extends Plugin {
     });
 
     modal.open();
-    setTimeout(() => folderInput.focus(), 50);
+    window.setTimeout(() => folderInput.focus(), 50);
   }
 
   async fetchAllReleases(): Promise<Array<{ name?: string; tag_name?: string; published_at?: string; created_at?: string; body?: string }>> {
@@ -917,8 +926,8 @@ class SideCardsSettingTab extends PluginSettingTab {
       const color1 = settings.color1 || '#8392a4';
       const root = document.documentElement;
       root.style.setProperty('--card-color-1', color1);
-      previewCard.style.setProperty('border-radius', `${settings.borderRadius || 0}px`, 'important');
-      previewCard.style.setProperty('border-width', `${settings.borderThickness ?? 2}px`, 'important');
+      previewCard.style.setProperty('border-radius', `${settings.borderRadius || 0}px`);
+      previewCard.style.setProperty('border-width', `${settings.borderThickness ?? 2}px`);
       const colorSettings = {
         cardStyle: settings.cardStyle,
         cardBgOpacity: settings.cardBgOpacity,
@@ -983,14 +992,7 @@ class SideCardsSettingTab extends PluginSettingTab {
     new Setting(containerEl).setName('Maximum card height').setDesc('Limit card height in pixels (0 = no limit)').addSlider(slider => slider.setLimits(0, 800, 10).setValue(this.plugin.settings.maxCardHeight || 0).setDynamicTooltip().onChange(async (value) => {
       this.plugin.settings.maxCardHeight = Number(value) || 0;
       await this.plugin.saveSettings();
-      const styleId = 'card-max-height-style';
-      document.getElementById(styleId)?.remove();
-      if (this.plugin.settings.maxCardHeight && this.plugin.settings.maxCardHeight > 0) {
-        // eslint-disable-next-line obsidianmd/no-forbidden-elements -- dynamic CSS injection for user-configured max card height requires a style element
-        const s = document.head.createEl('style');
-        s.id = styleId;
-        s.textContent = `.sc-card { max-height: ${this.plugin.settings.maxCardHeight}px !important; overflow: hidden !important; }`;
-      }
+      this.plugin.applyMaxCardHeight();
     }));
     new Setting(containerEl).setName('Bottom space under input row').setDesc('Padding to accommodate the status bar').addSlider(slider => slider.setLimits(0, 100, 1).setValue(this.plugin.settings.buttonPaddingBottom || 26).onChange(async (value) => {
       this.plugin.settings.buttonPaddingBottom = Number(value) || 0;
@@ -1068,14 +1070,7 @@ class SideCardsSettingTab extends PluginSettingTab {
     // Apply CSS on settings open
     this.updateCSSVariables();
     updateButtonPadding(this.plugin.settings.buttonPaddingBottom || 26);
-    const styleId = 'card-max-height-style';
-    document.getElementById(styleId)?.remove();
-    if (this.plugin.settings.maxCardHeight && this.plugin.settings.maxCardHeight > 0) {
-      // eslint-disable-next-line obsidianmd/no-forbidden-elements -- dynamic CSS injection for user-configured max card height requires a style element
-      const s = document.head.createEl('style');
-      s.id = styleId;
-      s.textContent = `.sc-card { max-height: ${this.plugin.settings.maxCardHeight}px !important; overflow: hidden !important; }`;
-    }
+    this.plugin.applyMaxCardHeight();
 
     // ── Colors ────────────────────────────────────────────────────────────────
     new Setting(containerEl).setName('Colors').setDesc('Card colors used for tagging. Names are written to notes.').setHeading();
@@ -1217,7 +1212,7 @@ class SideCardsSettingTab extends PluginSettingTab {
           if (e.dataTransfer) {
             e.dataTransfer.effectAllowed = 'move';
           }
-          setTimeout(() => {
+          window.setTimeout(() => {
             setting.settingEl.addClass('sc-dragging');
           }, 0);
         });
@@ -1437,9 +1432,9 @@ class SideCardsSettingTab extends PluginSettingTab {
         previewBtn.textContent = itemInfo.label;
         const applyPreviewColors = () => {
           const colors = this.plugin.settings.filterColors?.[colorKey];
-          if (colors?.bgColor) previewBtn.style.setProperty('background-color', colors.bgColor, 'important');
+          if (colors?.bgColor) previewBtn.style.setProperty('background-color', colors.bgColor);
           else previewBtn.style.removeProperty('background-color');
-          if (colors?.textColor) previewBtn.style.setProperty('color', colors.textColor, 'important');
+          if (colors?.textColor) previewBtn.style.setProperty('color', colors.textColor);
           else previewBtn.style.removeProperty('color');
         };
         applyPreviewColors();
@@ -1643,7 +1638,7 @@ class SideCardsSettingTab extends PluginSettingTab {
           ruleDragSrcId = `rule-${idx}`;
           e.dataTransfer?.setData('text/plain', ruleDragSrcId);
           if (e.dataTransfer) e.dataTransfer.effectAllowed = 'move';
-          setTimeout(() => setting.settingEl.addClass('sc-dragging'), 0);
+          window.setTimeout(() => setting.settingEl.addClass('sc-dragging'), 0);
         });
         setting.settingEl.addEventListener('dragend', () => {
           rulesContainer.querySelectorAll('.sc-dragging').forEach(el => el.removeClass('sc-dragging'));
@@ -1847,7 +1842,7 @@ class SideCardsSettingTab extends PluginSettingTab {
           statusDragSrcId = `status-${idx}`;
           e.dataTransfer?.setData('text/plain', statusDragSrcId);
           if (e.dataTransfer) e.dataTransfer.effectAllowed = 'move';
-          setTimeout(() => setting.settingEl.addClass('sc-dragging'), 0);
+          window.setTimeout(() => setting.settingEl.addClass('sc-dragging'), 0);
         });
         setting.settingEl.addEventListener('dragend', () => {
           statusConfigContainer.querySelectorAll('.sc-dragging').forEach(el => el.removeClass('sc-dragging'));
@@ -2125,8 +2120,7 @@ class FolderSuggest {
     } catch { /* ignore */ }
     this.folders = Array.from(foldersSet).sort();
     this.updateSuggestions();
-    // eslint-disable-next-line obsidianmd/no-static-styles-assignment -- vanilla element, no Obsidian API available
-    this.suggestEl.style.display = 'block';
+    this.suggestEl.addClass('is-visible');
   }
 
   private onInput(): void {
@@ -2137,8 +2131,7 @@ class FolderSuggest {
     const target = event.target as Node | null;
     if (!target) return;
     if (!this.inputEl.contains(target) && !this.suggestEl.contains(target)) {
-      // eslint-disable-next-line obsidianmd/no-static-styles-assignment -- vanilla element, no Obsidian API available
-      this.suggestEl.style.display = 'none';
+      this.suggestEl.removeClass('is-visible');
     }
   }
 
@@ -2153,8 +2146,7 @@ class FolderSuggest {
       item.addEventListener('click', () => {
         this.inputEl.value = folder;
         this.inputEl.dispatchEvent(new Event('input'));
-        // eslint-disable-next-line obsidianmd/no-static-styles-assignment -- vanilla element, no Obsidian API available
-        this.suggestEl.style.display = 'none';
+        this.suggestEl.removeClass('is-visible');
       });
       this.suggestEl.appendChild(item);
     });

@@ -1,14 +1,14 @@
 import { Card } from "../../models/Card";
 import { CardStore } from "../../services/CardStore";
 import { applyCardColorToElement } from "../../utils/dom";
-import { App, MarkdownRenderer, Plugin, Menu, Notice, TFile, TFolder, setIcon, Scope, Editor, Platform, Component } from "obsidian";
+import { App, MarkdownRenderer, Plugin, Menu, Notice, TFile, TFolder, setIcon, Scope, Editor, Platform, Component, MarkdownFileInfo } from "obsidian";
 import { DateTimeModal } from "../modals/DateTimeModal";
 import { getWordRangeAtCaret, handleKeyWrap } from "../../utils/editor-utils";
 import { InlineAutocomplete } from "./InlineAutocomplete";
 
 interface AppWithInternals extends App {
   keymap: { pushScope: (scope: Scope) => void; popScope: (scope: Scope) => void };
-  workspace: App['workspace'] & { activeEditor: { editor: Editor; editMode: boolean } | null };
+  workspace: App['workspace'] & { activeEditor: (MarkdownFileInfo & { editor: Editor; editMode: boolean }) | null };
 }
 
 export class CardComponent extends Component {
@@ -232,7 +232,7 @@ export class CardComponent extends Component {
         existingContent.setAttribute('contenteditable', 'true');
         existingContent.textContent = this.card.content;
         existingContent.addClass('is-editing');
-        setTimeout(() => {
+        window.setTimeout(() => {
           (existingContent as HTMLElement).focus();
           const range = document.createRange();
           const sel = window.getSelection();
@@ -243,7 +243,7 @@ export class CardComponent extends Component {
         }, 0);
         existingContent.addEventListener('focusin', () => {
           (this.app as unknown as AppWithInternals).keymap.pushScope(this.scope);
-          (this.app as unknown as AppWithInternals).workspace.activeEditor = this.owner as any;
+          (this.app as unknown as AppWithInternals).workspace.activeEditor = this.owner as unknown as MarkdownFileInfo & { editor: Editor; editMode: boolean };
         });
         existingContent.addEventListener('blur', () => {
           (this.app as unknown as AppWithInternals).keymap.popScope(this.scope);
@@ -310,19 +310,6 @@ export class CardComponent extends Component {
       delete this.el.dataset.status;
     }
 
-    const maxH = this.store.settings.maxCardHeight;
-    if (maxH && maxH > 0) {
-      this.el.setCssProps({
-        'max-height': `${maxH}px`,
-        'overflow': 'hidden'
-      });
-    } else {
-      this.el.setCssProps({
-        'max-height': '',
-        'overflow': ''
-      });
-    }
-    
     if (this.store.settings.cardStyle === 2) {
       this.el.addClass('sc-style-2-masonry');
     } else {
@@ -411,7 +398,7 @@ export class CardComponent extends Component {
       const ac = new InlineAutocomplete(container, this.store, this.app);
       
       // Auto-focus and place cursor at the end
-      setTimeout(() => {
+      window.setTimeout(() => {
         container.focus();
         const range = document.createRange();
         const sel = window.getSelection();
@@ -423,7 +410,7 @@ export class CardComponent extends Component {
 
       container.addEventListener('focusin', () => {
         (this.app as unknown as AppWithInternals).keymap.pushScope(this.scope);
-        (this.app as unknown as AppWithInternals).workspace.activeEditor = this.owner as any;
+        (this.app as unknown as AppWithInternals).workspace.activeEditor = this.owner as unknown as MarkdownFileInfo & { editor: Editor; editMode: boolean };
       });
 
       container.addEventListener('blur', () => {
@@ -744,7 +731,7 @@ export class CardComponent extends Component {
         colors.forEach((color, idx) => {
           const swatch = document.createElement('div');
           swatch.className = 'sc-color-dot sc-color-dot-swatch';
-          swatch.style.border = this.card.color === color ? '2px solid var(--text-accent)' : '1px solid var(--background-modifier-border)';
+          swatch.classList.toggle('is-selected', this.card.color === color);
           swatch.title = s.colorNames[idx] || `Color ${idx + 1}`;
           const computed = getComputedStyle(document.documentElement).getPropertyValue(color.replace('var(', '').replace(')', ''));
           swatch.style.backgroundColor = computed.trim() || color;

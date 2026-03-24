@@ -1,4 +1,4 @@
-import { App, Editor, Modal, Notice, Platform, Plugin, Scope } from "obsidian";
+import { App, Editor, MarkdownFileInfo, Modal, Notice, Platform, Plugin, Scope } from "obsidian";
 import { handleKeyWrap } from "../../utils/editor-utils";
 import { resolveAutoColor } from "../../utils/dom";
 import { CardStore } from "../../services/CardStore";
@@ -7,7 +7,7 @@ import { InlineAutocomplete } from "../components/InlineAutocomplete";
 
 interface AppWithInternals extends App {
   keymap: { pushScope: (scope: Scope) => void; popScope: (scope: Scope) => void };
-  workspace: App['workspace'] & { activeEditor: { editor: Editor; editMode: boolean } | null };
+  workspace: App['workspace'] & { activeEditor: (MarkdownFileInfo & { editor: Editor; editMode: boolean }) | null };
 }
 
 export class QuickCardWithFilterModal extends Modal {
@@ -280,7 +280,7 @@ export class QuickCardWithFilterModal extends Modal {
 
     editorEl.addEventListener('focusin', () => {
       (this.app as unknown as AppWithInternals).keymap.pushScope(this.editorScope);
-      (this.app as unknown as AppWithInternals).workspace.activeEditor = this.owner as any;
+      (this.app as unknown as AppWithInternals).workspace.activeEditor = this.owner as unknown as MarkdownFileInfo & { editor: Editor; editMode: boolean };
     });
 
     editorEl.addEventListener('blur', () => {
@@ -330,7 +330,7 @@ export class QuickCardWithFilterModal extends Modal {
       cls: 'sc-modal-tags-input'
     });
     const tagsAutocomplete = tagsWrapper.createDiv('sc-modal-tags-autocomplete');
-    (tagsAutocomplete as HTMLElement).setCssProps({ 'display': 'none' });
+    tagsAutocomplete.addClass('sc-hidden');
 
     // Tag Autocomplete Logic
     let selectedTagIdx = -1;
@@ -340,7 +340,7 @@ export class QuickCardWithFilterModal extends Modal {
       const currentTag = val.substring(lastComma + 1).trim().toLowerCase();
 
       if (!currentTag) {
-        (tagsAutocomplete as HTMLElement).setCssProps({ 'display': 'none' });
+        tagsAutocomplete.addClass('sc-hidden');
         return;
       }
 
@@ -348,28 +348,28 @@ export class QuickCardWithFilterModal extends Modal {
       const suggestions = allTags.filter(t => t.startsWith(currentTag)).slice(0, 8);
 
       if (suggestions.length === 0) {
-        (tagsAutocomplete as HTMLElement).setCssProps({ 'display': 'none' });
+        tagsAutocomplete.addClass('sc-hidden');
         return;
       }
 
       tagsAutocomplete.empty();
       selectedTagIdx = -1;
-      suggestions.forEach((tag, idx) => {
+      suggestions.forEach((tag) => {
         const item = tagsAutocomplete.createDiv('sc-modal-autocomplete-item');
         item.textContent = tag;
         item.addEventListener('click', () => {
           const before = val.substring(0, lastComma + 1);
           tagsInput.value = (before ? before + ' ' : '') + tag + ', ';
-          (tagsAutocomplete as HTMLElement).setCssProps({ 'display': 'none' });
+          tagsAutocomplete.addClass('sc-hidden');
           tagsInput.focus();
         });
       });
-      (tagsAutocomplete as HTMLElement).setCssProps({ 'display': 'block' });
+      tagsAutocomplete.removeClass('sc-hidden');
     };
 
     tagsInput.addEventListener('input', updateAutocomplete);
     tagsInput.addEventListener('keydown', (e) => {
-      if ((tagsAutocomplete as HTMLElement).style.display === 'none') return;
+      if (tagsAutocomplete.hasClass('sc-hidden')) return;
       const items = tagsAutocomplete.querySelectorAll('.sc-modal-autocomplete-item');
       if (e.key === 'ArrowDown') {
         e.preventDefault();

@@ -60,6 +60,9 @@ export function applyCardColorToElement(cardEl: HTMLElement, colorVar: string, s
   cardEl.style.removeProperty('border');
   cardEl.style.removeProperty('background-color');
   cardEl.style.removeProperty('box-shadow');
+  // Clear any legacy inline max-height/overflow from older builds
+  cardEl.style.removeProperty('max-height');
+  cardEl.style.removeProperty('overflow');
 
   const hex = resolveColorVarToHex(colorVar, settings) || colorVar;
   const rgba = hexToRgba(hex, opacity);
@@ -67,22 +70,22 @@ export function applyCardColorToElement(cardEl: HTMLElement, colorVar: string, s
   const borderRadius = settings.borderRadius ?? 6;
 
   if (style === 1) {
-    cardEl.style.setProperty('border', `${borderThickness}px solid ${borderColor}`, 'important');
-    cardEl.style.setProperty('background-color', rgba, 'important');
+    cardEl.style.setProperty('border', `${borderThickness}px solid ${borderColor}`);
+    cardEl.style.setProperty('background-color', rgba);
   } else if (style === 3) {
-    cardEl.style.setProperty('border-left', `${borderThickness}px solid ${borderColor}`, 'important');
-    cardEl.style.setProperty('background-color', rgba, 'important');
-    cardEl.style.setProperty('border-top', `1px solid var(--background-modifier-border)`, 'important');
-    cardEl.style.setProperty('border-right', `1px solid var(--background-modifier-border)`, 'important');
-    cardEl.style.setProperty('border-bottom', `1px solid var(--background-modifier-border)`, 'important');
+    cardEl.style.setProperty('border-left', `${borderThickness}px solid ${borderColor}`);
+    cardEl.style.setProperty('background-color', rgba);
+    cardEl.style.setProperty('border-top', `1px solid var(--background-modifier-border)`);
+    cardEl.style.setProperty('border-right', `1px solid var(--background-modifier-border)`);
+    cardEl.style.setProperty('border-bottom', `1px solid var(--background-modifier-border)`);
   } else {
     // Style 2 (Default)
-    cardEl.style.setProperty('border', `${borderThickness}px solid ${borderColor}`, 'important');
-    cardEl.style.setProperty('background-color', rgba, 'important');
-    cardEl.style.setProperty('box-shadow', `2px 2px 0 0 ${borderColor}`, 'important');
+    cardEl.style.setProperty('border', `${borderThickness}px solid ${borderColor}`);
+    cardEl.style.setProperty('background-color', rgba);
+    cardEl.style.setProperty('box-shadow', `2px 2px 0 0 ${borderColor}`);
   }
 
-  cardEl.style.setProperty('border-radius', `${borderRadius}px`, 'important');
+  cardEl.style.setProperty('border-radius', `${borderRadius}px`);
 }
 
 export function resolveAutoColor(

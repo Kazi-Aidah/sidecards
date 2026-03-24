@@ -2,10 +2,10 @@
 import { Card } from "../models/Card";
 import { SideCardsSettings } from "../core/Settings";
 import { EventBus } from "../core/EventBus";
-import { App, Plugin, TFile, TFolder, Notice } from "obsidian";
+import { App, Plugin, TFile, TFolder, Notice, stringifyYaml } from "obsidian";
 import type SideCardsPlugin from "../core/Plugin";
 
-import { parseTagsFromFrontmatter, updateFrontmatter } from "../utils/frontmatter";
+import { parseTagsFromFrontmatter } from "../utils/frontmatter";
 
 export class CardStore {
   private cards: Map<string, Card> = new Map();
@@ -113,7 +113,7 @@ export class CardStore {
         try {
           await this.app.fileManager.trashFile(file);
         } catch { /* file may already be gone */ } finally {
-          setTimeout(() => this._syncingPaths.delete(card.notePath!), 500);
+          window.setTimeout(() => this._syncingPaths.delete(card.notePath!), 500);
         }
       }
     }
@@ -173,20 +173,16 @@ export class CardStore {
       fileName = `${title}-${Date.now()}.md`;
       filePath = folder && folder !== '/' ? `${folder}/${fileName}` : fileName;
     }
-    const tagsYaml = (card.tags || []).length ? `Tags: [${card.tags.map(t => `"${String(t).replace(/"/g, '\\"')}"`).join(', ')}]` : 'Tags: []';
-    const frontmatter = [
-      '---',
-      tagsYaml,
-      `card-color: ${this.getFrontmatterColorValueForCard(card.color)}`,
-      card.archived ? 'Archived: true' : '',
-      card.pinned ? 'Pinned: true' : '',
-      card.category ? `Category: ${String(card.category).replace(/\n/g, ' ')}` : '',
-      card.expiresAt ? `Expires-At: ${new Date(card.expiresAt).toISOString()}` : '',
-      card.status ? `Status: ${card.status.name}` : '',
-      '---',
-      '',
-      card.content
-    ].filter(Boolean).join('\n');
+    const fmData: Record<string, unknown> = {
+      Tags: card.tags || [],
+      'card-color': this.getFrontmatterColorValueForCard(card.color),
+    };
+    if (card.archived) fmData['Archived'] = true;
+    if (card.pinned) fmData['Pinned'] = true;
+    if (card.category) fmData['Category'] = card.category;
+    if (card.expiresAt) fmData['Expires-At'] = new Date(card.expiresAt).toISOString();
+    if (card.status) fmData['Status'] = card.status.name;
+    const frontmatter = '---\n' + stringifyYaml(fmData) + '---\n\n' + card.content;
     await this.app.vault.create(filePath, frontmatter);
     await this.update(id, { notePath: filePath });
     return filePath;
@@ -260,34 +256,24 @@ export class CardStore {
     for (const file of files) {
       const exists = this.getAll().some(c => c.notePath === file.path);
       if (!exists) {
-        const raw = await this.app.vault.read(file);
-        const fmMatch = raw.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n/);
-        let cardContent = raw.trim();
-        let tags: string[] = [];
-        let category: string | null = null;
-        let expiresAt: number | null = null;
-        let color = 'var(--card-color-1)';
-        let archived = false;
-        let pinned = false;
+        const cache = this.app.metadataCache.getFileCache(file);
+        const fm = cache?.frontmatter ?? {};
+        const raw = await this.app.vault.cachedRead(file);
+        const fmMatch = raw.match(/^---\r?\n[\s\S]*?\r?\n---\r?\n/);
+        const cardContent = fmMatch ? raw.slice(fmMatch[0].length).trim() : raw.trim();
 
-        if (fmMatch) {
-          const fm = fmMatch[1];
-          tags = parseTagsFromFrontmatter(fm);
-          archived = /archived:\s*true/i.test(fm);
-          pinned = /pinned:\s*true/i.test(fm);
-          const categoryMatch = fm.match(/^\s*category\s*:\s*(.+)$/im);
-          const expiresMatch = fm.match(/^\s*expires-at\s*:\s*(.+)$/im);
-          const colorMatch = fm.match(/^\s*card-color\s*:\s*(.+)$/im);
-          if (categoryMatch) category = categoryMatch[1].trim();
-          if (expiresMatch) {
-            const parsed = new Date(expiresMatch[1].trim()).getTime();
-            if (!Number.isNaN(parsed)) expiresAt = parsed;
-          }
-          if (colorMatch) {
-            const normalized = this.normalizeCardColorValue(colorMatch[1].trim(), color);
-            color = normalized.color;
-          }
-          cardContent = raw.replace(fmMatch[0], '').trim();
+        const tags: string[] = Array.isArray(fm['Tags'] ?? fm['tags'])
+          ? (fm['Tags'] ?? fm['tags']).map((t: unknown) => String(t).trim()).filter(Boolean)
+          : parseTagsFromFrontmatter(Object.keys(fm).length ? '' : (fmMatch?.[0] ?? ''));
+        const archived = !!(fm['Archived'] ?? fm['archived']);
+        const pinned = !!(fm['Pinned'] ?? fm['pinned']);
+        const category = fm['Category'] ?? fm['category'] ?? null;
+        const expiresRaw = fm['Expires-At'] ?? fm['expires-at'];
+        const expiresAt = expiresRaw ? new Date(String(expiresRaw)).getTime() || null : null;
+        let color = 'var(--card-color-1)';
+        const colorRaw = fm['card-color'];
+        if (colorRaw !== undefined) {
+          color = this.normalizeCardColorValue(colorRaw, color).color;
         }
 
         const card = new Card({
@@ -295,8 +281,8 @@ export class CardStore {
           notePath: file.path,
           created: file.stat.ctime,
           tags,
-          category,
-          expiresAt,
+          category: category ? String(category) : null,
+          expiresAt: expiresAt && !Number.isNaN(expiresAt) ? expiresAt : null,
           color,
           archived,
           pinned,
@@ -349,83 +335,61 @@ export class CardStore {
     const file = this.app.vault.getAbstractFileByPath(path);
     if (!(file instanceof TFile)) return;
 
-    const content = await this.app.vault.read(file);
-    const fmMatch = content.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n/);
-    if (fmMatch) {
-      const fm = fmMatch[1];
-      const tags = parseTagsFromFrontmatter(fm);
-      const archived = /archived:\s*true/i.test(fm);
-      const pinned = /pinned:\s*true/i.test(fm);
-      const categoryMatch = fm.match(/^\s*category\s*:\s*(.+)$/im);
-      const expiresMatch = fm.match(/^\s*expires-at\s*:\s*(.+)$/im);
-      const statusMatch = fm.match(/^\s*status\s*:\s*(.+)$/im);
-      const colorMatch = fm.match(/^\s*card-color\s*:\s*(.+)$/im);
-      const colorRaw = colorMatch ? colorMatch[1].trim() : null;
-      const normalizedColor = this.normalizeCardColorValue(colorRaw, card.color);
-      
-      await this.update(card.id, { 
-        tags, 
-        archived,
-        pinned,
-        category: categoryMatch ? categoryMatch[1].trim() : null,
-        expiresAt: expiresMatch ? new Date(expiresMatch[1].trim()).getTime() : null,
-        status: statusMatch ? { name: statusMatch[1].trim(), color: card.status?.color || '', textColor: card.status?.textColor || '#000' } : null,
-        color: normalizedColor.color,
-        created: file.stat.ctime,
-        content: content.replace(fmMatch[0], '').trim() 
+    const cache = this.app.metadataCache.getFileCache(file);
+    const fm = cache?.frontmatter ?? {};
+    const content = await this.app.vault.cachedRead(file);
+    const fmMatch = content.match(/^---\r?\n[\s\S]*?\r?\n---\r?\n/);
+    const cardContent = fmMatch ? content.slice(fmMatch[0].length).trim() : content.trim();
+
+    const tags: string[] = Array.isArray(fm['Tags'] ?? fm['tags'])
+      ? (fm['Tags'] ?? fm['tags']).map((t: unknown) => String(t).trim()).filter(Boolean)
+      : parseTagsFromFrontmatter(fmMatch?.[0] ?? '');
+    const archived = !!(fm['Archived'] ?? fm['archived']);
+    const pinned = !!(fm['Pinned'] ?? fm['pinned']);
+    const category = fm['Category'] ?? fm['category'] ?? null;
+    const expiresRaw = fm['Expires-At'] ?? fm['expires-at'];
+    const expiresAt = expiresRaw ? new Date(String(expiresRaw)).getTime() || null : null;
+    const colorRaw = fm['card-color'];
+    const normalizedColor = this.normalizeCardColorValue(colorRaw, card.color);
+    const statusRaw = fm['Status'] ?? fm['status'];
+
+    await this.update(card.id, {
+      tags,
+      archived,
+      pinned,
+      category: category ? String(category) : null,
+      expiresAt: expiresAt && !Number.isNaN(expiresAt) ? expiresAt : null,
+      status: statusRaw ? { name: String(statusRaw), color: card.status?.color || '', textColor: card.status?.textColor || '#000' } : null,
+      color: normalizedColor.color,
+      created: file.stat.ctime,
+      content: cardContent,
+    });
+
+    // Normalise stored color index format if needed
+    if (colorRaw !== undefined && normalizedColor.frontmatterColor !== null && String(colorRaw) !== String(normalizedColor.frontmatterColor)) {
+      await this.app.fileManager.processFrontMatter(file, (fmObj) => {
+        fmObj['card-color'] = normalizedColor.frontmatterColor;
       });
-      if (colorRaw && normalizedColor.frontmatterColor !== null && colorRaw !== String(normalizedColor.frontmatterColor)) {
-        const normalizedText = updateFrontmatter(content, 'card-color', normalizedColor.frontmatterColor);
-        if (normalizedText !== content) {
-          await this.app.vault.modify(file, normalizedText);
-        }
-      }
-    } else {
-      await this.update(card.id, { content: content.trim() });
     }
   }
 
   async handlePendingTagReapply(file: TFile, pending: { tags: string[], expiresAt: number }): Promise<void> {
     try {
-      const text = await this.app.vault.read(file);
-      const fmMatch = text.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n/);
-      const existing = parseTagsFromFrontmatter(fmMatch?.[1] || '');
       const desired = Array.isArray(pending.tags) ? pending.tags.map(t => String(t).trim()).filter(Boolean) : [];
-      
+      const cache = this.app.metadataCache.getFileCache(file);
+      const existing: string[] = Array.isArray(cache?.frontmatter?.['Tags'] ?? cache?.frontmatter?.['tags'])
+        ? (cache?.frontmatter?.['Tags'] ?? cache?.frontmatter?.['tags']).map((t: unknown) => String(t).trim())
+        : [];
+
       if (existing.length === desired.length && desired.every(t => existing.includes(t))) {
         this._pendingTagWrites.delete(file.path);
         return;
       }
 
       this._reapplyingTags.add(file.path);
-      
-      let content = text;
-      const tagsBlock = desired.length > 0
-        ? 'Tags: [' + desired.map(t => `"${String(t).replace(/"/g, '\\"')}"`).join(', ') + ']'
-        : 'Tags: []';
-
-      if (fmMatch) {
-        let fm = fmMatch[1];
-        let fmLines = fm.split(/\r?\n/);
-        const newLines = [];
-        for (let i = 0; i < fmLines.length; i++) {
-          const line = fmLines[i];
-          if (/^\s*(Tags|tags)\s*:/i.test(line)) {
-            const rest = line.replace(/^\s*(Tags|tags)\s*:\s*/i, '').trim();
-            if (rest.startsWith('[')) continue;
-            i++;
-            while (i < fmLines.length && /^\s*-\s+/.test(fmLines[i])) i++;
-            i--; continue;
-          }
-          newLines.push(line);
-        }
-        const rebuiltFm = tagsBlock + '\n' + (newLines.length ? newLines.join('\n') + '\n' : '');
-        content = content.replace(fmMatch[0], '---\n' + rebuiltFm + '---\n');
-      } else {
-        content = '---\n' + tagsBlock + '\n---\n\n' + content;
-      }
-
-      await this.app.vault.modify(file, content);
+      await this.app.fileManager.processFrontMatter(file, (fm) => {
+        fm['Tags'] = desired;
+      });
     } catch (e) {
       console.error('Error reapplying tags:', e);
     } finally {
@@ -512,30 +476,29 @@ export class CardStore {
     if (!(file instanceof TFile)) return;
     this._syncingPaths.add(card.notePath);
     try {
-      let text = await this.app.vault.read(file);
-      if (typeof updates.archived !== 'undefined') {
-        text = updateFrontmatter(text, 'Archived', !!updates.archived);
-      }
-      if (typeof updates.pinned !== 'undefined') {
-        text = updateFrontmatter(text, 'Pinned', !!updates.pinned);
-      }
-      if (typeof updates.category !== 'undefined') {
-        text = updateFrontmatter(text, 'Category', updates.category || null);
-      }
-      if (typeof updates.expiresAt !== 'undefined') {
-        text = updateFrontmatter(text, 'Expires-At', updates.expiresAt ? new Date(updates.expiresAt).toISOString() : null);
-      }
-      if (typeof updates.color !== 'undefined') {
-        const normalizedColor = this.normalizeCardColorValue(updates.color, card.color);
-        text = updateFrontmatter(text, 'card-color', normalizedColor.frontmatterColor ?? normalizedColor.color);
-      }
-      if (typeof updates.status !== 'undefined') {
-        text = updateFrontmatter(text, 'Status', updates.status?.name || null);
-      }
-      await this.app.vault.modify(file, text);
+      await this.app.fileManager.processFrontMatter(file, (fm) => {
+        if (typeof updates.archived !== 'undefined') {
+          if (updates.archived) fm['Archived'] = true; else delete fm['Archived'];
+        }
+        if (typeof updates.pinned !== 'undefined') {
+          if (updates.pinned) fm['Pinned'] = true; else delete fm['Pinned'];
+        }
+        if (typeof updates.category !== 'undefined') {
+          if (updates.category) fm['Category'] = updates.category; else delete fm['Category'];
+        }
+        if (typeof updates.expiresAt !== 'undefined') {
+          if (updates.expiresAt) fm['Expires-At'] = new Date(updates.expiresAt).toISOString(); else delete fm['Expires-At'];
+        }
+        if (typeof updates.color !== 'undefined') {
+          const normalizedColor = this.normalizeCardColorValue(updates.color, card.color);
+          fm['card-color'] = normalizedColor.frontmatterColor ?? normalizedColor.color;
+        }
+        if (typeof updates.status !== 'undefined') {
+          if (updates.status?.name) fm['Status'] = updates.status.name; else delete fm['Status'];
+        }
+      });
     } finally {
-      // Small delay so the vault modify event fires before we clear the guard
-      setTimeout(() => this._syncingPaths.delete(card.notePath!), 500);
+      window.setTimeout(() => this._syncingPaths.delete(card.notePath!), 500);
     }
   }
 
@@ -546,24 +509,15 @@ export class CardStore {
       seen.add(card.notePath);
       const file = this.app.vault.getAbstractFileByPath(card.notePath);
       if (!(file instanceof TFile)) continue;
-      let text = '';
-      try {
-        text = await this.app.vault.read(file);
-      } catch {
-        continue;
-      }
-      const fmMatch = text.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n/);
-      if (!fmMatch) continue;
-      const colorMatch = fmMatch[1].match(/^\s*card-color\s*:\s*(.+)$/im);
-      if (!colorMatch) continue;
-      const raw = colorMatch[1].trim();
-      const idx = this.parseColorIndex(raw);
+      const cache = this.app.metadataCache.getFileCache(file);
+      const colorRaw = cache?.frontmatter?.['card-color'];
+      if (colorRaw === undefined) continue;
+      const idx = this.parseColorIndex(colorRaw);
       if (idx === null) continue;
-      if (raw === String(idx)) continue;
-      const updated = updateFrontmatter(text, 'card-color', idx);
-      if (updated !== text) {
-        await this.app.vault.modify(file, updated);
-      }
+      if (String(colorRaw) === String(idx)) continue;
+      await this.app.fileManager.processFrontMatter(file, (fm) => {
+        fm['card-color'] = idx;
+      });
     }
   }
 }

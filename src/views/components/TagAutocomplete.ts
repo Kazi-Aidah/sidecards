@@ -71,10 +71,11 @@ export class TagAutocomplete {
       });
     });
     this.container.setCssProps({ 'display': '' });
+    this.container.addClass('sc-tag-autocomplete--open');
   }
 
   private onKeyDown(e: KeyboardEvent): void {
-    if (this.container.style.display === 'none') return;
+    if (!this.container.hasClass('sc-tag-autocomplete--open')) return;
     const items = this.container.querySelectorAll('.sc-autocomplete-item');
     if ((e.key === 'ArrowUp' || e.key === 'ArrowDown') && items.length > 0) {
       e.preventDefault();
@@ -100,5 +101,6 @@ export class TagAutocomplete {
 
   private hide(): void {
     this.container.setCssProps({ 'display': 'none' });
+    this.container.removeClass('sc-tag-autocomplete--open');
   }
 }

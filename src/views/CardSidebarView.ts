@@ -1,5 +1,5 @@
 
-import { ItemView, WorkspaceLeaf, Notice, Menu, TFile, setIcon, Scope, Editor, App } from "obsidian";
+import { ItemView, WorkspaceLeaf, Notice, Menu, TFile, setIcon, Scope, Editor, App, MarkdownFileInfo } from "obsidian";
 import { CardStore } from "../services/CardStore";
 import { FilterService, FilterOptions } from "../services/FilterService";
 import { SortService, SortMode } from "../services/SortService";
@@ -14,7 +14,7 @@ import { attachDragToReorder } from "../utils/drag-drop";
 
 interface AppWithInternals extends App {
   keymap: { pushScope: (scope: Scope) => void; popScope: (scope: Scope) => void };
-  workspace: App['workspace'] & { activeEditor: { editor: Editor; editMode: boolean } | null };
+  workspace: App['workspace'] & { activeEditor: (MarkdownFileInfo & { editor: Editor; editMode: boolean }) | null };
 }
 
 export class CardSidebarView extends ItemView {
@@ -282,10 +282,10 @@ export class CardSidebarView extends ItemView {
 
   private _loadInProgress = false;
   private _loadingEl: HTMLElement | null = null;
-  private _loadingTimeout: ReturnType<typeof setTimeout> | null = null;
+  private _loadingTimeout: number | null = null;
   private _masonryObserver: ResizeObserver | null = null;
   private _masonryMutationObserver: MutationObserver | null = null;
-  private _masonryTimeout: ReturnType<typeof setTimeout> | null = null;
+  private _masonryTimeout: number | null = null;
 
   async onOpen(): Promise<void> {
     const container = this.containerEl;
@@ -340,12 +340,12 @@ export class CardSidebarView extends ItemView {
 
     box.createDiv({ text: 'Loading cards...', cls: 'sc-sidebar-loading-text' });
 
-    this._loadingTimeout = setTimeout(() => this.hideLoadingOverlay(), maxMs);
+    this._loadingTimeout = window.setTimeout(() => this.hideLoadingOverlay(), maxMs);
   }
 
   private hideLoadingOverlay(fadeMs = 0) {
     if (this._loadingTimeout) {
-      clearTimeout(this._loadingTimeout);
+      window.clearTimeout(this._loadingTimeout);
       this._loadingTimeout = null;
     }
     if (this._loadingEl) {
@@ -467,9 +467,9 @@ export class CardSidebarView extends ItemView {
         : chip.value;
 
       const customColors = settings.filterColors?.[colorKey];
-      if (customColors?.bgColor) btn.style.setProperty('background-color', customColors.bgColor, 'important');
+      if (customColors?.bgColor) btn.style.setProperty('background-color', customColors.bgColor);
       if (customColors?.textColor) {
-        btn.style.setProperty('color', customColors.textColor, 'important');
+        btn.style.setProperty('color', customColors.textColor);
         btn.style.setProperty('--sc-btn-text-color', customColors.textColor);
       }
 
@@ -479,10 +479,10 @@ export class CardSidebarView extends ItemView {
           (b as HTMLElement).removeClass('active');
           const bVal = (b as HTMLElement).dataset.filterValue || '';
           const bColors = settings.filterColors?.[bVal];
-          if (bColors?.bgColor) (b as HTMLElement).style.setProperty('background-color', bColors.bgColor, 'important');
+          if (bColors?.bgColor) (b as HTMLElement).style.setProperty('background-color', bColors.bgColor);
           else (b as HTMLElement).style.removeProperty('background-color');
           if (bColors?.textColor) {
-            (b as HTMLElement).style.setProperty('color', bColors.textColor, 'important');
+            (b as HTMLElement).style.setProperty('color', bColors.textColor);
             (b as HTMLElement).style.setProperty('--sc-btn-text-color', bColors.textColor);
           } else {
             (b as HTMLElement).style.removeProperty('color');
@@ -564,7 +564,7 @@ export class CardSidebarView extends ItemView {
 
     editorEl.addEventListener('focusin', () => {
       (this.app as unknown as AppWithInternals).keymap.pushScope(this.editorScope);
-      (this.app as unknown as AppWithInternals).workspace.activeEditor = this.owner as any;
+      (this.app as unknown as AppWithInternals).workspace.activeEditor = this.owner as unknown as MarkdownFileInfo & { editor: Editor; editMode: boolean };
     });
 
     editorEl.addEventListener('blur', () => {
@@ -679,7 +679,7 @@ export class CardSidebarView extends ItemView {
       void (async () => {
         this.plugin.settings.verticalCardMode = !this.plugin.settings.verticalCardMode;
         await this.plugin.saveSettings();
-        await flipAnimateAsync(this.cardsContainer, async () => {
+        await flipAnimateAsync(this.cardsContainer, () => {
           this.applyLayoutMode();
         }, {}, this.store.settings);
       })();
@@ -783,17 +783,17 @@ export class CardSidebarView extends ItemView {
     });
   }
 
-  private renderTimeout: ReturnType<typeof setTimeout> | null = null;
+  private renderTimeout: number | null = null;
   private renderCardsDebounced(): void {
-    if (this.renderTimeout) clearTimeout(this.renderTimeout);
-    this.renderTimeout = setTimeout(() => { void this.renderCards(); }, 300);
+    if (this.renderTimeout) window.clearTimeout(this.renderTimeout);
+    this.renderTimeout = window.setTimeout(() => { void this.renderCards(); }, 300);
   }
 
   private async renderCards(isManualReload = false): Promise<void> {
     const settings = { ...this.store.settings };
     const scrollTop = this.cardsContainer?.scrollTop || 0;
 
-    await flipAnimateAsync(this.cardsContainer, async () => {
+    await flipAnimateAsync(this.cardsContainer, () => {
       // Clear existing components
       this.cardComponents.forEach(comp => comp.destroy());
       this.cardComponents.clear();
@@ -873,8 +873,8 @@ export class CardSidebarView extends ItemView {
     }
     if (this._masonryObserver) this._masonryObserver.disconnect();
     this._masonryObserver = new ResizeObserver(() => {
-      if (this._masonryTimeout) clearTimeout(this._masonryTimeout);
-      this._masonryTimeout = setTimeout(() => this.refreshMasonrySpans(), 50);
+      if (this._masonryTimeout) window.clearTimeout(this._masonryTimeout);
+      this._masonryTimeout = window.setTimeout(() => this.refreshMasonrySpans(), 50);
     });
     this._masonryObserver.observe(this.cardsContainer);
     this.cardsContainer.querySelectorAll('.sc-card').forEach(el => {
@@ -886,10 +886,17 @@ export class CardSidebarView extends ItemView {
   private refreshMasonrySpans(): void {
     if (!this.plugin.settings.verticalCardMode || !this.cardsContainer) return;
     const cards = this.cardsContainer.querySelectorAll('.sc-card:not(.drag-spacer)');
+    const maxH = this.plugin.settings.maxCardHeight;
+    const hasMaxHeight = !!maxH && maxH > 0;
     cards.forEach((el) => {
       const card = el as HTMLElement;
       card.style.removeProperty('grid-row-end');
-      const h = card.getBoundingClientRect().height;
+      // Temporarily lift max-height so we measure the natural content height,
+      // then cap it ourselves for the span calculation.
+      if (hasMaxHeight) card.style.setProperty('max-height', 'none');
+      const naturalH = card.getBoundingClientRect().height;
+      if (hasMaxHeight) card.style.removeProperty('max-height');
+      const h = hasMaxHeight ? Math.min(naturalH, maxH) : naturalH;
       if (h > 0) {
         const span = Math.max(1, Math.ceil(h + 8));
         card.style.setProperty('grid-row-end', `span ${span}`);
@@ -900,10 +907,10 @@ export class CardSidebarView extends ItemView {
   private setupMasonryMutationObserver(): void {
     if (!this.cardsContainer || typeof MutationObserver === 'undefined') return;
     if (this._masonryMutationObserver) this._masonryMutationObserver.disconnect();
-    let recalcTimeout: ReturnType<typeof setTimeout> | null = null;
+    let recalcTimeout: number | null = null;
     const debounced = () => {
-      if (recalcTimeout) clearTimeout(recalcTimeout);
-      recalcTimeout = setTimeout(() => this.refreshMasonrySpans(), 120);
+      if (recalcTimeout) window.clearTimeout(recalcTimeout);
+      recalcTimeout = window.setTimeout(() => this.refreshMasonrySpans(), 120);
     };
     this._masonryMutationObserver = new MutationObserver((mutations) => {
       for (const mutation of mutations) {

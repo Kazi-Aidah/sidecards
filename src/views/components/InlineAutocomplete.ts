@@ -28,7 +28,7 @@ export class InlineAutocomplete {
 
     editorEl.addEventListener('input', () => this.onInput());
     editorEl.addEventListener('keydown', (e) => this.onKeyDown(e), true);
-    editorEl.addEventListener('blur', () => setTimeout(() => this.hide(), 150));
+    editorEl.addEventListener('blur', () => window.setTimeout(() => this.hide(), 150));
   }
 
   private getCaretInfo(): { text: string; offset: number } {
