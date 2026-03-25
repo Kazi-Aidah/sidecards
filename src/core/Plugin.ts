@@ -173,9 +173,9 @@ export default class SideCardsPlugin extends Plugin {
       },
     });
 
-    this.addRibbonIcon('home', 'Open homepage (SideCards)', () => void this.activateHomeView());
-    this.addRibbonIcon('rows-3', 'Open sidebar (SideCards)', () => void this.activateView());
-    this.addRibbonIcon('rectangle-horizontal', 'Add a card (SideCards)', () => new QuickCardWithFilterModal(this.app, this, this.store).open());
+    this.addRibbonIcon('home', 'Open homepage', () => void this.activateHomeView());
+    this.addRibbonIcon('rows-3', 'Open sidebar', () => void this.activateView());
+    this.addRibbonIcon('rectangle-horizontal', 'Add card', () => new QuickCardWithFilterModal(this.app, this, this.store).open());
 
     this.addSettingTab(new SideCardsSettingTab(this.app, this));
 
@@ -333,7 +333,7 @@ export default class SideCardsPlugin extends Plugin {
   applyMaxCardHeight(): void {
     const h = this.settings.maxCardHeight;
     if (h && h > 0) {
-      document.documentElement.style.setProperty('--sc-max-card-height', `${h}px`);
+      document.documentElement.setCssProps({ '--sc-max-card-height': `${h}px` });
       document.body.addClass('sc-max-card-height-active');
     } else {
       document.documentElement.style.removeProperty('--sc-max-card-height');
@@ -580,16 +580,18 @@ class SideCardsSettingTab extends PluginSettingTab {
 
   private updateCSSVariables(): void {
     const root = document.documentElement;
-    root.style.setProperty('--card-color-1', this.plugin.settings.color1 || '#8392a4');
-    root.style.setProperty('--card-color-2', this.plugin.settings.color2 || '#eb3b5a');
-    root.style.setProperty('--card-color-3', this.plugin.settings.color3 || '#fa8231');
-    root.style.setProperty('--card-color-4', this.plugin.settings.color4 || '#e5a216');
-    root.style.setProperty('--card-color-5', this.plugin.settings.color5 || '#20bf6b');
-    root.style.setProperty('--card-color-6', this.plugin.settings.color6 || '#2d98da');
-    root.style.setProperty('--card-color-7', this.plugin.settings.color7 || '#8854d0');
-    root.style.setProperty('--card-color-8', this.plugin.settings.color8 || '#e832c1');
-    root.style.setProperty('--card-color-9', this.plugin.settings.color9 || '#e83289');
-    root.style.setProperty('--card-color-10', this.plugin.settings.color10 || '#965b3b');
+    root.setCssProps({
+      '--card-color-1': this.plugin.settings.color1 || '#8392a4',
+      '--card-color-2': this.plugin.settings.color2 || '#eb3b5a',
+      '--card-color-3': this.plugin.settings.color3 || '#fa8231',
+      '--card-color-4': this.plugin.settings.color4 || '#e5a216',
+      '--card-color-5': this.plugin.settings.color5 || '#20bf6b',
+      '--card-color-6': this.plugin.settings.color6 || '#2d98da',
+      '--card-color-7': this.plugin.settings.color7 || '#8854d0',
+      '--card-color-8': this.plugin.settings.color8 || '#e832c1',
+      '--card-color-9': this.plugin.settings.color9 || '#e83289',
+      '--card-color-10': this.plugin.settings.color10 || '#965b3b'
+    });
   }
 
   private applyColorToDropdown(selectEl: HTMLSelectElement, colorIndex: string) {
@@ -884,7 +886,7 @@ class SideCardsSettingTab extends PluginSettingTab {
             await this.plugin.saveSettings();
             // Apply live to open homepage views
             document.querySelectorAll('.sc-home-container').forEach((el) => {
-              (el as HTMLElement).style.setProperty('--sc-home-max-width', `${value}px`);
+              (el as HTMLElement).setCssProps({ '--sc-home-max-width': `${value}px` });
             });
           });
         // Append label after the slider control
@@ -905,7 +907,7 @@ class SideCardsSettingTab extends PluginSettingTab {
             label.textContent = `${value}px`;
             await this.plugin.saveSettings();
             document.querySelectorAll('.sc-home-container').forEach((el) => {
-              (el as HTMLElement).style.setProperty('--sc-home-top-margin', `${value}px`);
+              (el as HTMLElement).setCssProps({ '--sc-home-top-margin': `${value}px` });
             });
           });
         slider.sliderEl.insertAdjacentElement('afterend', label);
@@ -925,9 +927,11 @@ class SideCardsSettingTab extends PluginSettingTab {
       previewCard.addClass(`sc-style-${settings.cardStyle || 2}`);
       const color1 = settings.color1 || '#8392a4';
       const root = document.documentElement;
-      root.style.setProperty('--card-color-1', color1);
-      previewCard.style.setProperty('border-radius', `${settings.borderRadius || 0}px`);
-      previewCard.style.setProperty('border-width', `${settings.borderThickness ?? 2}px`);
+      root.setCssProps({ '--card-color-1': color1 });
+      previewCard.setCssProps({
+        'border-radius': `${settings.borderRadius || 0}px`,
+        'border-width': `${settings.borderThickness ?? 2}px`
+      });
       const colorSettings = {
         cardStyle: settings.cardStyle,
         cardBgOpacity: settings.cardBgOpacity,
@@ -985,7 +989,7 @@ class SideCardsSettingTab extends PluginSettingTab {
     new Setting(containerEl).setName('Card border radius').setDesc('Set the corner rounding of the card').addSlider(slider => slider.setLimits(0, 30, 1).setValue(this.plugin.settings.borderRadius || 0).setDynamicTooltip().onChange(async (value) => {
       this.plugin.settings.borderRadius = value;
       await this.plugin.saveSettings();
-      document.documentElement.style.setProperty('--card-border-radius', `${value}px`);
+      document.documentElement.setCssProps({ '--card-border-radius': `${value}px` });
       updatePreview();
       refreshSidebarCards();
     }));
@@ -1432,9 +1436,9 @@ class SideCardsSettingTab extends PluginSettingTab {
         previewBtn.textContent = itemInfo.label;
         const applyPreviewColors = () => {
           const colors = this.plugin.settings.filterColors?.[colorKey];
-          if (colors?.bgColor) previewBtn.style.setProperty('background-color', colors.bgColor);
+          if (colors?.bgColor) previewBtn.setCssProps({ 'background-color': colors.bgColor });
           else previewBtn.style.removeProperty('background-color');
-          if (colors?.textColor) previewBtn.style.setProperty('color', colors.textColor);
+          if (colors?.textColor) previewBtn.setCssProps({ 'color': colors.textColor });
           else previewBtn.style.removeProperty('color');
         };
         applyPreviewColors();

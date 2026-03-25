@@ -467,10 +467,12 @@ export class CardSidebarView extends ItemView {
         : chip.value;
 
       const customColors = settings.filterColors?.[colorKey];
-      if (customColors?.bgColor) btn.style.setProperty('background-color', customColors.bgColor);
+      if (customColors?.bgColor) btn.setCssProps({ 'background-color': customColors.bgColor });
       if (customColors?.textColor) {
-        btn.style.setProperty('color', customColors.textColor);
-        btn.style.setProperty('--sc-btn-text-color', customColors.textColor);
+        btn.setCssProps({
+          'color': customColors.textColor,
+          '--sc-btn-text-color': customColors.textColor
+        });
       }
 
       btn.addEventListener('click', () => {
@@ -479,11 +481,13 @@ export class CardSidebarView extends ItemView {
           (b as HTMLElement).removeClass('active');
           const bVal = (b as HTMLElement).dataset.filterValue || '';
           const bColors = settings.filterColors?.[bVal];
-          if (bColors?.bgColor) (b as HTMLElement).style.setProperty('background-color', bColors.bgColor);
+          if (bColors?.bgColor) (b as HTMLElement).setCssProps({ 'background-color': bColors.bgColor });
           else (b as HTMLElement).style.removeProperty('background-color');
           if (bColors?.textColor) {
-            (b as HTMLElement).style.setProperty('color', bColors.textColor);
-            (b as HTMLElement).style.setProperty('--sc-btn-text-color', bColors.textColor);
+            (b as HTMLElement).setCssProps({
+              'color': bColors.textColor,
+              '--sc-btn-text-color': bColors.textColor
+            });
           } else {
             (b as HTMLElement).style.removeProperty('color');
             (b as HTMLElement).style.removeProperty('--sc-btn-text-color');
@@ -893,13 +897,13 @@ export class CardSidebarView extends ItemView {
       card.style.removeProperty('grid-row-end');
       // Temporarily lift max-height so we measure the natural content height,
       // then cap it ourselves for the span calculation.
-      if (hasMaxHeight) card.style.setProperty('max-height', 'none');
+      if (hasMaxHeight) card.setCssProps({ 'max-height': 'none' });
       const naturalH = card.getBoundingClientRect().height;
       if (hasMaxHeight) card.style.removeProperty('max-height');
       const h = hasMaxHeight ? Math.min(naturalH, maxH) : naturalH;
       if (h > 0) {
         const span = Math.max(1, Math.ceil(h + 8));
-        card.style.setProperty('grid-row-end', `span ${span}`);
+        card.setCssProps({ 'grid-row-end': `span ${span}` });
       }
     });
   }

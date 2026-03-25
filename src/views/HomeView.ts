@@ -305,9 +305,9 @@ export class SideCardsHomeView extends ItemView {
     const main = container.createDiv({ cls: 'sc-home-main' });
     // Apply user-configured max width via CSS variable so it overrides correctly
     const maxW = this.plugin.settings.homepageMaxWidth ?? 1000;
-    container.style.setProperty('--sc-home-max-width', `${maxW}px`);
+    container.setCssProps({ '--sc-home-max-width': `${maxW}px` });
     const topMargin = this.plugin.settings.homepageTopMargin ?? 70;
-    container.style.setProperty('--sc-home-top-margin', `${topMargin}px`);
+    container.setCssProps({ '--sc-home-top-margin': `${topMargin}px` });
     
     // Top Section
     const topSection = main.createDiv({ cls: 'sc-home-top' });
@@ -735,9 +735,9 @@ export class SideCardsHomeView extends ItemView {
     const titleEl = main.querySelector('.sc-home-title');
     if (titleEl) titleEl.textContent = this.plugin.settings.homepageName || 'Sidecards';
     const maxW = this.plugin.settings.homepageMaxWidth ?? 1000;
-    this.containerEl.style.setProperty('--sc-home-max-width', `${maxW}px`);
+    this.containerEl.setCssProps({ '--sc-home-max-width': `${maxW}px` });
     const topMargin = this.plugin.settings.homepageTopMargin ?? 70;
-    this.containerEl.style.setProperty('--sc-home-top-margin', `${topMargin}px`);
+    this.containerEl.setCssProps({ '--sc-home-top-margin': `${topMargin}px` });
 
     // Refresh category bar
     const categoryBar = main.querySelector('.sc-home-category-bar') as HTMLElement;
@@ -891,10 +891,12 @@ export class SideCardsHomeView extends ItemView {
       btn.dataset.filterColorKey = colorKey;
 
       const customColors = this.plugin.settings.filterColors?.[colorKey];
-      if (customColors?.bgColor) btn.style.setProperty('background-color', customColors.bgColor);
+      if (customColors?.bgColor) btn.setCssProps({ 'background-color': customColors.bgColor });
       if (customColors?.textColor) {
-        btn.style.setProperty('color', customColors.textColor);
-        btn.style.setProperty('--sc-btn-text-color', customColors.textColor);
+        btn.setCssProps({
+          'color': customColors.textColor,
+          '--sc-btn-text-color': customColors.textColor
+        });
       }
 
       btn.addEventListener('click', () => {
@@ -902,11 +904,13 @@ export class SideCardsHomeView extends ItemView {
           (b as HTMLElement).removeClass('active');
           const bColorKey = (b as HTMLElement).dataset.filterColorKey || '';
           const bColors = this.plugin.settings.filterColors?.[bColorKey];
-          if (bColors?.bgColor) (b as HTMLElement).style.setProperty('background-color', bColors.bgColor);
+          if (bColors?.bgColor) (b as HTMLElement).setCssProps({ 'background-color': bColors.bgColor });
           else (b as HTMLElement).style.removeProperty('background-color');
           if (bColors?.textColor) {
-            (b as HTMLElement).style.setProperty('color', bColors.textColor);
-            (b as HTMLElement).style.setProperty('--sc-btn-text-color', bColors.textColor);
+            (b as HTMLElement).setCssProps({
+              'color': bColors.textColor,
+              '--sc-btn-text-color': bColors.textColor
+            });
           } else {
             (b as HTMLElement).style.removeProperty('color');
             (b as HTMLElement).style.removeProperty('--sc-btn-text-color');

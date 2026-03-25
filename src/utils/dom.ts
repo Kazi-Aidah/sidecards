@@ -70,22 +70,28 @@ export function applyCardColorToElement(cardEl: HTMLElement, colorVar: string, s
   const borderRadius = settings.borderRadius ?? 6;
 
   if (style === 1) {
-    cardEl.style.setProperty('border', `${borderThickness}px solid ${borderColor}`);
-    cardEl.style.setProperty('background-color', rgba);
+    cardEl.setCssProps({
+      'border': `${borderThickness}px solid ${borderColor}`,
+      'background-color': rgba
+    });
   } else if (style === 3) {
-    cardEl.style.setProperty('border-left', `${borderThickness}px solid ${borderColor}`);
-    cardEl.style.setProperty('background-color', rgba);
-    cardEl.style.setProperty('border-top', `1px solid var(--background-modifier-border)`);
-    cardEl.style.setProperty('border-right', `1px solid var(--background-modifier-border)`);
-    cardEl.style.setProperty('border-bottom', `1px solid var(--background-modifier-border)`);
+    cardEl.setCssProps({
+      'border-left': `${borderThickness}px solid ${borderColor}`,
+      'background-color': rgba,
+      'border-top': `1px solid var(--background-modifier-border)`,
+      'border-right': `1px solid var(--background-modifier-border)`,
+      'border-bottom': `1px solid var(--background-modifier-border)`
+    });
   } else {
     // Style 2 (Default)
-    cardEl.style.setProperty('border', `${borderThickness}px solid ${borderColor}`);
-    cardEl.style.setProperty('background-color', rgba);
-    cardEl.style.setProperty('box-shadow', `2px 2px 0 0 ${borderColor}`);
+    cardEl.setCssProps({
+      'border': `${borderThickness}px solid ${borderColor}`,
+      'background-color': rgba,
+      'box-shadow': `2px 2px 0 0 ${borderColor}`
+    });
   }
 
-  cardEl.style.setProperty('border-radius', `${borderRadius}px`);
+  cardEl.setCssProps({ 'border-radius': `${borderRadius}px` });
 }
 
 export function resolveAutoColor(

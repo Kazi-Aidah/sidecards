@@ -377,8 +377,9 @@ export class CardStore {
     try {
       const desired = Array.isArray(pending.tags) ? pending.tags.map(t => String(t).trim()).filter(Boolean) : [];
       const cache = this.app.metadataCache.getFileCache(file);
-      const existing: string[] = Array.isArray(cache?.frontmatter?.['Tags'] ?? cache?.frontmatter?.['tags'])
-        ? (cache?.frontmatter?.['Tags'] ?? cache?.frontmatter?.['tags']).map((t: unknown) => String(t).trim())
+      const rawTags = cache?.frontmatter?.['Tags'] ?? cache?.frontmatter?.['tags'];
+      const existing: string[] = Array.isArray(rawTags)
+        ? rawTags.map((t: unknown) => String(t).trim())
         : [];
 
       if (existing.length === desired.length && desired.every(t => existing.includes(t))) {

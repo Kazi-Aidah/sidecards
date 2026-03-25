@@ -92,20 +92,26 @@ function applyCardColorToElement(cardEl, colorVar, settings) {
   const borderColor = borderShadowOpacity >= 1 ? colorVar : hexToRgba(hex, borderShadowOpacity);
   const borderRadius = (_e = settings.borderRadius) != null ? _e : 6;
   if (style === 1) {
-    cardEl.style.setProperty("border", `${borderThickness}px solid ${borderColor}`);
-    cardEl.style.setProperty("background-color", rgba);
+    cardEl.setCssProps({
+      "border": `${borderThickness}px solid ${borderColor}`,
+      "background-color": rgba
+    });
   } else if (style === 3) {
-    cardEl.style.setProperty("border-left", `${borderThickness}px solid ${borderColor}`);
-    cardEl.style.setProperty("background-color", rgba);
-    cardEl.style.setProperty("border-top", `1px solid var(--background-modifier-border)`);
-    cardEl.style.setProperty("border-right", `1px solid var(--background-modifier-border)`);
-    cardEl.style.setProperty("border-bottom", `1px solid var(--background-modifier-border)`);
+    cardEl.setCssProps({
+      "border-left": `${borderThickness}px solid ${borderColor}`,
+      "background-color": rgba,
+      "border-top": `1px solid var(--background-modifier-border)`,
+      "border-right": `1px solid var(--background-modifier-border)`,
+      "border-bottom": `1px solid var(--background-modifier-border)`
+    });
   } else {
-    cardEl.style.setProperty("border", `${borderThickness}px solid ${borderColor}`);
-    cardEl.style.setProperty("background-color", rgba);
-    cardEl.style.setProperty("box-shadow", `2px 2px 0 0 ${borderColor}`);
+    cardEl.setCssProps({
+      "border": `${borderThickness}px solid ${borderColor}`,
+      "background-color": rgba,
+      "box-shadow": `2px 2px 0 0 ${borderColor}`
+    });
   }
-  cardEl.style.setProperty("border-radius", `${borderRadius}px`);
+  cardEl.setCssProps({ "border-radius": `${borderRadius}px` });
 }
 function resolveAutoColor(content, tags, settings) {
   const rules = settings.autoColorRules;
@@ -2637,10 +2643,12 @@ var CardSidebarView = class extends import_obsidian4.ItemView {
       const colorKey = chip.value === "all" ? "all" : chip.value === "today" ? "today" : chip.value === "tomorrow" ? "tomorrow" : chip.value === "archived" ? "archived" : chip.value;
       const customColors = (_a = settings.filterColors) == null ? void 0 : _a[colorKey];
       if (customColors == null ? void 0 : customColors.bgColor)
-        btn.style.setProperty("background-color", customColors.bgColor);
+        btn.setCssProps({ "background-color": customColors.bgColor });
       if (customColors == null ? void 0 : customColors.textColor) {
-        btn.style.setProperty("color", customColors.textColor);
-        btn.style.setProperty("--sc-btn-text-color", customColors.textColor);
+        btn.setCssProps({
+          "color": customColors.textColor,
+          "--sc-btn-text-color": customColors.textColor
+        });
       }
       btn.addEventListener("click", () => {
         void (async () => {
@@ -2650,12 +2658,14 @@ var CardSidebarView = class extends import_obsidian4.ItemView {
             const bVal = b.dataset.filterValue || "";
             const bColors = (_a2 = settings.filterColors) == null ? void 0 : _a2[bVal];
             if (bColors == null ? void 0 : bColors.bgColor)
-              b.style.setProperty("background-color", bColors.bgColor);
+              b.setCssProps({ "background-color": bColors.bgColor });
             else
               b.style.removeProperty("background-color");
             if (bColors == null ? void 0 : bColors.textColor) {
-              b.style.setProperty("color", bColors.textColor);
-              b.style.setProperty("--sc-btn-text-color", bColors.textColor);
+              b.setCssProps({
+                "color": bColors.textColor,
+                "--sc-btn-text-color": bColors.textColor
+              });
             } else {
               b.style.removeProperty("color");
               b.style.removeProperty("--sc-btn-text-color");
@@ -3068,14 +3078,14 @@ var CardSidebarView = class extends import_obsidian4.ItemView {
       const card = el;
       card.style.removeProperty("grid-row-end");
       if (hasMaxHeight)
-        card.style.setProperty("max-height", "none");
+        card.setCssProps({ "max-height": "none" });
       const naturalH = card.getBoundingClientRect().height;
       if (hasMaxHeight)
         card.style.removeProperty("max-height");
       const h = hasMaxHeight ? Math.min(naturalH, maxH) : naturalH;
       if (h > 0) {
         const span = Math.max(1, Math.ceil(h + 8));
-        card.style.setProperty("grid-row-end", `span ${span}`);
+        card.setCssProps({ "grid-row-end": `span ${span}` });
       }
     });
   }
@@ -3481,11 +3491,12 @@ var CardStore = class {
     }
   }
   async handlePendingTagReapply(file, pending) {
-    var _a, _b, _c, _d, _e, _f;
+    var _a, _b, _c;
     try {
       const desired = Array.isArray(pending.tags) ? pending.tags.map((t) => String(t).trim()).filter(Boolean) : [];
       const cache = this.app.metadataCache.getFileCache(file);
-      const existing = Array.isArray((_c = (_a = cache == null ? void 0 : cache.frontmatter) == null ? void 0 : _a["Tags"]) != null ? _c : (_b = cache == null ? void 0 : cache.frontmatter) == null ? void 0 : _b["tags"]) ? ((_f = (_d = cache == null ? void 0 : cache.frontmatter) == null ? void 0 : _d["Tags"]) != null ? _f : (_e = cache == null ? void 0 : cache.frontmatter) == null ? void 0 : _e["tags"]).map((t) => String(t).trim()) : [];
+      const rawTags = (_c = (_a = cache == null ? void 0 : cache.frontmatter) == null ? void 0 : _a["Tags"]) != null ? _c : (_b = cache == null ? void 0 : cache.frontmatter) == null ? void 0 : _b["tags"];
+      const existing = Array.isArray(rawTags) ? rawTags.map((t) => String(t).trim()) : [];
       if (existing.length === desired.length && desired.every((t) => existing.includes(t))) {
         this._pendingTagWrites.delete(file.path);
         return;
@@ -4680,9 +4691,9 @@ var SideCardsHomeView = class extends import_obsidian9.ItemView {
     this.sortAscending = typeof this.plugin.settings.sortAscending === "boolean" ? this.plugin.settings.sortAscending : false;
     const main = container.createDiv({ cls: "sc-home-main" });
     const maxW = (_a = this.plugin.settings.homepageMaxWidth) != null ? _a : 1e3;
-    container.style.setProperty("--sc-home-max-width", `${maxW}px`);
+    container.setCssProps({ "--sc-home-max-width": `${maxW}px` });
     const topMargin = (_b = this.plugin.settings.homepageTopMargin) != null ? _b : 70;
-    container.style.setProperty("--sc-home-top-margin", `${topMargin}px`);
+    container.setCssProps({ "--sc-home-top-margin": `${topMargin}px` });
     const topSection = main.createDiv({ cls: "sc-home-top" });
     topSection.createEl("h2", { text: this.plugin.settings.homepageName || "SideCards", cls: "sc-home-title" });
     const paletteRow = topSection.createDiv({ cls: "sc-home-palette-row" });
@@ -5072,9 +5083,9 @@ var SideCardsHomeView = class extends import_obsidian9.ItemView {
     if (titleEl)
       titleEl.textContent = this.plugin.settings.homepageName || "Sidecards";
     const maxW = (_a = this.plugin.settings.homepageMaxWidth) != null ? _a : 1e3;
-    this.containerEl.style.setProperty("--sc-home-max-width", `${maxW}px`);
+    this.containerEl.setCssProps({ "--sc-home-max-width": `${maxW}px` });
     const topMargin = (_b = this.plugin.settings.homepageTopMargin) != null ? _b : 70;
-    this.containerEl.style.setProperty("--sc-home-top-margin", `${topMargin}px`);
+    this.containerEl.setCssProps({ "--sc-home-top-margin": `${topMargin}px` });
     const categoryBar = main.querySelector(".sc-home-category-bar");
     if (categoryBar) {
       this.renderCategoryBar(categoryBar, this.cardListEl);
@@ -5200,10 +5211,12 @@ var SideCardsHomeView = class extends import_obsidian9.ItemView {
       btn.dataset.filterColorKey = colorKey;
       const customColors = (_a = this.plugin.settings.filterColors) == null ? void 0 : _a[colorKey];
       if (customColors == null ? void 0 : customColors.bgColor)
-        btn.style.setProperty("background-color", customColors.bgColor);
+        btn.setCssProps({ "background-color": customColors.bgColor });
       if (customColors == null ? void 0 : customColors.textColor) {
-        btn.style.setProperty("color", customColors.textColor);
-        btn.style.setProperty("--sc-btn-text-color", customColors.textColor);
+        btn.setCssProps({
+          "color": customColors.textColor,
+          "--sc-btn-text-color": customColors.textColor
+        });
       }
       btn.addEventListener("click", () => {
         container.querySelectorAll(".sc-category-btn").forEach((b) => {
@@ -5212,12 +5225,14 @@ var SideCardsHomeView = class extends import_obsidian9.ItemView {
           const bColorKey = b.dataset.filterColorKey || "";
           const bColors = (_a2 = this.plugin.settings.filterColors) == null ? void 0 : _a2[bColorKey];
           if (bColors == null ? void 0 : bColors.bgColor)
-            b.style.setProperty("background-color", bColors.bgColor);
+            b.setCssProps({ "background-color": bColors.bgColor });
           else
             b.style.removeProperty("background-color");
           if (bColors == null ? void 0 : bColors.textColor) {
-            b.style.setProperty("color", bColors.textColor);
-            b.style.setProperty("--sc-btn-text-color", bColors.textColor);
+            b.setCssProps({
+              "color": bColors.textColor,
+              "--sc-btn-text-color": bColors.textColor
+            });
           } else {
             b.style.removeProperty("color");
             b.style.removeProperty("--sc-btn-text-color");
@@ -5529,9 +5544,9 @@ var SideCardsPlugin = class extends import_obsidian10.Plugin {
         return false;
       }
     });
-    this.addRibbonIcon("home", "Open homepage (SideCards)", () => void this.activateHomeView());
-    this.addRibbonIcon("rows-3", "Open sidebar (SideCards)", () => void this.activateView());
-    this.addRibbonIcon("rectangle-horizontal", "Add a card (SideCards)", () => new QuickCardWithFilterModal(this.app, this, this.store).open());
+    this.addRibbonIcon("home", "Open homepage", () => void this.activateHomeView());
+    this.addRibbonIcon("rows-3", "Open sidebar", () => void this.activateView());
+    this.addRibbonIcon("rectangle-horizontal", "Add card", () => new QuickCardWithFilterModal(this.app, this, this.store).open());
     this.addSettingTab(new SideCardsSettingTab(this.app, this));
     this.registerEvent(
       this.app.vault.on("rename", (file, oldPath) => {
@@ -5687,7 +5702,7 @@ var SideCardsPlugin = class extends import_obsidian10.Plugin {
   applyMaxCardHeight() {
     const h = this.settings.maxCardHeight;
     if (h && h > 0) {
-      document.documentElement.style.setProperty("--sc-max-card-height", `${h}px`);
+      document.documentElement.setCssProps({ "--sc-max-card-height": `${h}px` });
       document.body.addClass("sc-max-card-height-active");
     } else {
       document.documentElement.style.removeProperty("--sc-max-card-height");
@@ -5909,16 +5924,18 @@ var SideCardsSettingTab = class extends import_obsidian10.PluginSettingTab {
   }
   updateCSSVariables() {
     const root = document.documentElement;
-    root.style.setProperty("--card-color-1", this.plugin.settings.color1 || "#8392a4");
-    root.style.setProperty("--card-color-2", this.plugin.settings.color2 || "#eb3b5a");
-    root.style.setProperty("--card-color-3", this.plugin.settings.color3 || "#fa8231");
-    root.style.setProperty("--card-color-4", this.plugin.settings.color4 || "#e5a216");
-    root.style.setProperty("--card-color-5", this.plugin.settings.color5 || "#20bf6b");
-    root.style.setProperty("--card-color-6", this.plugin.settings.color6 || "#2d98da");
-    root.style.setProperty("--card-color-7", this.plugin.settings.color7 || "#8854d0");
-    root.style.setProperty("--card-color-8", this.plugin.settings.color8 || "#e832c1");
-    root.style.setProperty("--card-color-9", this.plugin.settings.color9 || "#e83289");
-    root.style.setProperty("--card-color-10", this.plugin.settings.color10 || "#965b3b");
+    root.setCssProps({
+      "--card-color-1": this.plugin.settings.color1 || "#8392a4",
+      "--card-color-2": this.plugin.settings.color2 || "#eb3b5a",
+      "--card-color-3": this.plugin.settings.color3 || "#fa8231",
+      "--card-color-4": this.plugin.settings.color4 || "#e5a216",
+      "--card-color-5": this.plugin.settings.color5 || "#20bf6b",
+      "--card-color-6": this.plugin.settings.color6 || "#2d98da",
+      "--card-color-7": this.plugin.settings.color7 || "#8854d0",
+      "--card-color-8": this.plugin.settings.color8 || "#e832c1",
+      "--card-color-9": this.plugin.settings.color9 || "#e83289",
+      "--card-color-10": this.plugin.settings.color10 || "#965b3b"
+    });
   }
   applyColorToDropdown(selectEl, colorIndex) {
     const colorKey = `color${colorIndex}`;
@@ -6127,7 +6144,7 @@ var SideCardsSettingTab = class extends import_obsidian10.PluginSettingTab {
         label.textContent = `${value}px`;
         await this.plugin.saveSettings();
         document.querySelectorAll(".sc-home-container").forEach((el) => {
-          el.style.setProperty("--sc-home-max-width", `${value}px`);
+          el.setCssProps({ "--sc-home-max-width": `${value}px` });
         });
       });
       slider.sliderEl.insertAdjacentElement("afterend", label);
@@ -6140,7 +6157,7 @@ var SideCardsSettingTab = class extends import_obsidian10.PluginSettingTab {
         label.textContent = `${value}px`;
         await this.plugin.saveSettings();
         document.querySelectorAll(".sc-home-container").forEach((el) => {
-          el.style.setProperty("--sc-home-top-margin", `${value}px`);
+          el.setCssProps({ "--sc-home-top-margin": `${value}px` });
         });
       });
       slider.sliderEl.insertAdjacentElement("afterend", label);
@@ -6155,9 +6172,11 @@ var SideCardsSettingTab = class extends import_obsidian10.PluginSettingTab {
       previewCard.addClass(`sc-style-${settings.cardStyle || 2}`);
       const color1 = settings.color1 || "#8392a4";
       const root = document.documentElement;
-      root.style.setProperty("--card-color-1", color1);
-      previewCard.style.setProperty("border-radius", `${settings.borderRadius || 0}px`);
-      previewCard.style.setProperty("border-width", `${(_a = settings.borderThickness) != null ? _a : 2}px`);
+      root.setCssProps({ "--card-color-1": color1 });
+      previewCard.setCssProps({
+        "border-radius": `${settings.borderRadius || 0}px`,
+        "border-width": `${(_a = settings.borderThickness) != null ? _a : 2}px`
+      });
       const colorSettings = {
         cardStyle: settings.cardStyle,
         cardBgOpacity: settings.cardBgOpacity,
@@ -6217,7 +6236,7 @@ var SideCardsSettingTab = class extends import_obsidian10.PluginSettingTab {
     new import_obsidian10.Setting(containerEl).setName("Card border radius").setDesc("Set the corner rounding of the card").addSlider((slider) => slider.setLimits(0, 30, 1).setValue(this.plugin.settings.borderRadius || 0).setDynamicTooltip().onChange(async (value) => {
       this.plugin.settings.borderRadius = value;
       await this.plugin.saveSettings();
-      document.documentElement.style.setProperty("--card-border-radius", `${value}px`);
+      document.documentElement.setCssProps({ "--card-border-radius": `${value}px` });
       updatePreview();
       refreshSidebarCards();
     }));
@@ -6616,11 +6635,11 @@ var SideCardsSettingTab = class extends import_obsidian10.PluginSettingTab {
           var _a2;
           const colors = (_a2 = this.plugin.settings.filterColors) == null ? void 0 : _a2[colorKey];
           if (colors == null ? void 0 : colors.bgColor)
-            previewBtn.style.setProperty("background-color", colors.bgColor);
+            previewBtn.setCssProps({ "background-color": colors.bgColor });
           else
             previewBtn.style.removeProperty("background-color");
           if (colors == null ? void 0 : colors.textColor)
-            previewBtn.style.setProperty("color", colors.textColor);
+            previewBtn.setCssProps({ "color": colors.textColor });
           else
             previewBtn.style.removeProperty("color");
         };
