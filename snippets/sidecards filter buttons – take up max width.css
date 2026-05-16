@@ -1,35 +1,35 @@
 /* --- FILTER BUTTONS: STRETCH TO MAX WIDTH */
 .sc-sidebar-category-group {
-gap: 6px !important;
-width: 100% !important;
+gap: 6px;
+width: 100%;
 }
 
 .sc-category-btn {
-border-radius: 0px !important;
-padding: 0px 37px !important;
-width: 100% !important;
-/* box-shadow: none !important; */
-filter: brightness(0.9) !important; /* DARKEN ALL OTHERS */
+border-radius: 0px;
+padding: 0px 37px;
+width: 100%;
+/* box-shadow: none; */
+filter: brightness(0.9); /* DARKEN ALL OTHERS */
 text-transform: uppercase; /* CAPITALIZE NAMES */
 }
 
 .sc-category-btn.active {
-border: 1.7px solid #ffffff30 !important;
+border: 1.7px solid #ffffff30;
 transition: all 100ms ease;
-filter: brightness(1.7) !important;
-/* box-shadow: 0px 0px 4px #ffffff !important; */ 
+filter: brightness(1.7);
+/* box-shadow: 0px 0px 4px #ffffff; */ 
 /* uncomment box-shadow if you want glow */
-transform: scale(1.02) !important;
-z-index: 2000 !important;
+transform: scale(1.02);
+z-index: 2000;
 }
 
 .sc-category-btn:first-child {
-border-top-left-radius: 10px !important;
-border-bottom-left-radius: 10px !important;
+border-top-left-radius: 10px;
+border-bottom-left-radius: 10px;
 }
 
 .sc-category-btn:last-child {
-background-color: var(--background-primary) !important;
-border-top-right-radius: 10px !important;
-border-bottom-right-radius: 10px !important;
+background-color: var(--background-primary);
+border-top-right-radius: 10px;
+border-bottom-right-radius: 10px;
 }

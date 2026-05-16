@@ -22,8 +22,8 @@
     display: grid;
     grid-template-columns: repeat(5, 18px);
     grid-auto-rows: 18px;
-    column-gap: 8px;
-    row-gap: 8px;
+    /* column-gap: 8px;
+    row-gap: 8px; */
     width: fit-content;
 }
 
@@ -87,9 +87,8 @@
   color: var(--text-muted);
   font-size: 11px;
   cursor: pointer;
-  transition: all 0.2s ease;
   white-space: nowrap;
-  transition: border-width 0s ease;
+  transition: border-width 0s ease, all 0.2s ease;
 }
 .sc-category-btn:hover {
   filter: brightness(1.2);
@@ -218,9 +217,9 @@
 }
 
 .sc-home-color-dot {
+  border-radius: 10px;
   width: 24px;
   height: 24px;
-  border-radius: 50%;
   cursor: pointer;
   border: 2px solid transparent;
   transition: transform 0.1s ease, border-color 0.1s ease;
@@ -260,7 +259,6 @@
   grid-template-columns: minmax(0, 280px) 1fr;
   gap: 32px;
   align-items: start;
-  gap: 40px;
 }
 
 .sc-home-section-title {
@@ -394,9 +392,6 @@
 
   .sc-home-main {
     padding: 20px 12px;
-  }
-
-  .sc-home-main {
     margin: 50px 10px;
     transition: all 0.2s ease;
   }
@@ -411,7 +406,6 @@
 }
 
 .sc-search-clear-btn {
-  font-size: 20px;
   position: absolute;
   right: 8px;
   top: 50%;
@@ -424,7 +418,7 @@
   background: transparent;
   cursor: pointer;
   transition: all 0.2s ease;
-  font-size: 14px;
+  font-size: 20px;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -622,11 +616,6 @@
   cursor: pointer;
   flex-shrink: 0;
   transition: transform 0.1s ease;
-}
-
-.sc-home-color-dot {
-  border-radius: 10px;
-  border: 1px solid var(--background-primary);
 }
 
 .sc-icon-btn {
@@ -887,9 +876,9 @@
 
 /* Individual color swatch in context menu */
 .sc-color-dot-swatch {
-  width: 18px;
-  height: 18px;
-  border-radius: 4px;
+  /* width: 18px;
+  height: 18px; */
+  border-radius: 7px;
   cursor: pointer;
   flex-shrink: 0;
   border: 1px solid var(--background-modifier-border);
