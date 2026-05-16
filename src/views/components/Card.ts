@@ -368,22 +368,18 @@ export class CardComponent extends Component {
     if (this.card.expiresAt && this.store.settings.showExpiryTimeLeft) {
       const pill = container.createDiv('sc-expiry-pill');
       pill.textContent = this.formatExpiryTimeLeft(this.card.expiresAt);
-      if (this.card.status) pill.setCssProps({ 'margin-bottom': '4px' });
+      if (this.card.status) pill.addClass('sc-status-pill--with-margin');
     }
     if (this.card.status) {
       const pill = container.createDiv('sc-status-pill');
       pill.textContent = this.card.status.name;
       const statusDef = (this.store.settings.cardStatuses || []).find(s => s.name === this.card.status!.name);
       if (statusDef?.colorIndex) {
-        pill.setCssProps({
-          'background-color': `var(--card-color-${statusDef.colorIndex})`,
-          'color': statusDef.textColor || '#000'
-        });
+        pill.style.backgroundColor = `var(--card-color-${statusDef.colorIndex})`;
+        pill.style.color = statusDef.textColor || '#000';
       } else {
-        pill.setCssProps({
-          'background-color': this.card.status.color || 'transparent',
-          'color': this.card.status.textColor || '#000'
-        });
+        pill.style.backgroundColor = this.card.status.color || 'transparent';
+        pill.style.color = this.card.status.textColor || '#000';
       }
     }
   }
@@ -748,14 +744,14 @@ export class CardComponent extends Component {
       if (todayVisible || tomorrowVisible || customCategories.length > 0) {
         if (todayVisible) {
           menu.addItem(item => {
-            item.setTitle('Add to today')
+            item.setTitle('Add to Today')
               .setIcon(s.builtinCategoryIcons?.['today'] ?? 'calendar-check')
               .onClick(async () => { await this.store.setCategory(this.card.id, 'today'); });
           });
         }
         if (tomorrowVisible) {
           menu.addItem(item => {
-            item.setTitle('Add to tomorrow')
+            item.setTitle('Add to Tomorrow')
               .setIcon(s.builtinCategoryIcons?.['tomorrow'] ?? 'calendar-plus')
               .onClick(async () => { await this.store.setCategory(this.card.id, 'tomorrow'); });
           });
@@ -780,7 +776,7 @@ export class CardComponent extends Component {
 
       // Pin
       menu.addItem(item => {
-        item.setTitle(this.card.pinned ? 'Unpin' : 'Pin card')
+        item.setTitle(this.card.pinned ? 'Unpin' : 'Pin Card')
           .setIcon('pin')
           .onClick(async () => { await this.store.togglePin(this.card.id, !this.card.pinned); });
       });
@@ -788,7 +784,7 @@ export class CardComponent extends Component {
       // Set status
       if (s.enableCardStatus && Array.isArray(s.cardStatuses) && s.cardStatuses.length > 0) {
         menu.addItem(item => {
-          item.setTitle('Set status')
+          item.setTitle('Set Status')
             .setIcon('flag')
             .onClick(() => {
               const menu2 = new Menu();
@@ -806,7 +802,7 @@ export class CardComponent extends Component {
                 });
               });
               menu2.addItem(i => {
-                i.setTitle('Clear status').onClick(async () => { await this.store.setStatus(this.card.id, null); });
+                i.setTitle('Clear Status').onClick(async () => { await this.store.setStatus(this.card.id, null); });
               });
               menu2.showAtMouseEvent(e);
             });
@@ -815,7 +811,7 @@ export class CardComponent extends Component {
 
       // Set expiry
       menu.addItem(item => {
-        item.setTitle('Set expiry')
+        item.setTitle('Set Expiry')
           .setIcon('alarm-clock')
           .onClick(() => { new DateTimeModal(this.app, this.card, this.store).open(); });
       });
@@ -831,7 +827,7 @@ export class CardComponent extends Component {
 
       // View / Create note
       menu.addItem(item => {
-        item.setTitle(this.card.notePath ? 'View note' : 'Create note')
+        item.setTitle(this.card.notePath ? 'View Note' : 'Create Note')
           .setIcon(this.card.notePath ? 'link' : 'file-plus')
           .onClick(async () => {
             if (this.card.notePath) {

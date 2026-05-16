@@ -1,4 +1,4 @@
-import { ItemView, WorkspaceLeaf, Menu, Notice, setIcon, Scope, Editor, TFile, Platform, App, MarkdownFileInfo } from "obsidian";
+import { ItemView, WorkspaceLeaf, Menu, Notice, setIcon, Scope, Editor, TFile, Platform, App, MarkdownFileInfo, Text } from "obsidian";
 import type SideCardsPlugin from "../core/Plugin";
 import { CardStore } from "../services/CardStore";
 import { Card } from "../models/Card";
@@ -92,7 +92,7 @@ export class SideCardsHomeView extends ItemView {
     const baseRange = selection.getRangeAt(0);
     if (!baseRange.collapsed) return baseRange;
     const node = baseRange.startContainer;
-    if (!(node instanceof Text)) return null;
+    if (!node.instanceOf(Text)) return null;
     const text = node.data;
     if (!text) return null;
     const offset = baseRange.startOffset;
@@ -311,7 +311,7 @@ export class SideCardsHomeView extends ItemView {
     
     // Top Section
     const topSection = main.createDiv({ cls: 'sc-home-top' });
-        topSection.createEl('h2', { text: this.plugin.settings.homepageName || 'SideCards', cls: 'sc-home-title' });
+        topSection.createDiv({ text: this.plugin.settings.homepageName || 'SideCards', cls: 'sc-home-title' });
 
     const paletteRow = topSection.createDiv({ cls: 'sc-home-palette-row' });
 
@@ -510,7 +510,7 @@ export class SideCardsHomeView extends ItemView {
           e.preventDefault();
           const menu = new Menu();
           menu.addItem(i => i
-            .setTitle('Unpin from homepage').setIcon('pin-off').onClick(async () => {
+            .setTitle('Unpin from Homepage').setIcon('pin-off').onClick(async () => {
             this.plugin.settings.pinnedNotes = (this.plugin.settings.pinnedNotes || []).filter(p => p !== file.path);
             await this.plugin.saveSettings();
             await this.renderFileList(container, 'pinned');
@@ -762,7 +762,7 @@ export class SideCardsHomeView extends ItemView {
     this.renderCards(cardList);
   }
 
-  private renderToolbar(container: HTMLElement, editorEl: HTMLElement, cardList: HTMLElement, pinnedList: HTMLElement, recentList: HTMLElement) {
+  private renderToolbar(container: HTMLElement, _editorEl: HTMLElement, _cardList: HTMLElement, pinnedList: HTMLElement, recentList: HTMLElement) {
     container.empty();
     
     const leftActions = container.createDiv({ cls: 'sc-home-toolbar-left' });
@@ -844,7 +844,7 @@ export class SideCardsHomeView extends ItemView {
     moreBtn.addEventListener('click', (e) => {
       const menu = new Menu();
       menu.addItem(item => {
-        item.setTitle('Show tags')
+        item.setTitle('Show Tags')
             .setChecked(this.plugin.settings.homeShowTags ?? true)
             .onClick(async () => {
               const current = this.plugin.settings.homeShowTags ?? true;
@@ -854,7 +854,7 @@ export class SideCardsHomeView extends ItemView {
             });
       });
       menu.addItem(item => {
-        item.setTitle('Show timestamps')
+        item.setTitle('Show Timestamps')
             .setChecked(this.plugin.settings.homeShowTimestamps ?? this.plugin.settings.showTimestamps)
             .onClick(async () => {
               const current = this.plugin.settings.homeShowTimestamps ?? this.plugin.settings.showTimestamps;
@@ -1061,7 +1061,7 @@ export class SideCardsHomeView extends ItemView {
     }
   }
 
-  private async createCardFromHomeInput(editorEl: HTMLElement, cardList: HTMLElement) {
+  private async createCardFromHomeInput(editorEl: HTMLElement, _cardList: HTMLElement) {
     const content = editorEl.textContent?.trim();
     if (!content) return;
 

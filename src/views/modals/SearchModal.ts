@@ -29,10 +29,6 @@ export class SearchModal extends Modal {
     });
 
     this.resultsContainer = contentEl.createDiv('sc-search-results');
-    this.resultsContainer.setCssProps({
-      'max-height': '400px',
-      'overflow': 'auto'
-    });
 
     this.searchInput.focus();
     this.searchInput.addEventListener('input', () => this.renderResults());
@@ -50,11 +46,7 @@ export class SearchModal extends Modal {
     this.searchResults.forEach((card, idx) => {
       const result = this.resultsContainer.createDiv('sc-search-result');
       result.textContent = card.content.substring(0, 100) + (card.content.length > 100 ? '...' : '');
-      result.setCssProps({
-        'padding': '8px',
-        'cursor': 'pointer',
-        'border-left': `4px solid ${card.color}`
-      });
+      result.style.borderLeft = `4px solid ${card.color}`;
       result.dataset.index = String(idx);
 
       result.addEventListener('click', () => this.selectResult(card));
@@ -70,10 +62,10 @@ export class SearchModal extends Modal {
     els.forEach((el, idx) => {
       if (idx === this.selectedIndex) {
         el.addClass('selected');
-        el.setCssProps({ 'background-color': 'var(--background-modifier-hover)' });
+        el.addClass('sc-search-result--selected');
       } else {
         el.removeClass('selected');
-        el.setCssProps({ 'background-color': '' });
+        el.removeClass('sc-search-result--selected');
       }
     });
   }

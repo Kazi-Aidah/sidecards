@@ -11,19 +11,7 @@ export class TagAutocomplete {
   ) {
     const parent = this.input.parentElement || document.body;
     this.container = parent.createDiv('sc-tag-autocomplete');
-    this.container.setCssProps({
-      'display': 'none',
-      'position': 'absolute',
-      'bottom': 'calc(100% + 4px)',
-      'left': '0',
-      'right': '0',
-      'max-height': '150px',
-      'overflow-y': 'auto',
-      'border': '1px solid var(--background-modifier-border)',
-      'border-radius': '4px',
-      'background': 'var(--background-primary)',
-      'z-index': '1000'
-    });
+    this.container.addClass('sc-hidden');
   }
 
   attach(): void {
@@ -57,10 +45,10 @@ export class TagAutocomplete {
       const item = this.container.createDiv('sc-autocomplete-item');
       item.textContent = '#' + tag;
       item.addEventListener('mouseenter', () => {
-        item.setCssProps({ 'background': 'var(--background-modifier-hover)' });
+        item.addClass('sc-autocomplete-item--selected');
         this.selectedIndex = idx;
       });
-      item.addEventListener('mouseleave', () => { item.setCssProps({ 'background': '' }); });
+      item.addEventListener('mouseleave', () => { item.removeClass('sc-autocomplete-item--selected'); });
       item.addEventListener('click', () => {
         const before = this.input.value.substring(0, lastHashIdx);
         const after = this.input.value.substring(cursorPos);
@@ -70,7 +58,7 @@ export class TagAutocomplete {
         this.update();
       });
     });
-    this.container.setCssProps({ 'display': '' });
+    this.container.removeClass('sc-hidden');
     this.container.addClass('sc-tag-autocomplete--open');
   }
 
@@ -82,8 +70,8 @@ export class TagAutocomplete {
       if (e.key === 'ArrowDown') this.selectedIndex = (this.selectedIndex + 1) % items.length;
       else this.selectedIndex = (this.selectedIndex - 1 + items.length) % items.length;
       items.forEach((item, idx) => {
-        if (idx === this.selectedIndex) (item as HTMLElement).setCssProps({ 'background': 'var(--background-modifier-hover)' });
-        else (item as HTMLElement).setCssProps({ 'background': '' });
+        if (idx === this.selectedIndex) (item as HTMLElement).addClass('sc-autocomplete-item--selected');
+        else (item as HTMLElement).removeClass('sc-autocomplete-item--selected');
       });
       return;
     }
@@ -100,7 +88,7 @@ export class TagAutocomplete {
   }
 
   private hide(): void {
-    this.container.setCssProps({ 'display': 'none' });
+    this.container.addClass('sc-hidden');
     this.container.removeClass('sc-tag-autocomplete--open');
   }
 }

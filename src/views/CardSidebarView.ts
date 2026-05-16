@@ -1,5 +1,5 @@
 
-import { ItemView, WorkspaceLeaf, Notice, Menu, TFile, setIcon, Scope, Editor, App, MarkdownFileInfo } from "obsidian";
+import { ItemView, WorkspaceLeaf, Notice, Menu, TFile, setIcon, Scope, Editor, App, MarkdownFileInfo, Text } from "obsidian";
 import { CardStore } from "../services/CardStore";
 import { FilterService, FilterOptions } from "../services/FilterService";
 import { SortService, SortMode } from "../services/SortService";
@@ -87,7 +87,7 @@ export class CardSidebarView extends ItemView {
     const baseRange = selection.getRangeAt(0);
     if (!baseRange.collapsed) return baseRange;
     const node = baseRange.startContainer;
-    if (!(node instanceof Text)) return null;
+    if (!node.instanceOf(Text)) return null;
     const text = node.data;
     if (!text) return null;
     const offset = baseRange.startOffset;
@@ -343,7 +343,7 @@ export class CardSidebarView extends ItemView {
     this._loadingTimeout = window.setTimeout(() => this.hideLoadingOverlay(), maxMs);
   }
 
-  private hideLoadingOverlay(fadeMs = 0) {
+  private hideLoadingOverlay(_fadeMs = 0) {
     if (this._loadingTimeout) {
       window.clearTimeout(this._loadingTimeout);
       this._loadingTimeout = null;
@@ -696,7 +696,7 @@ export class CardSidebarView extends ItemView {
     moreBtn.addEventListener('click', (e) => {
       const menu = new Menu();
       menu.addItem(item => {
-        item.setTitle('Show tags')
+        item.setTitle('Show Tags')
             .setChecked(this.plugin.settings.sidebarShowTags ?? true)
             .onClick(async () => {
               const current = this.plugin.settings.sidebarShowTags ?? true;
@@ -706,7 +706,7 @@ export class CardSidebarView extends ItemView {
             });
       });
       menu.addItem(item => {
-        item.setTitle('Show timestamps')
+        item.setTitle('Show Timestamps')
             .setChecked(this.plugin.settings.sidebarShowTimestamps ?? this.plugin.settings.showTimestamps)
             .onClick(async () => {
               const current = this.plugin.settings.sidebarShowTimestamps ?? this.plugin.settings.showTimestamps;
@@ -793,7 +793,7 @@ export class CardSidebarView extends ItemView {
     this.renderTimeout = window.setTimeout(() => { void this.renderCards(); }, 300);
   }
 
-  private async renderCards(isManualReload = false): Promise<void> {
+  private async renderCards(_isManualReload = false): Promise<void> {
     const settings = { ...this.store.settings };
     const scrollTop = this.cardsContainer?.scrollTop || 0;
 

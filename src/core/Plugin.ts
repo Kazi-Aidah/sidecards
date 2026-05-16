@@ -1,5 +1,5 @@
 
-import { Plugin, PluginSettingTab, App, Setting, WorkspaceLeaf, setIcon, Notice, TFile, Platform, requestUrl, Component, MarkdownRenderer, Modal, getIconIds, MarkdownView } from "obsidian";
+import { Plugin, PluginSettingTab, App, Setting, WorkspaceLeaf, setIcon, Notice, TFile, Platform, requestUrl, Component, MarkdownRenderer, Modal, getIconIds, MarkdownView, activeDocument, activeWindow, Text } from "obsidian";
 import { CardSidebarView } from "../views/CardSidebarView";
 import { CardStore } from "../services/CardStore";
 import { FilterService } from "../services/FilterService";
@@ -20,7 +20,7 @@ export default class SideCardsPlugin extends Plugin {
 
   async onload() {
     await this.loadSettings();
-    (document.documentElement).setCssProps({
+    (activeDocument.documentElement).setCssProps({
       '--card-color-1': this.settings.color1 || '#8392a4',
       '--card-color-2': this.settings.color2 || '#eb3b5a',
       '--card-color-3': this.settings.color3 || '#fa8231',
@@ -117,7 +117,7 @@ export default class SideCardsPlugin extends Plugin {
       id: 'custom-wrap-comment',
       name: 'Wrap with comment %% (any focused editable)',
       checkCallback: (checking: boolean) => {
-        const activeEl = document.activeElement;
+        const activeEl = activeDocument.activeElement;
         if (activeEl instanceof HTMLElement && activeEl.isContentEditable) {
           if (!checking) {
             this.wrapWith('%%', '%%');
@@ -132,7 +132,7 @@ export default class SideCardsPlugin extends Plugin {
       id: 'custom-wrap-bold',
       name: 'Wrap with **bold**',
       checkCallback: (checking: boolean) => {
-        const activeEl = document.activeElement;
+        const activeEl = activeDocument.activeElement;
         if (activeEl instanceof HTMLElement && activeEl.isContentEditable) {
           if (!checking) {
             this.wrapWith('**', '**');
@@ -147,7 +147,7 @@ export default class SideCardsPlugin extends Plugin {
       id: 'custom-wrap-italic',
       name: 'Wrap with *italic*',
       checkCallback: (checking: boolean) => {
-        const activeEl = document.activeElement;
+        const activeEl = activeDocument.activeElement;
         if (activeEl instanceof HTMLElement && activeEl.isContentEditable) {
           if (!checking) {
             this.wrapWith('*', '*');
@@ -162,7 +162,7 @@ export default class SideCardsPlugin extends Plugin {
       id: 'custom-wrap-highlight',
       name: 'Wrap with ==highlight==',
       checkCallback: (checking: boolean) => {
-        const activeEl = document.activeElement;
+        const activeEl = activeDocument.activeElement;
         if (activeEl instanceof HTMLElement && activeEl.isContentEditable) {
           if (!checking) {
             this.wrapWith('==', '==');
@@ -173,9 +173,9 @@ export default class SideCardsPlugin extends Plugin {
       },
     });
 
-    this.addRibbonIcon('home', 'Open homepage', () => void this.activateHomeView());
-    this.addRibbonIcon('rows-3', 'Open sidebar', () => void this.activateView());
-    this.addRibbonIcon('rectangle-horizontal', 'Add card', () => new QuickCardWithFilterModal(this.app, this, this.store).open());
+    this.addRibbonIcon('home', 'Open Homepage', () => void this.activateHomeView());
+    this.addRibbonIcon('rows-3', 'Open Sidebar', () => void this.activateView());
+    this.addRibbonIcon('rectangle-horizontal', 'Add Card', () => new QuickCardWithFilterModal(this.app, this, this.store).open());
 
     this.addSettingTab(new SideCardsSettingTab(this.app, this));
 
@@ -242,7 +242,7 @@ export default class SideCardsPlugin extends Plugin {
     this.applyMaxCardHeight();
 
     // Allow drop on any element — needed so the browser accepts the drop
-    this.registerDomEvent(document, 'dragover', (ev: DragEvent) => {
+    this.registerDomEvent(activeDocument, 'dragover', (ev: DragEvent) => {
       if (!ev.dataTransfer) return;
       const types = Array.from(ev.dataTransfer.types || []);
       if (!types.includes('text/x-card-sidebar')) return;
@@ -301,8 +301,8 @@ export default class SideCardsPlugin extends Plugin {
       mdView.editor.replaceSelection(content);
       mdView.editor.focus();
     };
-    document.addEventListener('drop', cardDropHandler, true /* capture */);
-    (this as unknown as { _cardDropCleanup?: () => void })._cardDropCleanup = () => document.removeEventListener('drop', cardDropHandler, true);
+    activeDocument.addEventListener('drop', cardDropHandler, true /* capture */);
+    (this as unknown as { _cardDropCleanup?: () => void })._cardDropCleanup = () => activeDocument.removeEventListener('drop', cardDropHandler, true);
 
     // Auto-open sidebar on startup; show setup modal if no storage folder set
     this.app.workspace.onLayoutReady(() => {
@@ -325,7 +325,7 @@ export default class SideCardsPlugin extends Plugin {
 
   applyButtonPadding(): void {
     const paddingPx = this.settings.buttonPaddingBottom ?? 26;
-    (document.documentElement).setCssProps({
+    (activeDocument.documentElement).setCssProps({
       '--sc-button-padding-bottom': `${paddingPx}px`
     });
   }
@@ -333,11 +333,11 @@ export default class SideCardsPlugin extends Plugin {
   applyMaxCardHeight(): void {
     const h = this.settings.maxCardHeight;
     if (h && h > 0) {
-      document.documentElement.setCssProps({ '--sc-max-card-height': `${h}px` });
-      document.body.addClass('sc-max-card-height-active');
+      activeDocument.documentElement.setCssProps({ '--sc-max-card-height': `${h}px` });
+      activeDocument.body.addClass('sc-max-card-height-active');
     } else {
-      document.documentElement.style.removeProperty('--sc-max-card-height');
-      document.body.removeClass('sc-max-card-height-active');
+      activeDocument.documentElement.style.removeProperty('--sc-max-card-height');
+      activeDocument.body.removeClass('sc-max-card-height-active');
     }
   }
 
@@ -366,7 +366,7 @@ export default class SideCardsPlugin extends Plugin {
   }
 
   private wrapWith(start: string, end: string) {
-    const activeEl = document.activeElement;
+    const activeEl = activeDocument.activeElement;
     if (!(activeEl instanceof HTMLElement) || activeEl.isContentEditable !== true) {
       new Notice('No editable field focused');
       return;
@@ -390,10 +390,10 @@ export default class SideCardsPlugin extends Plugin {
     const wrapped = start + text + end;
 
     range.deleteContents();
-    range.insertNode(document.createTextNode(wrapped));
+    range.insertNode(activeDocument.createTextNode(wrapped));
 
     // Optional: place caret inside the wrapped text
-    const newRange = document.createRange();
+    const newRange = activeDocument.createRange();
     newRange.setStart(range.startContainer, range.startOffset + start.length);
     newRange.collapse(true);
     sel.removeAllRanges();
@@ -409,7 +409,7 @@ export default class SideCardsPlugin extends Plugin {
     const baseRange = selection.getRangeAt(0);
     if (!baseRange.collapsed) return baseRange;
     const node = baseRange.startContainer;
-    if (!(node instanceof Text)) return null;
+    if (!node.instanceOf(Text)) return null;
     const text = node.data;
     if (!text) return null;
     const offset = baseRange.startOffset;
@@ -420,7 +420,7 @@ export default class SideCardsPlugin extends Plugin {
     let end = offset;
     while (start > 0 && this.isWordChar(text[start - 1])) start--;
     while (end < text.length && this.isWordChar(text[end])) end++;
-    const wordRange = document.createRange();
+    const wordRange = activeDocument.createRange();
     wordRange.setStart(node, start);
     wordRange.setEnd(node, end);
     return wordRange;
@@ -511,7 +511,7 @@ export default class SideCardsPlugin extends Plugin {
 
     folderInput.addEventListener('focus', () => renderSuggestions(folderInput.value));
     folderInput.addEventListener('input', () => renderSuggestions(folderInput.value));
-    folderInput.addEventListener('blur', () => window.setTimeout(() => suggestEl.removeClass('is-visible'), 150));
+    folderInput.addEventListener('blur', () => activeWindow.setTimeout(() => suggestEl.removeClass('is-visible'), 150));
 
     const btnRow = content.createDiv({ cls: 'sc-setup-btn-row' });
 
@@ -537,7 +537,7 @@ export default class SideCardsPlugin extends Plugin {
     });
 
     modal.open();
-    window.setTimeout(() => folderInput.focus(), 50);
+    activeWindow.setTimeout(() => folderInput.focus(), 50);
   }
 
   async fetchAllReleases(): Promise<Array<{ name?: string; tag_name?: string; published_at?: string; created_at?: string; body?: string }>> {
@@ -579,7 +579,7 @@ class SideCardsSettingTab extends PluginSettingTab {
   }
 
   private updateCSSVariables(): void {
-    const root = document.documentElement;
+    const root = activeDocument.documentElement;
     root.setCssProps({
       '--card-color-1': this.plugin.settings.color1 || '#8392a4',
       '--card-color-2': this.plugin.settings.color2 || '#eb3b5a',
@@ -613,7 +613,7 @@ class SideCardsSettingTab extends PluginSettingTab {
     if (hex && hex.startsWith('var')) {
       const varName = hex.match(/--[a-zA-Z0-9-]+/)?.[0];
       if (varName) {
-        hex = getComputedStyle(document.documentElement).getPropertyValue(varName).trim();
+        hex = getComputedStyle(activeDocument.documentElement).getPropertyValue(varName).trim();
       }
     }
 
@@ -691,8 +691,8 @@ class SideCardsSettingTab extends PluginSettingTab {
       const rect = row.getBoundingClientRect();
       offsetY = e.clientY - rect.top;
 
-      document.addEventListener('pointermove', onPointerMove, { passive: false });
-      document.addEventListener('pointerup', onPointerUp);
+      activeDocument.addEventListener('pointermove', onPointerMove, { passive: false });
+      activeDocument.addEventListener('pointerup', onPointerUp);
       // Don't preventDefault yet — let clicks through until threshold
     };
 
@@ -725,7 +725,7 @@ class SideCardsSettingTab extends PluginSettingTab {
           boxShadow: '0 4px 16px rgba(0,0,0,0.25)',
           opacity: '0.9',
         });
-        document.body.appendChild(ghost);
+        activeDocument.body.appendChild(ghost);
         draggedEl!.setCssProps({ 'opacity': '0.3' });
       }
 
@@ -754,8 +754,8 @@ class SideCardsSettingTab extends PluginSettingTab {
     };
 
     const onPointerUp = (e: PointerEvent) => {
-      document.removeEventListener('pointermove', onPointerMove);
-      document.removeEventListener('pointerup', onPointerUp);
+      activeDocument.removeEventListener('pointermove', onPointerMove);
+      activeDocument.removeEventListener('pointerup', onPointerUp);
 
       getRows().forEach(row => row.removeClass('sc-drag-over-top', 'sc-drag-over-bottom'));
 
@@ -779,8 +779,8 @@ class SideCardsSettingTab extends PluginSettingTab {
     container.addEventListener('pointerdown', onPointerDown);
     return () => {
       container.removeEventListener('pointerdown', onPointerDown);
-      document.removeEventListener('pointermove', onPointerMove);
-      document.removeEventListener('pointerup', onPointerUp);
+      activeDocument.removeEventListener('pointermove', onPointerMove);
+      activeDocument.removeEventListener('pointerup', onPointerUp);
       ghost?.remove();
       if (draggedEl) draggedEl.setCssProps({ 'opacity': '' });
     };
@@ -832,7 +832,7 @@ class SideCardsSettingTab extends PluginSettingTab {
       .setName('Latest release notes')
       .setDesc('View the most recent plugin release notes.')
       .addButton(b => {
-        b.setButtonText('Open changelog')
+        b.setButtonText('Open Changelog')
           .onClick(() => {
             new ChangelogModal(this.app, this.plugin).open();
           });
@@ -1038,7 +1038,7 @@ class SideCardsSettingTab extends PluginSettingTab {
             label.textContent = `${value}px`;
             await this.plugin.saveSettings();
             // Apply live to open homepage views
-            document.querySelectorAll('.sc-home-container').forEach((el) => {
+            activeDocument.querySelectorAll('.sc-home-container').forEach((el) => {
               (el as HTMLElement).setCssProps({ '--sc-home-max-width': `${value}px` });
             });
           });
@@ -1059,7 +1059,7 @@ class SideCardsSettingTab extends PluginSettingTab {
             this.plugin.settings.homepageTopMargin = value;
             label.textContent = `${value}px`;
             await this.plugin.saveSettings();
-            document.querySelectorAll('.sc-home-container').forEach((el) => {
+            activeDocument.querySelectorAll('.sc-home-container').forEach((el) => {
               (el as HTMLElement).setCssProps({ '--sc-home-top-margin': `${value}px` });
             });
           });
@@ -1079,7 +1079,7 @@ class SideCardsSettingTab extends PluginSettingTab {
       previewCard.className = 'sc-card';
       previewCard.addClass(`sc-style-${settings.cardStyle || 2}`);
       const color1 = settings.color1 || '#8392a4';
-      const root = document.documentElement;
+      const root = activeDocument.documentElement;
       root.setCssProps({ '--card-color-1': color1 });
       previewCard.setCssProps({
         'border-radius': `${settings.borderRadius || 0}px`,
@@ -1142,7 +1142,7 @@ class SideCardsSettingTab extends PluginSettingTab {
     new Setting(containerEl).setName('Card border radius').setDesc('Set the corner rounding of the card').addSlider(slider => slider.setLimits(0, 30, 1).setValue(this.plugin.settings.borderRadius || 0).setDynamicTooltip().onChange(async (value) => {
       this.plugin.settings.borderRadius = value;
       await this.plugin.saveSettings();
-      document.documentElement.setCssProps({ '--card-border-radius': `${value}px` });
+      activeDocument.documentElement.setCssProps({ '--card-border-radius': `${value}px` });
       updatePreview();
       refreshSidebarCards();
     }));
@@ -1369,7 +1369,7 @@ class SideCardsSettingTab extends PluginSettingTab {
           if (e.dataTransfer) {
             e.dataTransfer.effectAllowed = 'move';
           }
-          window.setTimeout(() => {
+          activeWindow.setTimeout(() => {
             setting.settingEl.addClass('sc-dragging');
           }, 0);
         });
@@ -1824,7 +1824,7 @@ class SideCardsSettingTab extends PluginSettingTab {
           ruleDragSrcId = `rule-${idx}`;
           e.dataTransfer?.setData('text/plain', ruleDragSrcId);
           if (e.dataTransfer) e.dataTransfer.effectAllowed = 'move';
-          window.setTimeout(() => setting.settingEl.addClass('sc-dragging'), 0);
+          activeWindow.setTimeout(() => setting.settingEl.addClass('sc-dragging'), 0);
         });
         setting.settingEl.addEventListener('dragend', () => {
           rulesContainer.querySelectorAll('.sc-dragging').forEach(el => el.removeClass('sc-dragging'));
@@ -2047,7 +2047,7 @@ class SideCardsSettingTab extends PluginSettingTab {
           statusDragSrcId = `status-${idx}`;
           e.dataTransfer?.setData('text/plain', statusDragSrcId);
           if (e.dataTransfer) e.dataTransfer.effectAllowed = 'move';
-          window.setTimeout(() => setting.settingEl.addClass('sc-dragging'), 0);
+          activeWindow.setTimeout(() => setting.settingEl.addClass('sc-dragging'), 0);
         });
         setting.settingEl.addEventListener('dragend', () => {
           statusConfigContainer.querySelectorAll('.sc-dragging').forEach(el => el.removeClass('sc-dragging'));
@@ -2113,35 +2113,35 @@ class SideCardsSettingTab extends PluginSettingTab {
     renderStatusConfig();
 
     // ── Data Management ───────────────────────────────────────────────────────
-    new Setting(containerEl).setName('Data management').setHeading();
+    new Setting(containerEl).setName('Data Management').setHeading();
 
     new Setting(containerEl)
-      .setName('Export data')
+      .setName('Export Data')
       .setDesc('Download all cards as a JSON file.')
       .addButton(btn => btn
-        .setButtonText('Export data')
+        .setButtonText('Export Data')
         .onClick(() => {
           const cards = this.plugin.store.getAll().map(c => c.toJSON());
           const payload = JSON.stringify({ version: 1, exportedAt: new Date().toISOString(), cards }, null, 2);
           const blob = new Blob([payload], { type: 'application/json' });
           const url = URL.createObjectURL(blob);
-          const a = document.createElement('a');
+          const a = containerEl.createEl('a');
           a.href = url;
           a.download = `sidecards-export-${new Date().toISOString().slice(0, 10)}.json`;
-          document.body.appendChild(a);
+          activeDocument.body.appendChild(a);
           a.click();
-          document.body.removeChild(a);
+          activeDocument.body.removeChild(a);
           URL.revokeObjectURL(url);
           new Notice('Cards exported.');
         }));
 
     new Setting(containerEl)
-      .setName('Import data')
+      .setName('Import Data')
       .setDesc('Import cards from a previously exported JSON file. Existing cards with the same ID will be skipped.')
       .addButton(btn => btn
-        .setButtonText('Import data')
+        .setButtonText('Import Data')
         .onClick(() => {
-          const input = document.createElement('input');
+          const input = containerEl.createEl('input');
           input.type = 'file';
           input.accept = '.json,application/json';
           input.addEventListener('change', () => {
@@ -2312,12 +2312,12 @@ class FolderSuggest {
 
   constructor(private app: App, private inputEl: HTMLInputElement, folders: Set<string>) {
     this.folders = Array.from(folders).sort();
-    this.suggestEl = document.createElement('div');
+    this.suggestEl = this.inputEl.parentElement?.createDiv() || activeDocument.createElement('div');
     this.suggestEl.className = 'suggestion-container sc-folder-suggest';
     this.inputEl.parentElement?.appendChild(this.suggestEl);
     this.inputEl.addEventListener('click', () => this.onFocus());
     this.inputEl.addEventListener('input', () => this.onInput());
-    document.addEventListener('click', (event) => this.onClick(event));
+    activeDocument.addEventListener('click', (event) => this.onClick(event));
   }
 
   private onFocus(): void {
@@ -2363,7 +2363,7 @@ class FolderSuggest {
     this.suggestEl.empty();
     const filtered = this.folders.filter(folder => folder.toLowerCase().includes(inputValue)).slice(0, 100);
     filtered.forEach(folder => {
-      const item = document.createElement('div');
+      const item = this.suggestEl.createDiv();
       item.className = 'suggestion-item sc-folder-suggest-item';
       item.textContent = folder;
       item.addEventListener('click', () => {

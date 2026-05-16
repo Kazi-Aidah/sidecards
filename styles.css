@@ -1408,6 +1408,73 @@ de
   cursor: grabbing;
 }
 
+/* Tag Autocomplete */
+.sc-tag-autocomplete {
+  display: none;
+  position: absolute;
+  bottom: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  max-height: 150px;
+  overflow-y: auto;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 4px;
+  background: var(--background-primary);
+  z-index: 1000;
+}
+
+.sc-tag-autocomplete--open {
+  display: block;
+}
+
+.sc-autocomplete-item:hover,
+.sc-autocomplete-item.sc-autocomplete-item--selected {
+  background: var(--background-modifier-hover);
+}
+
+/* DateTime Modal panel visibility */
+.sc-dt-panel-exact {
+  display: none;
+}
+
+/* Search Modal */
+.sc-search-results {
+  max-height: 400px;
+  overflow: auto;
+}
+
+.sc-search-result {
+  padding: 8px;
+  cursor: pointer;
+}
+
+.sc-search-result.sc-search-result--selected {
+  background-color: var(--background-modifier-hover);
+}
+
+/* Quick Card Modal color swatch base */
+.sc-modal-color-swatch {
+  width: 24px;
+  height: 24px;
+  border-radius: 10px;
+  cursor: pointer;
+  border: 2px solid transparent;
+  transition: transform 0.1s ease;
+}
+
+.sc-modal-color-swatch:hover {
+  transform: scale(1.2);
+}
+
+.sc-modal-color-swatch.is-selected {
+  border-color: var(--text-accent);
+}
+
+/* Card status pill with margin */
+.sc-status-pill--with-margin {
+  margin-bottom: 4px;
+}
+
 /* Settings drag ghost (mobile touch reorder) */
 .sc-settings-drag-ghost {
   border: 1px solid var(--background-modifier-border);

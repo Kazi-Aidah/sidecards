@@ -255,10 +255,10 @@ export class QuickCardWithFilterModal extends Modal {
     contentEl.empty();
     contentEl.addClass('sc-quick-card-modal');
 
-    contentEl.createEl('h2', { text: 'Quick card add', cls: 'sc-modal-title' });
+    contentEl.createDiv({ text: 'Quick card add', cls: 'sc-modal-title' });
 
     // Content Section
-    contentEl.createEl('h3', { text: 'Card content', cls: 'sc-modal-section-title' });
+    contentEl.createDiv({ text: 'Card content', cls: 'sc-modal-section-title' });
     const editorEl = contentEl.createDiv({
       cls: 'sc-modal-textarea',
     });
@@ -291,7 +291,7 @@ export class QuickCardWithFilterModal extends Modal {
     });
 
     // Color Section
-    contentEl.createEl('h3', { text: 'Color', cls: 'sc-modal-section-title' });
+    contentEl.createDiv({ text: 'Color', cls: 'sc-modal-section-title' });
     const colorContainer = contentEl.createDiv('sc-modal-color-container');
     let selectedColor = 'var(--card-color-1)';
     const colors = [
@@ -309,8 +309,7 @@ export class QuickCardWithFilterModal extends Modal {
 
     colors.forEach((color, idx) => {
       const swatch = colorContainer.createDiv('sc-modal-color-swatch');
-      const hex = this.resolveColor(color.var);
-      (swatch as HTMLElement).setCssProps({ 'background-color': hex });
+      swatch.style.backgroundColor = this.resolveColor(color.var);
       swatch.title = this.store.settings.colorNames[idx] || color.name;
       
       if (selectedColor === color.var) swatch.addClass('is-selected');
@@ -323,7 +322,7 @@ export class QuickCardWithFilterModal extends Modal {
     });
 
     // Tags Section
-    contentEl.createEl('h3', { text: 'Tags', cls: 'sc-modal-section-title' });
+    contentEl.createDiv({ text: 'Tags', cls: 'sc-modal-section-title' });
     const tagsWrapper = contentEl.createDiv('sc-modal-tags-wrapper');
     const tagsInput = tagsWrapper.createEl('input', {
       placeholder: 'Tags (comma separated)...',
@@ -386,7 +385,7 @@ export class QuickCardWithFilterModal extends Modal {
     });
 
     // Category Section
-    contentEl.createEl('h3', { text: 'Apply category', cls: 'sc-modal-section-title' });
+    contentEl.createDiv({ text: 'Apply category', cls: 'sc-modal-section-title' });
     const select = contentEl.createEl('select', { cls: 'sc-modal-select' });
     this.getAvailableFilters().forEach(f => {
       const opt = select.createEl('option', { value: f.value, text: f.label });

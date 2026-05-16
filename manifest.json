@@ -3,7 +3,7 @@
   "name": "SideCards",
   "description": "Quickly create cards in your sidebar, color, tag, and drag them straight into your notes.",
   "version": "0.2.0",
-  "minAppVersion": "0.15.0",
+  "minAppVersion": "1.7.2",
   "author": "Kazi Aidah Haque",
   "authorUrl": "https://github.com/Kazi-Aidah",
   "isDesktopOnly": false

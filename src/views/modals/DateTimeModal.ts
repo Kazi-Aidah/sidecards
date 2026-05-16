@@ -74,7 +74,7 @@ export class DateTimeModal extends Modal {
 
     // --- Exact panel ---
     const exactPanel = contentEl.createDiv('sc-dt-panel sc-dt-panel-exact');
-    exactPanel.setCssProps({ 'display': 'none' });
+    exactPanel.addClass('sc-hidden');
 
     const exactInput = exactPanel.createEl('input', { type: 'datetime-local', cls: 'sc-dt-exact-input' });
     if (this.card.expiresAt) {
@@ -94,15 +94,15 @@ export class DateTimeModal extends Modal {
     relRadio.addEventListener('change', () => {
       if (relRadio.checked) {
         this.mode = 'relative';
-        relPanel.setCssProps({ 'display': '' });
-        exactPanel.setCssProps({ 'display': 'none' });
+        relPanel.removeClass('sc-hidden');
+        exactPanel.addClass('sc-hidden');
       }
     });
     exactRadio.addEventListener('change', () => {
       if (exactRadio.checked) {
         this.mode = 'exact';
-        relPanel.setCssProps({ 'display': 'none' });
-        exactPanel.setCssProps({ 'display': '' });
+        relPanel.addClass('sc-hidden');
+        exactPanel.removeClass('sc-hidden');
       }
     });
 
