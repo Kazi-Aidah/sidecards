@@ -105,7 +105,9 @@ Bold, italic, highlight, and comment wrapping work inside card editors.
 
 
 ## Installation
+You can install it from https://community.obsidian.md/plugins/sidecards.
 
+<!-- 
 *SideCards is not yet available in Obsidian Community Plugins or BRAT.*
 
 1. **Clone the repository** and place the plugin folder in your vault’s `.obsidian/plugins/` directory. The folder structure should look like this:
@@ -131,7 +133,7 @@ Inside your vault, it should end up like:
 
 2. **Enable the plugin** in Obsidian.
 
-3. **Set a storage folder** on first launch. This is where your cards will be saved as notes.
+3. **Set a storage folder** on first launch. This is where your cards will be saved as notes. -->
 
 
 ### Questions or Suggestions?
