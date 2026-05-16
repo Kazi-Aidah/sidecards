@@ -67,8 +67,6 @@ export function applyCardColorToElement(cardEl: HTMLElement, colorVar: string, s
   const hex = resolveColorVarToHex(colorVar, settings) || colorVar;
   const rgba = hexToRgba(hex, opacity);
   const borderColor = borderShadowOpacity >= 1 ? colorVar : hexToRgba(hex, borderShadowOpacity);
-  const borderRadius = settings.borderRadius ?? 6;
-
   if (style === 1) {
     cardEl.setCssProps({
       'border': `${borderThickness}px solid ${borderColor}`,
@@ -90,8 +88,6 @@ export function applyCardColorToElement(cardEl: HTMLElement, colorVar: string, s
       'box-shadow': `2px 2px 0 0 ${borderColor}`
     });
   }
-
-  cardEl.setCssProps({ 'border-radius': `${borderRadius}px` });
 }
 
 export function resolveAutoColor(

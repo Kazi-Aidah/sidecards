@@ -1,5 +1,5 @@
 
-import { ItemView, WorkspaceLeaf, Notice, Menu, TFile, setIcon, Scope, Editor, App, MarkdownFileInfo, Text } from "obsidian";
+import { ItemView, WorkspaceLeaf, Notice, Menu, TFile, setIcon, Scope, Editor, App, MarkdownFileInfo } from "obsidian";
 import { CardStore } from "../services/CardStore";
 import { FilterService, FilterOptions } from "../services/FilterService";
 import { SortService, SortMode } from "../services/SortService";
@@ -86,8 +86,8 @@ export class CardSidebarView extends ItemView {
     if (!selection.rangeCount) return null;
     const baseRange = selection.getRangeAt(0);
     if (!baseRange.collapsed) return baseRange;
-    const node = baseRange.startContainer;
-    if (!node.instanceOf(Text)) return null;
+    const node = baseRange.startContainer as Text;
+    if (!node?.data) return null;
     const text = node.data;
     if (!text) return null;
     const offset = baseRange.startOffset;

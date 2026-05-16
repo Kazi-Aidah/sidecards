@@ -1,4 +1,3 @@
-import { activeDocument } from "obsidian";
 import SideCardsPlugin from "../core/Plugin";
 
 /**
@@ -175,8 +174,8 @@ export function attachDragToReorder(
     offsetX = e.clientX - rect.left;
     offsetY = e.clientY - rect.top;
 
-    activeDocument.addEventListener('pointermove', onPointerMove);
-    activeDocument.addEventListener('pointerup', onPointerUp);
+    document.addEventListener('pointermove', onPointerMove);
+    document.addEventListener('pointerup', onPointerUp);
     // Don't preventDefault here for mouse — let clicks through until threshold crossed
     // For touch, we need to prevent scroll once drag is active (done in onPointerMove)
   };
@@ -436,8 +435,8 @@ export function attachPinnedListDragToReorder(
     dropIndex = computeDropIndex(e.clientY);
     positionIndicator(dropIndex);
 
-    activeDocument.addEventListener('pointermove', onPointerMove);
-    activeDocument.addEventListener('pointerup', onPointerUp);
+    document.addEventListener('pointermove', onPointerMove);
+    document.addEventListener('pointerup', onPointerUp);
     e.preventDefault();
   };
 

@@ -1,5 +1,5 @@
 
-import { Plugin, PluginSettingTab, App, Setting, WorkspaceLeaf, setIcon, Notice, TFile, Platform, requestUrl, Component, MarkdownRenderer, Modal, getIconIds, MarkdownView, activeDocument, activeWindow, Text } from "obsidian";
+import { Plugin, PluginSettingTab, App, Setting, WorkspaceLeaf, setIcon, Notice, TFile, Platform, requestUrl, Component, MarkdownRenderer, Modal, getIconIds, MarkdownView, FuzzySuggestModal, TFolder } from "obsidian";
 import { CardSidebarView } from "../views/CardSidebarView";
 import { CardStore } from "../services/CardStore";
 import { FilterService } from "../services/FilterService";
@@ -20,7 +20,7 @@ export default class SideCardsPlugin extends Plugin {
 
   async onload() {
     await this.loadSettings();
-    (activeDocument.documentElement).setCssProps({
+    (document.documentElement).setCssProps({
       '--card-color-1': this.settings.color1 || '#8392a4',
       '--card-color-2': this.settings.color2 || '#eb3b5a',
       '--card-color-3': this.settings.color3 || '#fa8231',
@@ -117,7 +117,7 @@ export default class SideCardsPlugin extends Plugin {
       id: 'custom-wrap-comment',
       name: 'Wrap with comment %% (any focused editable)',
       checkCallback: (checking: boolean) => {
-        const activeEl = activeDocument.activeElement;
+        const activeEl = document.activeElement;
         if (activeEl instanceof HTMLElement && activeEl.isContentEditable) {
           if (!checking) {
             this.wrapWith('%%', '%%');
@@ -132,7 +132,7 @@ export default class SideCardsPlugin extends Plugin {
       id: 'custom-wrap-bold',
       name: 'Wrap with **bold**',
       checkCallback: (checking: boolean) => {
-        const activeEl = activeDocument.activeElement;
+        const activeEl = document.activeElement;
         if (activeEl instanceof HTMLElement && activeEl.isContentEditable) {
           if (!checking) {
             this.wrapWith('**', '**');
@@ -147,7 +147,7 @@ export default class SideCardsPlugin extends Plugin {
       id: 'custom-wrap-italic',
       name: 'Wrap with *italic*',
       checkCallback: (checking: boolean) => {
-        const activeEl = activeDocument.activeElement;
+        const activeEl = document.activeElement;
         if (activeEl instanceof HTMLElement && activeEl.isContentEditable) {
           if (!checking) {
             this.wrapWith('*', '*');
@@ -162,7 +162,7 @@ export default class SideCardsPlugin extends Plugin {
       id: 'custom-wrap-highlight',
       name: 'Wrap with ==highlight==',
       checkCallback: (checking: boolean) => {
-        const activeEl = activeDocument.activeElement;
+        const activeEl = document.activeElement;
         if (activeEl instanceof HTMLElement && activeEl.isContentEditable) {
           if (!checking) {
             this.wrapWith('==', '==');
@@ -240,9 +240,10 @@ export default class SideCardsPlugin extends Plugin {
     this.injectStatusColors();
     this.applyButtonPadding();
     this.applyMaxCardHeight();
+    this.applyHomepageTopMargin();
 
     // Allow drop on any element — needed so the browser accepts the drop
-    this.registerDomEvent(activeDocument, 'dragover', (ev: DragEvent) => {
+    this.registerDomEvent(document, 'dragover', (ev: DragEvent) => {
       if (!ev.dataTransfer) return;
       const types = Array.from(ev.dataTransfer.types || []);
       if (!types.includes('text/x-card-sidebar')) return;
@@ -301,8 +302,8 @@ export default class SideCardsPlugin extends Plugin {
       mdView.editor.replaceSelection(content);
       mdView.editor.focus();
     };
-    activeDocument.addEventListener('drop', cardDropHandler, true /* capture */);
-    (this as unknown as { _cardDropCleanup?: () => void })._cardDropCleanup = () => activeDocument.removeEventListener('drop', cardDropHandler, true);
+    document.addEventListener('drop', cardDropHandler, true /* capture */);
+    (this as unknown as { _cardDropCleanup?: () => void })._cardDropCleanup = () => document.removeEventListener('drop', cardDropHandler, true);
 
     // Auto-open sidebar on startup; show setup modal if no storage folder set
     this.app.workspace.onLayoutReady(() => {
@@ -325,7 +326,7 @@ export default class SideCardsPlugin extends Plugin {
 
   applyButtonPadding(): void {
     const paddingPx = this.settings.buttonPaddingBottom ?? 26;
-    (activeDocument.documentElement).setCssProps({
+    (document.documentElement).setCssProps({
       '--sc-button-padding-bottom': `${paddingPx}px`
     });
   }
@@ -333,12 +334,17 @@ export default class SideCardsPlugin extends Plugin {
   applyMaxCardHeight(): void {
     const h = this.settings.maxCardHeight;
     if (h && h > 0) {
-      activeDocument.documentElement.setCssProps({ '--sc-max-card-height': `${h}px` });
-      activeDocument.body.addClass('sc-max-card-height-active');
+      document.documentElement.setCssProps({ '--sc-max-card-height': `${h}px` });
+      document.body.addClass('sc-max-card-height-active');
     } else {
-      activeDocument.documentElement.style.removeProperty('--sc-max-card-height');
-      activeDocument.body.removeClass('sc-max-card-height-active');
+      document.documentElement.style.removeProperty('--sc-max-card-height');
+      document.body.removeClass('sc-max-card-height-active');
     }
+  }
+
+  applyHomepageTopMargin(): void {
+    const topMargin = this.settings.homepageTopMargin ?? 70;
+    document.documentElement.style.setProperty('--sc-home-top-margin', `${topMargin}px`);
   }
 
   injectStatusColors(): void {
@@ -366,7 +372,7 @@ export default class SideCardsPlugin extends Plugin {
   }
 
   private wrapWith(start: string, end: string) {
-    const activeEl = activeDocument.activeElement;
+    const activeEl = document.activeElement;
     if (!(activeEl instanceof HTMLElement) || activeEl.isContentEditable !== true) {
       new Notice('No editable field focused');
       return;
@@ -390,10 +396,10 @@ export default class SideCardsPlugin extends Plugin {
     const wrapped = start + text + end;
 
     range.deleteContents();
-    range.insertNode(activeDocument.createTextNode(wrapped));
+    range.insertNode(document.createTextNode(wrapped));
 
     // Optional: place caret inside the wrapped text
-    const newRange = activeDocument.createRange();
+    const newRange = document.createRange();
     newRange.setStart(range.startContainer, range.startOffset + start.length);
     newRange.collapse(true);
     sel.removeAllRanges();
@@ -408,8 +414,8 @@ export default class SideCardsPlugin extends Plugin {
     if (!selection.rangeCount) return null;
     const baseRange = selection.getRangeAt(0);
     if (!baseRange.collapsed) return baseRange;
-    const node = baseRange.startContainer;
-    if (!node.instanceOf(Text)) return null;
+    const node = baseRange.startContainer as Text;
+    if (!node?.data) return null;
     const text = node.data;
     if (!text) return null;
     const offset = baseRange.startOffset;
@@ -420,7 +426,7 @@ export default class SideCardsPlugin extends Plugin {
     let end = offset;
     while (start > 0 && this.isWordChar(text[start - 1])) start--;
     while (end < text.length && this.isWordChar(text[end])) end++;
-    const wordRange = activeDocument.createRange();
+    const wordRange = document.createRange();
     wordRange.setStart(node, start);
     wordRange.setEnd(node, end);
     return wordRange;
@@ -511,7 +517,7 @@ export default class SideCardsPlugin extends Plugin {
 
     folderInput.addEventListener('focus', () => renderSuggestions(folderInput.value));
     folderInput.addEventListener('input', () => renderSuggestions(folderInput.value));
-    folderInput.addEventListener('blur', () => activeWindow.setTimeout(() => suggestEl.removeClass('is-visible'), 150));
+    folderInput.addEventListener('blur', () => window.setTimeout(() => suggestEl.removeClass('is-visible'), 150));
 
     const btnRow = content.createDiv({ cls: 'sc-setup-btn-row' });
 
@@ -537,7 +543,7 @@ export default class SideCardsPlugin extends Plugin {
     });
 
     modal.open();
-    activeWindow.setTimeout(() => folderInput.focus(), 50);
+    window.setTimeout(() => folderInput.focus(), 50);
   }
 
   async fetchAllReleases(): Promise<Array<{ name?: string; tag_name?: string; published_at?: string; created_at?: string; body?: string }>> {
@@ -579,7 +585,7 @@ class SideCardsSettingTab extends PluginSettingTab {
   }
 
   private updateCSSVariables(): void {
-    const root = activeDocument.documentElement;
+    const root = document.documentElement;
     root.setCssProps({
       '--card-color-1': this.plugin.settings.color1 || '#8392a4',
       '--card-color-2': this.plugin.settings.color2 || '#eb3b5a',
@@ -613,7 +619,7 @@ class SideCardsSettingTab extends PluginSettingTab {
     if (hex && hex.startsWith('var')) {
       const varName = hex.match(/--[a-zA-Z0-9-]+/)?.[0];
       if (varName) {
-        hex = getComputedStyle(activeDocument.documentElement).getPropertyValue(varName).trim();
+        hex = getComputedStyle(document.documentElement).getPropertyValue(varName).trim();
       }
     }
 
@@ -691,8 +697,8 @@ class SideCardsSettingTab extends PluginSettingTab {
       const rect = row.getBoundingClientRect();
       offsetY = e.clientY - rect.top;
 
-      activeDocument.addEventListener('pointermove', onPointerMove, { passive: false });
-      activeDocument.addEventListener('pointerup', onPointerUp);
+      document.addEventListener('pointermove', onPointerMove, { passive: false });
+      document.addEventListener('pointerup', onPointerUp);
       // Don't preventDefault yet — let clicks through until threshold
     };
 
@@ -725,7 +731,7 @@ class SideCardsSettingTab extends PluginSettingTab {
           boxShadow: '0 4px 16px rgba(0,0,0,0.25)',
           opacity: '0.9',
         });
-        activeDocument.body.appendChild(ghost);
+        document.body.appendChild(ghost);
         draggedEl!.setCssProps({ 'opacity': '0.3' });
       }
 
@@ -754,8 +760,8 @@ class SideCardsSettingTab extends PluginSettingTab {
     };
 
     const onPointerUp = (e: PointerEvent) => {
-      activeDocument.removeEventListener('pointermove', onPointerMove);
-      activeDocument.removeEventListener('pointerup', onPointerUp);
+      document.removeEventListener('pointermove', onPointerMove);
+      document.removeEventListener('pointerup', onPointerUp);
 
       getRows().forEach(row => row.removeClass('sc-drag-over-top', 'sc-drag-over-bottom'));
 
@@ -779,8 +785,8 @@ class SideCardsSettingTab extends PluginSettingTab {
     container.addEventListener('pointerdown', onPointerDown);
     return () => {
       container.removeEventListener('pointerdown', onPointerDown);
-      activeDocument.removeEventListener('pointermove', onPointerMove);
-      activeDocument.removeEventListener('pointerup', onPointerUp);
+      document.removeEventListener('pointermove', onPointerMove);
+      document.removeEventListener('pointerup', onPointerUp);
       ghost?.remove();
       if (draggedEl) draggedEl.setCssProps({ 'opacity': '' });
     };
@@ -841,22 +847,29 @@ class SideCardsSettingTab extends PluginSettingTab {
     new Setting(containerEl)
       .setName('Storage folder')
       .setDesc('Choose where to save notes created from cards.')
-      .addSearch(cb => {
-        cb.setPlaceholder('Choose a folder')
-          .setValue(this.plugin.settings.storageFolder || '')
-          .onChange(async (value) => {
-            const newFolder = value.trim();
-            const oldFolder = this.plugin.settings.storageFolder;
-            this.plugin.settings.storageFolder = newFolder;
-            this.plugin.settings.tutorialShown = true;
-            await this.plugin.saveSettings();
-            if (newFolder !== oldFolder) {
-              await this.plugin.store.switchStorageFolder(newFolder);
-            }
+      .addButton(b => {
+        b.setButtonText(this.plugin.settings.storageFolder?.trim() ? this.plugin.settings.storageFolder : 'Unset')
+          .onClick(() => {
+            const folders = this.app.vault.getAllLoadedFiles()
+              .filter((f): f is TFolder => f instanceof TFolder)
+              .map(f => f.path)
+              .sort();
+            const suggest = new FolderSuggestModal(this.app, folders, async (folder) => {
+              const newFolder = folder || '';
+              const oldFolder = this.plugin.settings.storageFolder;
+              this.plugin.settings.storageFolder = newFolder;
+              this.plugin.settings.tutorialShown = true;
+              await this.plugin.saveSettings();
+              if (newFolder !== oldFolder) {
+                await this.plugin.store.switchStorageFolder(newFolder);
+              }
+              b.setButtonText(this.plugin.settings.storageFolder?.trim() ? this.plugin.settings.storageFolder : 'Unset');
+              refreshSidebarCards();
+              refreshHomepage();
+            });
+            suggest.setPlaceholder('Select storage folder...');
+            suggest.open();
           });
-        const folders = new Set<string>(['/']);
-        this.app.vault.getAllLoadedFiles().forEach((file) => { if (file.parent) folders.add(file.parent.path); });
-        new FolderSuggest(this.app, cb.inputEl, folders);
       });
 
     // ── Behaviour ─────────────────────────────────────────────────────────────
@@ -1038,7 +1051,7 @@ class SideCardsSettingTab extends PluginSettingTab {
             label.textContent = `${value}px`;
             await this.plugin.saveSettings();
             // Apply live to open homepage views
-            activeDocument.querySelectorAll('.sc-home-container').forEach((el) => {
+            document.querySelectorAll('.sc-home-container').forEach((el) => {
               (el as HTMLElement).setCssProps({ '--sc-home-max-width': `${value}px` });
             });
           });
@@ -1059,9 +1072,7 @@ class SideCardsSettingTab extends PluginSettingTab {
             this.plugin.settings.homepageTopMargin = value;
             label.textContent = `${value}px`;
             await this.plugin.saveSettings();
-            activeDocument.querySelectorAll('.sc-home-container').forEach((el) => {
-              (el as HTMLElement).setCssProps({ '--sc-home-top-margin': `${value}px` });
-            });
+            document.documentElement.style.setProperty('--sc-home-top-margin', `${value}px`);
           });
         slider.sliderEl.insertAdjacentElement('afterend', label);
       });
@@ -1079,7 +1090,7 @@ class SideCardsSettingTab extends PluginSettingTab {
       previewCard.className = 'sc-card';
       previewCard.addClass(`sc-style-${settings.cardStyle || 2}`);
       const color1 = settings.color1 || '#8392a4';
-      const root = activeDocument.documentElement;
+      const root = document.documentElement;
       root.setCssProps({ '--card-color-1': color1 });
       previewCard.setCssProps({
         'border-radius': `${settings.borderRadius || 0}px`,
@@ -1142,7 +1153,7 @@ class SideCardsSettingTab extends PluginSettingTab {
     new Setting(containerEl).setName('Card border radius').setDesc('Set the corner rounding of the card').addSlider(slider => slider.setLimits(0, 30, 1).setValue(this.plugin.settings.borderRadius || 0).setDynamicTooltip().onChange(async (value) => {
       this.plugin.settings.borderRadius = value;
       await this.plugin.saveSettings();
-      activeDocument.documentElement.setCssProps({ '--card-border-radius': `${value}px` });
+      document.documentElement.setCssProps({ '--card-border-radius': `${value}px` });
       updatePreview();
       refreshSidebarCards();
     }));
@@ -1369,7 +1380,7 @@ class SideCardsSettingTab extends PluginSettingTab {
           if (e.dataTransfer) {
             e.dataTransfer.effectAllowed = 'move';
           }
-          activeWindow.setTimeout(() => {
+          window.setTimeout(() => {
             setting.settingEl.addClass('sc-dragging');
           }, 0);
         });
@@ -1824,7 +1835,7 @@ class SideCardsSettingTab extends PluginSettingTab {
           ruleDragSrcId = `rule-${idx}`;
           e.dataTransfer?.setData('text/plain', ruleDragSrcId);
           if (e.dataTransfer) e.dataTransfer.effectAllowed = 'move';
-          activeWindow.setTimeout(() => setting.settingEl.addClass('sc-dragging'), 0);
+          window.setTimeout(() => setting.settingEl.addClass('sc-dragging'), 0);
         });
         setting.settingEl.addEventListener('dragend', () => {
           rulesContainer.querySelectorAll('.sc-dragging').forEach(el => el.removeClass('sc-dragging'));
@@ -2047,7 +2058,7 @@ class SideCardsSettingTab extends PluginSettingTab {
           statusDragSrcId = `status-${idx}`;
           e.dataTransfer?.setData('text/plain', statusDragSrcId);
           if (e.dataTransfer) e.dataTransfer.effectAllowed = 'move';
-          activeWindow.setTimeout(() => setting.settingEl.addClass('sc-dragging'), 0);
+          window.setTimeout(() => setting.settingEl.addClass('sc-dragging'), 0);
         });
         setting.settingEl.addEventListener('dragend', () => {
           statusConfigContainer.querySelectorAll('.sc-dragging').forEach(el => el.removeClass('sc-dragging'));
@@ -2128,16 +2139,16 @@ class SideCardsSettingTab extends PluginSettingTab {
           const a = containerEl.createEl('a');
           a.href = url;
           a.download = `sidecards-export-${new Date().toISOString().slice(0, 10)}.json`;
-          activeDocument.body.appendChild(a);
+          document.body.appendChild(a);
           a.click();
-          activeDocument.body.removeChild(a);
+          document.body.removeChild(a);
           URL.revokeObjectURL(url);
           new Notice('Cards exported.');
         }));
 
     new Setting(containerEl)
       .setName('Import Data')
-      .setDesc('Import cards from a previously exported JSON file. Existing cards with the same ID will be skipped.')
+      .setDesc('Import cards from a previously exported JSON file.')
       .addButton(btn => btn
         .setButtonText('Import Data')
         .onClick(() => {
@@ -2306,73 +2317,26 @@ class ChangelogModal extends Modal {
   }
 }
 
-class FolderSuggest {
-  private suggestEl: HTMLElement;
-  private folders: string[];
+class FolderSuggestModal extends FuzzySuggestModal<string> {
+  folders: string[];
+  onChoose: (folder: string) => void | Promise<void>;
 
-  constructor(private app: App, private inputEl: HTMLInputElement, folders: Set<string>) {
-    this.folders = Array.from(folders).sort();
-    this.suggestEl = this.inputEl.parentElement?.createDiv() || activeDocument.createElement('div');
-    this.suggestEl.className = 'suggestion-container sc-folder-suggest';
-    this.inputEl.parentElement?.appendChild(this.suggestEl);
-    this.inputEl.addEventListener('click', () => this.onFocus());
-    this.inputEl.addEventListener('input', () => this.onInput());
-    activeDocument.addEventListener('click', (event) => this.onClick(event));
+  constructor(app: App, folders: string[], onChoose: (folder: string) => void | Promise<void>) {
+    super(app);
+    this.folders = folders;
+    this.onChoose = onChoose;
   }
 
-  private onFocus(): void {
-    const foldersSet = new Set<string>(['/']);
-    type VaultNode = { path?: string; children?: VaultNode[] };
-    const vaultWithRoot = this.app.vault as unknown as { getRoot?: () => VaultNode };
-    const root: VaultNode | undefined = vaultWithRoot.getRoot?.();
-    const walk = (node: VaultNode) => {
-      if (!node) return;
-      const children = node.children || [];
-      for (const c of children) {
-        if (c && c.path && c.children) {
-          foldersSet.add(c.path || '/');
-          walk(c);
-        }
-      }
-    };
-    if (root) walk(root);
-    try {
-      this.app.vault.getAllLoadedFiles().forEach((file) => {
-        if (file && file.parent) foldersSet.add(file.parent.path);
-      });
-    } catch { /* ignore */ }
-    this.folders = Array.from(foldersSet).sort();
-    this.updateSuggestions();
-    this.suggestEl.addClass('is-visible');
+  getItems(): string[] {
+    return this.folders;
   }
 
-  private onInput(): void {
-    this.updateSuggestions();
+  getItemText(item: string): string {
+    return item;
   }
 
-  private onClick(event: MouseEvent): void {
-    const target = event.target as Node | null;
-    if (!target) return;
-    if (!this.inputEl.contains(target) && !this.suggestEl.contains(target)) {
-      this.suggestEl.removeClass('is-visible');
-    }
-  }
-
-  private updateSuggestions(): void {
-    const inputValue = this.inputEl.value.toLowerCase();
-    this.suggestEl.empty();
-    const filtered = this.folders.filter(folder => folder.toLowerCase().includes(inputValue)).slice(0, 100);
-    filtered.forEach(folder => {
-      const item = this.suggestEl.createDiv();
-      item.className = 'suggestion-item sc-folder-suggest-item';
-      item.textContent = folder;
-      item.addEventListener('click', () => {
-        this.inputEl.value = folder;
-        this.inputEl.dispatchEvent(new Event('input'));
-        this.suggestEl.removeClass('is-visible');
-      });
-      this.suggestEl.appendChild(item);
-    });
+  onChooseItem(item: string, evt: MouseEvent | KeyboardEvent): void {
+    void Promise.resolve(this.onChoose(item));
   }
 }
 

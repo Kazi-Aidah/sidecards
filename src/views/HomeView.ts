@@ -1,4 +1,4 @@
-import { ItemView, WorkspaceLeaf, Menu, Notice, setIcon, Scope, Editor, TFile, Platform, App, MarkdownFileInfo, Text } from "obsidian";
+import { ItemView, WorkspaceLeaf, Menu, Notice, setIcon, Scope, Editor, TFile, Platform, App, MarkdownFileInfo } from "obsidian";
 import type SideCardsPlugin from "../core/Plugin";
 import { CardStore } from "../services/CardStore";
 import { Card } from "../models/Card";
@@ -91,8 +91,8 @@ export class SideCardsHomeView extends ItemView {
     if (!selection.rangeCount) return null;
     const baseRange = selection.getRangeAt(0);
     if (!baseRange.collapsed) return baseRange;
-    const node = baseRange.startContainer;
-    if (!node.instanceOf(Text)) return null;
+    const node = baseRange.startContainer as Text;
+    if (!node?.data) return null;
     const text = node.data;
     if (!text) return null;
     const offset = baseRange.startOffset;
@@ -306,8 +306,6 @@ export class SideCardsHomeView extends ItemView {
     // Apply user-configured max width via CSS variable so it overrides correctly
     const maxW = this.plugin.settings.homepageMaxWidth ?? 1000;
     container.setCssProps({ '--sc-home-max-width': `${maxW}px` });
-    const topMargin = this.plugin.settings.homepageTopMargin ?? 70;
-    container.setCssProps({ '--sc-home-top-margin': `${topMargin}px` });
     
     // Top Section
     const topSection = main.createDiv({ cls: 'sc-home-top' });
@@ -762,7 +760,7 @@ export class SideCardsHomeView extends ItemView {
     this.renderCards(cardList);
   }
 
-  private renderToolbar(container: HTMLElement, _editorEl: HTMLElement, _cardList: HTMLElement, pinnedList: HTMLElement, recentList: HTMLElement) {
+  private renderToolbar(container: HTMLElement, _editorEl: HTMLElement, cardList: HTMLElement, pinnedList: HTMLElement, recentList: HTMLElement) {
     container.empty();
     
     const leftActions = container.createDiv({ cls: 'sc-home-toolbar-left' });
