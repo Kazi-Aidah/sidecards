@@ -3,11 +3,10 @@ import SideCardsPlugin from "../core/Plugin";
 /**
   Drag-to-reorder using FLIP.
   ------------------------------
-  We briefly move items in the DOM to see where they’d land,
+  Uses Pointer Events API for unified mouse + touch support.
+  We briefly move items in the DOM to see where they'd land,
   let the browser calculate the layout, then move them back.
   The position changes are animated with transforms.
-
-  drag-n-drop in grid layout is still messy ehm
 **/
 
 export function attachDragToReorder(
@@ -27,8 +26,6 @@ export function attachDragToReorder(
   let originalOrder: HTMLElement[] = [];
   let currentTargetIndex = -1;
   let draggedIndex = -1;
-
-  // Rects for the current targetIndex (used to avoid redundant FLIP reads)
   let lastFlipRects: Map<HTMLElement, DOMRect> = new Map();
 
   function getCards(): HTMLElement[] {
@@ -41,7 +38,6 @@ export function attachDragToReorder(
     return el.closest<HTMLElement>('.sc-card');
   }
 
-  /** Compute target insert index from cursor position using snapshotted rects */
   function computeTargetIndex(clientX: number, clientY: number): number {
     const others = originalOrder.filter((_, i) => i !== draggedIndex);
     if (others.length === 0) return 0;
@@ -76,54 +72,33 @@ export function attachDragToReorder(
     }
   }
 
-  /**
-   * FLIP: temporarily reorder DOM to targetIdx, read real rects, revert.
-   * Returns a map of card → new DOMRect in the target layout.
-   */
   function readFlipRects(targetIdx: number): Map<HTMLElement, DOMRect> {
-    // Build the new order array
     const newOrder = originalOrder.slice();
     newOrder.splice(draggedIndex, 1);
     newOrder.splice(targetIdx, 0, draggedEl!);
 
-    // Suppress transitions during DOM manipulation
     originalOrder.forEach(c => {
-      c.setCssProps({
-        'transition': 'none',
-        'transform': ''
-      });
+      c.setCssProps({ 'transition': 'none', 'transform': '' });
     });
 
-    // Temporarily reorder DOM
     newOrder.forEach(card => container.appendChild(card));
 
-    // Force layout read
     const rects = new Map<HTMLElement, DOMRect>();
     originalOrder.forEach(c => rects.set(c, c.getBoundingClientRect()));
 
-    // Revert DOM to original order
     originalOrder.forEach(card => container.appendChild(card));
 
     return rects;
   }
 
-  /** Apply FLIP animations: translate each card from snapRect → flipRect */
   function applyFlip(flipRects: Map<HTMLElement, DOMRect>) {
-    // Step 1: instantly snap each card to its "from" position (no transition)
-    // This is needed because readFlipRects cleared transforms — we must re-establish
-    // the current visual position before animating to the new one.
     for (const card of originalOrder) {
       if (card === draggedEl) continue;
-      card.setCssProps({
-        'transition': 'none',
-        'transform': card.style.transform || ''
-      });
+      card.setCssProps({ 'transition': 'none', 'transform': card.style.transform || '' });
     }
 
-    // Step 2: force a reflow so the browser registers the transition:none state
     void container.offsetHeight;
 
-    // Step 3: set target transforms with transition — browser will animate from current → target
     for (const card of originalOrder) {
       if (card === draggedEl) continue;
 
@@ -141,32 +116,29 @@ export function attachDragToReorder(
 
   function clearTransforms() {
     getCards().forEach(c => {
-      c.setCssProps({
-        'transition': '',
-        'transform': ''
-      });
+      c.setCssProps({ 'transition': '', 'transform': '' });
     });
   }
 
   let dragStartX = 0;
   let dragStartY = 0;
-  let dragPending = false; // mousedown happened but threshold not yet crossed
-  const DRAG_THRESHOLD = 5; // px
+  let dragPending = false;
+  const DRAG_THRESHOLD = 5;
+  const TOUCH_HOLD_MS = 300; // touch must be held this long before drag activates
+  let touchHoldTimer: ReturnType<typeof setTimeout> | null = null;
+  let touchHoldReady = false; // true once the hold timer fires
 
-  // If a native HTML5 drag starts (e.g. drag-to-editor), cancel the custom reorder
-  // immediately so the ghost never appears and mouseup cleanup is skipped.
+  // Cancel if a native HTML5 drag starts (e.g. drag-to-editor)
   const onNativeDragStart = () => {
     if (!dragPending && !active) return;
-    // Cancel pending/active custom drag without committing
-    document.removeEventListener('mousemove', onMouseMove);
-    document.removeEventListener('mouseup', onMouseUp);
+    document.removeEventListener('pointermove', onPointerMove);
+    document.removeEventListener('pointerup', onPointerUp);
+    if (touchHoldTimer) { clearTimeout(touchHoldTimer); touchHoldTimer = null; }
+    touchHoldReady = false;
     ghost?.remove();
     ghost = null;
     if (draggedEl) {
-      draggedEl.setCssProps({
-        'opacity': '',
-        'pointer-events': ''
-      });
+      draggedEl.setCssProps({ 'opacity': '', 'pointer-events': '' });
     }
     clearTransforms();
     draggedEl = null; active = false; dragPending = false;
@@ -174,9 +146,9 @@ export function attachDragToReorder(
     originalOrder = []; currentTargetIndex = -1; draggedIndex = -1;
   };
 
-  const onMouseDown = (e: MouseEvent) => {
+  const onPointerDown = (e: PointerEvent) => {
     if (getSortMode() !== 'manual') return;
-    if (e.button !== 0) return;
+    if (e.button !== 0 && e.pointerType === 'mouse') return;
     const card = getCardEl(e.target);
     if (!card) return;
 
@@ -187,8 +159,14 @@ export function attachDragToReorder(
     dragStartX = e.clientX;
     dragStartY = e.clientY;
     dragPending = true;
+    touchHoldReady = e.pointerType !== 'touch'; // mouse is ready immediately
 
-    // Snapshot rects eagerly so they're ready when drag activates
+    if (e.pointerType === 'touch') {
+      touchHoldTimer = setTimeout(() => {
+        touchHoldReady = true;
+      }, TOUCH_HOLD_MS);
+    }
+
     snapRects = new Map();
     originalOrder.forEach(c => snapRects.set(c, c.getBoundingClientRect()));
 
@@ -196,25 +174,21 @@ export function attachDragToReorder(
     offsetX = e.clientX - rect.left;
     offsetY = e.clientY - rect.top;
 
-    document.addEventListener('mousemove', onMouseMove);
-    document.addEventListener('mouseup', onMouseUp);
-    // Don't preventDefault here — let click events through until threshold crossed
+    document.addEventListener('pointermove', onPointerMove);
+    document.addEventListener('pointerup', onPointerUp);
+    // Don't preventDefault here for mouse — let clicks through until threshold crossed
+    // For touch, we need to prevent scroll once drag is active (done in onPointerMove)
   };
 
-  function activateDrag(e: MouseEvent) {
+  function activateDrag(e: PointerEvent) {
     if (!draggedEl) return;
     dragPending = false;
     active = true;
 
     const rect = snapRects.get(draggedEl)!;
 
-    // Hide source card in-place (keeps its grid slot)
-    draggedEl.setCssProps({
-      'opacity': '0',
-      'pointer-events': 'none'
-    });
+    draggedEl.setCssProps({ 'opacity': '0', 'pointer-events': 'none' });
 
-    // Ghost: clone with resolved computed styles so CSS vars work on document.body
     ghost = draggedEl.cloneNode(true) as HTMLElement;
     ghost.classList.add('sc-drag-ghost');
     const cs = getComputedStyle(draggedEl);
@@ -245,11 +219,25 @@ export function attachDragToReorder(
     });
     document.body.appendChild(ghost);
   }
-  const onMouseMove = (e: MouseEvent) => {
+
+  const onPointerMove = (e: PointerEvent) => {
     if (dragPending) {
       const dx = e.clientX - dragStartX;
       const dy = e.clientY - dragStartY;
       if (Math.hypot(dx, dy) >= DRAG_THRESHOLD) {
+        if (!touchHoldReady) {
+          // Touch moved before hold timer — cancel drag, let it be a scroll
+          if (touchHoldTimer) { clearTimeout(touchHoldTimer); touchHoldTimer = null; }
+          document.removeEventListener('pointermove', onPointerMove);
+          document.removeEventListener('pointerup', onPointerUp);
+          dragPending = false;
+          draggedEl = null;
+          snapRects = new Map();
+          originalOrder = [];
+          return;
+        }
+        // Prevent page scroll on touch once drag threshold is crossed
+        if (e.pointerType === 'touch') e.preventDefault();
         activateDrag(e);
       } else {
         return;
@@ -257,6 +245,9 @@ export function attachDragToReorder(
     }
 
     if (!active || !ghost || !draggedEl) return;
+
+    // Prevent scroll while dragging on touch
+    if (e.pointerType === 'touch') e.preventDefault();
 
     ghost.setCssProps({
       'left': (e.clientX - offsetX) + 'px',
@@ -271,11 +262,13 @@ export function attachDragToReorder(
     }
   };
 
-  const onMouseUp = () => {
-    document.removeEventListener('mousemove', onMouseMove);
-    document.removeEventListener('mouseup', onMouseUp);
+  const onPointerUp = () => {
+    document.removeEventListener('pointermove', onPointerMove);
+    document.removeEventListener('pointerup', onPointerUp);
 
-    // Threshold never crossed — just a click, cancel silently
+    if (touchHoldTimer) { clearTimeout(touchHoldTimer); touchHoldTimer = null; }
+    touchHoldReady = false;
+
     if (dragPending) {
       dragPending = false;
       draggedEl = null;
@@ -290,12 +283,8 @@ export function attachDragToReorder(
     ghost?.remove();
     ghost = null;
 
-    draggedEl.setCssProps({
-      'opacity': '',
-      'pointer-events': ''
-    });
+    draggedEl.setCssProps({ 'opacity': '', 'pointer-events': '' });
 
-    // Commit: clear transforms, reorder DOM permanently
     clearTransforms();
 
     const newOrder = originalOrder.slice();
@@ -316,20 +305,19 @@ export function attachDragToReorder(
     draggedIndex = -1;
   };
 
-  container.addEventListener('mousedown', onMouseDown);
+  container.addEventListener('pointerdown', onPointerDown);
   container.addEventListener('dragstart', onNativeDragStart);
 
   return () => {
-    container.removeEventListener('mousedown', onMouseDown);
+    container.removeEventListener('pointerdown', onPointerDown);
     container.removeEventListener('dragstart', onNativeDragStart);
-    document.removeEventListener('mousemove', onMouseMove);
-    document.removeEventListener('mouseup', onMouseUp);
+    document.removeEventListener('pointermove', onPointerMove);
+    document.removeEventListener('pointerup', onPointerUp);
+    if (touchHoldTimer) { clearTimeout(touchHoldTimer); touchHoldTimer = null; }
+    touchHoldReady = false;
     ghost?.remove();
     if (draggedEl) {
-      draggedEl.setCssProps({
-        'opacity': '',
-        'pointer-events': ''
-      });
+      draggedEl.setCssProps({ 'opacity': '', 'pointer-events': '' });
     }
     clearTransforms();
     ghost = null; draggedEl = null; active = false; dragPending = false;
@@ -340,8 +328,7 @@ export function attachDragToReorder(
 
 /**
  * Drag-to-reorder for the pinned notes list.
- * Items are vertical list rows (.sc-home-file-item).
- * Persists new order to plugin.settings.pinnedNotes.
+ * Uses Pointer Events for mouse + touch support.
  */
 export function attachPinnedListDragToReorder(
   container: HTMLElement,
@@ -400,10 +387,7 @@ export function attachPinnedListDragToReorder(
       top = target.top - containerRect.top;
     }
 
-    ind.setCssProps({
-      'display': 'block',
-      'top': (top - 1) + 'px'
-    });
+    ind.setCssProps({ 'display': 'block', 'top': (top - 1) + 'px' });
 
     if (!ind.parentElement) {
       container.setCssProps({ 'position': 'relative' });
@@ -411,8 +395,8 @@ export function attachPinnedListDragToReorder(
     }
   }
 
-  const onMouseDown = (e: MouseEvent) => {
-    if (e.button !== 0) return;
+  const onPointerDown = (e: PointerEvent) => {
+    if (e.button !== 0 && e.pointerType === 'mouse') return;
     const item = getItemEl(e.target);
     if (!item) return;
 
@@ -423,7 +407,6 @@ export function attachPinnedListDragToReorder(
     const rect = item.getBoundingClientRect();
     offsetY = e.clientY - rect.top;
 
-    // Ghost
     ghost = item.cloneNode(true) as HTMLElement;
     ghost.classList.add('sc-drag-ghost');
     const cs = getComputedStyle(item);
@@ -452,35 +435,34 @@ export function attachPinnedListDragToReorder(
     dropIndex = computeDropIndex(e.clientY);
     positionIndicator(dropIndex);
 
-    document.addEventListener('mousemove', onMouseMove);
-    document.addEventListener('mouseup', onMouseUp);
+    document.addEventListener('pointermove', onPointerMove);
+    document.addEventListener('pointerup', onPointerUp);
     e.preventDefault();
   };
 
-  const onMouseMove = (e: MouseEvent) => {
+  const onPointerMove = (e: PointerEvent) => {
     if (!active || !ghost) return;
+    if (e.pointerType === 'touch') e.preventDefault();
     ghost.setCssProps({ 'top': (e.clientY - offsetY) + 'px' });
     dropIndex = computeDropIndex(e.clientY);
     positionIndicator(dropIndex);
   };
 
-  const onMouseUp = () => {
+  const onPointerUp = () => {
     if (!active) return;
     active = false;
-    document.removeEventListener('mousemove', onMouseMove);
-    document.removeEventListener('mouseup', onMouseUp);
+    document.removeEventListener('pointermove', onPointerMove);
+    document.removeEventListener('pointerup', onPointerUp);
 
     ghost?.remove();
     ghost = null;
     if (indicator) indicator.setCssProps({ 'display': 'none' });
     if (draggedEl) draggedEl.setCssProps({ 'opacity': '' });
 
-    // Commit new order
     const paths = getPaths().slice();
     const fromIdx = paths.indexOf(draggedPath);
     if (fromIdx !== -1 && dropIndex !== -1) {
       paths.splice(fromIdx, 1);
-      // dropIndex is relative to items excluding dragged — adjust for removal
       const insertAt = fromIdx < dropIndex ? dropIndex : dropIndex;
       paths.splice(insertAt, 0, draggedPath);
       void onReorder(paths);
@@ -491,12 +473,12 @@ export function attachPinnedListDragToReorder(
     dropIndex = -1;
   };
 
-  container.addEventListener('mousedown', onMouseDown);
+  container.addEventListener('pointerdown', onPointerDown);
 
   return () => {
-    container.removeEventListener('mousedown', onMouseDown);
-    document.removeEventListener('mousemove', onMouseMove);
-    document.removeEventListener('mouseup', onMouseUp);
+    container.removeEventListener('pointerdown', onPointerDown);
+    document.removeEventListener('pointermove', onPointerMove);
+    document.removeEventListener('pointerup', onPointerUp);
     ghost?.remove();
     indicator?.remove();
     if (draggedEl) draggedEl.setCssProps({ 'opacity': '' });

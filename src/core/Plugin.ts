@@ -618,7 +618,7 @@ class SideCardsSettingTab extends PluginSettingTab {
     }
 
     if (typeof hex !== 'string' || !hex.startsWith('#')) {
-      return '#000000'; // Return black for invalid input
+      return '#1a1a1a';
     }
 
     const r = parseInt(hex.slice(1, 3), 16);
@@ -626,11 +626,164 @@ class SideCardsSettingTab extends PluginSettingTab {
     const b = parseInt(hex.slice(5, 7), 16);
 
     if (isNaN(r) || isNaN(g) || isNaN(b)) {
-        return '#000000';
+      return '#1a1a1a';
     }
 
     const yiq = ((r * 299) + (g * 587) + (b * 114)) / 1000;
-    return (yiq >= 128) ? '#000000' : '#ffffff';
+    // Use a very dark tint of the color for light backgrounds, very light tint for dark
+    if (yiq >= 128) {
+      // Dark text: mix color toward black
+      const dr = Math.round(r * 0.15);
+      const dg = Math.round(g * 0.15);
+      const db = Math.round(b * 0.15);
+      return `#${dr.toString(16).padStart(2,'0')}${dg.toString(16).padStart(2,'0')}${db.toString(16).padStart(2,'0')}`;
+    } else {
+      // Light text: mix color toward white
+      const lr = Math.round(r + (255 - r) * 0.85);
+      const lg = Math.round(g + (255 - g) * 0.85);
+      const lb = Math.round(b + (255 - b) * 0.85);
+      return `#${lr.toString(16).padStart(2,'0')}${lg.toString(16).padStart(2,'0')}${lb.toString(16).padStart(2,'0')}`;
+    }
+  }
+
+  /**
+   * Attaches touch-based drag-to-reorder to a settings container.
+   * Used as a mobile fallback since HTML5 drag API doesn't work on touch devices.
+   * Items must have a [data-drag-id] attribute.
+   * @param container  The element containing the draggable setting rows
+   * @param getItemSelector  CSS selector for draggable rows within container
+   * @param getDragId  Returns the drag ID from a row element
+   * @param onDrop  Called with [fromId, toId, insertBefore] when a drop occurs
+   */
+  private attachSettingsTouchDrag(
+    container: HTMLElement,
+    getItemSelector: string,
+    getDragId: (el: HTMLElement) => string | null,
+    onDrop: (fromId: string, toId: string, insertBefore: boolean) => void
+  ): () => void {
+    let ghost: HTMLElement | null = null;
+    let draggedEl: HTMLElement | null = null;
+    let draggedId: string | null = null;
+    let offsetY = 0;
+    let active = false;
+    const THRESHOLD = 8;
+    let startY = 0;
+    let startX = 0;
+    let pending = false;
+
+    const getRows = () => Array.from(container.querySelectorAll<HTMLElement>(getItemSelector));
+
+    const onPointerDown = (e: PointerEvent) => {
+      // Only activate from the drag handle
+      const handle = (e.target as HTMLElement).closest<HTMLElement>('.sc-drag-handle');
+      if (!handle) return;
+      const row = handle.closest<HTMLElement>(getItemSelector);
+      if (!row) return;
+      const id = getDragId(row);
+      if (!id) return;
+
+      draggedEl = row;
+      draggedId = id;
+      startX = e.clientX;
+      startY = e.clientY;
+      pending = true;
+
+      const rect = row.getBoundingClientRect();
+      offsetY = e.clientY - rect.top;
+
+      document.addEventListener('pointermove', onPointerMove, { passive: false });
+      document.addEventListener('pointerup', onPointerUp);
+      // Don't preventDefault yet — let clicks through until threshold
+    };
+
+    const onPointerMove = (e: PointerEvent) => {
+      if (pending) {
+        const dy = Math.abs(e.clientY - startY);
+        const dx = Math.abs(e.clientX - startX);
+        if (Math.hypot(dx, dy) < THRESHOLD) return;
+        pending = false;
+        active = true;
+
+        // Create ghost
+        const rect = draggedEl!.getBoundingClientRect();
+        ghost = draggedEl!.cloneNode(true) as HTMLElement;
+        ghost.classList.add('sc-drag-ghost', 'sc-settings-drag-ghost');
+        const cs = getComputedStyle(draggedEl!);
+        ghost.setCssStyles({
+          position: 'fixed',
+          zIndex: '9999',
+          pointerEvents: 'none',
+          width: rect.width + 'px',
+          left: rect.left + 'px',
+          top: (e.clientY - offsetY) + 'px',
+          background: cs.background,
+          backgroundColor: cs.backgroundColor,
+          borderRadius: cs.borderRadius,
+          padding: cs.padding,
+          fontSize: cs.fontSize,
+          color: cs.color,
+          boxShadow: '0 4px 16px rgba(0,0,0,0.25)',
+          opacity: '0.9',
+        });
+        document.body.appendChild(ghost);
+        draggedEl!.setCssProps({ 'opacity': '0.3' });
+      }
+
+      if (!active || !ghost || !draggedEl) return;
+      e.preventDefault();
+
+      ghost.setCssProps({ 'top': (e.clientY - offsetY) + 'px' });
+
+      // Highlight drop target
+      getRows().forEach(row => row.removeClass('sc-drag-over-top', 'sc-drag-over-bottom'));
+      const target = getDropTarget(e.clientY);
+      if (target && target.el !== draggedEl) {
+        target.el.addClass(target.insertBefore ? 'sc-drag-over-top' : 'sc-drag-over-bottom');
+      }
+    };
+
+    const getDropTarget = (clientY: number): { el: HTMLElement; insertBefore: boolean } | null => {
+      const rows = getRows().filter(r => r !== draggedEl);
+      for (const row of rows) {
+        const r = row.getBoundingClientRect();
+        if (clientY >= r.top && clientY <= r.bottom) {
+          return { el: row, insertBefore: clientY < r.top + r.height / 2 };
+        }
+      }
+      return null;
+    };
+
+    const onPointerUp = (e: PointerEvent) => {
+      document.removeEventListener('pointermove', onPointerMove);
+      document.removeEventListener('pointerup', onPointerUp);
+
+      getRows().forEach(row => row.removeClass('sc-drag-over-top', 'sc-drag-over-bottom'));
+
+      if (active && draggedEl && draggedId) {
+        const target = getDropTarget(e.clientY);
+        if (target && target.el !== draggedEl) {
+          const toId = getDragId(target.el);
+          if (toId) onDrop(draggedId, toId, target.insertBefore);
+        }
+      }
+
+      ghost?.remove();
+      ghost = null;
+      if (draggedEl) draggedEl.setCssProps({ 'opacity': '' });
+      draggedEl = null;
+      draggedId = null;
+      active = false;
+      pending = false;
+    };
+
+    container.addEventListener('pointerdown', onPointerDown);
+    return () => {
+      container.removeEventListener('pointerdown', onPointerDown);
+      document.removeEventListener('pointermove', onPointerMove);
+      document.removeEventListener('pointerup', onPointerUp);
+      ghost?.remove();
+      if (draggedEl) draggedEl.setCssProps({ 'opacity': '' });
+    };
   }
 
   display(): void {
@@ -1279,6 +1432,7 @@ class SideCardsSettingTab extends PluginSettingTab {
 
           newOrder.splice(finalIndex, 0, dragSrcId);
 
+          catsContainer.querySelectorAll('.sc-dragging').forEach(el => el.removeClass('sc-dragging'));
           this.plugin.settings.allItemsOrder = newOrder;
           await this.plugin.saveSettings();
           renderCategories();
@@ -1291,9 +1445,13 @@ class SideCardsSettingTab extends PluginSettingTab {
         const row = setting.controlEl;
         row.addClass('sc-cat-row-controls');
 
-        // Drag handle
-        const handle = row.createEl('div', { cls: 'drag-handle sc-drag-handle' });
-        try { setIcon(handle, 'grip-vertical'); } catch { handle.textContent = '⋮⋮'; }
+        // Drag handle — use addExtraButton so it matches auto color / status styling
+        setting.addExtraButton(btn => {
+          btn.setIcon('grip-vertical').setTooltip('Drag to reorder');
+          btn.extraSettingsEl.addClass('sc-drag-handle');
+          // Move to front of controlEl so it appears first
+          row.prepend(btn.extraSettingsEl);
+        });
 
         // Eye icon (Round button)
         const eyeBtn = row.createEl('button', { cls: 'clickable-icon sc-eye sc-round-btn' });
@@ -1544,6 +1702,29 @@ class SideCardsSettingTab extends PluginSettingTab {
           refreshSidebarHeader();
         })();
       });
+
+      // Mobile touch drag support for categories
+      this.attachSettingsTouchDrag(
+        catsContainer,
+        '.setting-item[data-cat-id]',
+        (el) => el.dataset.catId ?? null,
+        (fromId, toId, insertBefore) => {
+          const allIds = Array.from(catsContainer.querySelectorAll('.setting-item[data-cat-id]'))
+            .map(el => (el as HTMLElement).dataset.catId as string);
+          const srcIndex = allIds.indexOf(fromId);
+          const destIndex = allIds.indexOf(toId);
+          if (srcIndex === -1 || destIndex === -1) return;
+          const newOrder = allIds.filter(id => id !== fromId);
+          let finalIndex = destIndex;
+          if (srcIndex < destIndex && !insertBefore) finalIndex = destIndex;
+          else if (srcIndex > destIndex && insertBefore) finalIndex = destIndex;
+          else if (srcIndex < destIndex && insertBefore) finalIndex = destIndex - 1;
+          else if (srcIndex > destIndex && !insertBefore) finalIndex = destIndex + 1;
+          newOrder.splice(finalIndex, 0, fromId);
+          this.plugin.settings.allItemsOrder = newOrder;
+          void this.plugin.saveSettings().then(() => { renderCategories(); refreshSidebarHeader(); });
+        }
+      );
     };
     renderCategories();
 
@@ -1635,6 +1816,7 @@ class SideCardsSettingTab extends PluginSettingTab {
           });
         setting.infoEl.remove();
         setting.controlEl.addClass('sc-rule-row-controls');
+        setting.settingEl.setAttr('data-rule-idx', String(idx));
 
         // Add drag events for Auto Color
         setting.settingEl.setAttr('draggable', 'true');
@@ -1670,6 +1852,7 @@ class SideCardsSettingTab extends PluginSettingTab {
           const rules = this.plugin.settings.autoColorRules || [];
           const [moved] = rules.splice(srcIdx, 1);
           rules.splice(idx, 0, moved);
+          rulesContainer.querySelectorAll('.sc-dragging').forEach(el => el.removeClass('sc-dragging'));
           await this.plugin.saveSettings();
           renderRules();
           })();
@@ -1686,6 +1869,23 @@ class SideCardsSettingTab extends PluginSettingTab {
           renderRules();
         })();
       });
+
+      // Mobile touch drag support for auto color rules
+      this.attachSettingsTouchDrag(
+        rulesContainer,
+        '.setting-item[data-rule-idx]',
+        (el) => el.dataset.ruleIdx ?? null,
+        (fromId, toId, insertBefore) => {
+          const srcIdx = parseInt(fromId);
+          const destIdx = parseInt(toId);
+          if (isNaN(srcIdx) || isNaN(destIdx) || srcIdx === destIdx) return;
+          const rulesList = this.plugin.settings.autoColorRules || [];
+          const [moved] = rulesList.splice(srcIdx, 1);
+          const insertAt = insertBefore ? (srcIdx < destIdx ? destIdx - 1 : destIdx) : (srcIdx < destIdx ? destIdx : destIdx + 1);
+          rulesList.splice(insertAt, 0, moved);
+          void this.plugin.saveSettings().then(() => renderRules());
+        }
+      );
     };
     renderRules();
 
@@ -1802,7 +2002,7 @@ class SideCardsSettingTab extends PluginSettingTab {
                 const c = this.plugin.settings[cKey] as string;
                 (opt as HTMLElement).setCssProps({
                   'background-color': c,
-                  'color': 'var(--text-normal)'
+                  'color': this.getContrastColor(c)
                 });
               }
             });
@@ -1839,6 +2039,7 @@ class SideCardsSettingTab extends PluginSettingTab {
         });
 
         setting.controlEl.addClass('sc-status-row-controls');
+        setting.settingEl.setAttr('data-status-idx', String(idx));
 
         // Add drag events for Status
         setting.settingEl.setAttr('draggable', 'true');
@@ -1874,6 +2075,7 @@ class SideCardsSettingTab extends PluginSettingTab {
           const statuses = this.plugin.settings.cardStatuses || [];
           const [moved] = statuses.splice(srcIdx, 1);
           statuses.splice(idx, 0, moved);
+          statusConfigContainer.querySelectorAll('.sc-dragging').forEach(el => el.removeClass('sc-dragging'));
           await this.plugin.saveSettings();
           renderStatusConfig();
           })();
@@ -1890,6 +2092,23 @@ class SideCardsSettingTab extends PluginSettingTab {
           renderStatusConfig();
         })();
       });
+
+      // Mobile touch drag support for status entries
+      this.attachSettingsTouchDrag(
+        statusConfigContainer,
+        '.setting-item[data-status-idx]',
+        (el) => el.dataset.statusIdx ?? null,
+        (fromId, toId, insertBefore) => {
+          const srcIdx = parseInt(fromId);
+          const destIdx = parseInt(toId);
+          if (isNaN(srcIdx) || isNaN(destIdx) || srcIdx === destIdx) return;
+          const statuses = this.plugin.settings.cardStatuses || [];
+          const [moved] = statuses.splice(srcIdx, 1);
+          const insertAt = insertBefore ? (srcIdx < destIdx ? destIdx - 1 : destIdx) : (srcIdx < destIdx ? destIdx : destIdx + 1);
+          statuses.splice(insertAt, 0, moved);
+          void this.plugin.saveSettings().then(() => renderStatusConfig());
+        }
+      );
     };
     renderStatusConfig();
 

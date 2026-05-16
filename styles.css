@@ -1407,3 +1407,10 @@ de
   border-radius: var(--radius-m);
   cursor: grabbing;
 }
+
+/* Settings drag ghost (mobile touch reorder) */
+.sc-settings-drag-ghost {
+  border: 1px solid var(--background-modifier-border);
+  background: var(--background-primary);
+  overflow: hidden;
+}

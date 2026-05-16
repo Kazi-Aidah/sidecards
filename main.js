@@ -1863,10 +1863,7 @@ function attachDragToReorder(container, plugin, getSortMode, onReorder, onPlaceh
     newOrder.splice(draggedIndex, 1);
     newOrder.splice(targetIdx, 0, draggedEl);
     originalOrder.forEach((c) => {
-      c.setCssProps({
-        "transition": "none",
-        "transform": ""
-      });
+      c.setCssProps({ "transition": "none", "transform": "" });
     });
     newOrder.forEach((card) => container.appendChild(card));
     const rects = /* @__PURE__ */ new Map();
@@ -1878,10 +1875,7 @@ function attachDragToReorder(container, plugin, getSortMode, onReorder, onPlaceh
     for (const card of originalOrder) {
       if (card === draggedEl)
         continue;
-      card.setCssProps({
-        "transition": "none",
-        "transform": card.style.transform || ""
-      });
+      card.setCssProps({ "transition": "none", "transform": card.style.transform || "" });
     }
     void container.offsetHeight;
     for (const card of originalOrder) {
@@ -1899,28 +1893,30 @@ function attachDragToReorder(container, plugin, getSortMode, onReorder, onPlaceh
   }
   function clearTransforms() {
     getCards().forEach((c) => {
-      c.setCssProps({
-        "transition": "",
-        "transform": ""
-      });
+      c.setCssProps({ "transition": "", "transform": "" });
     });
   }
   let dragStartX = 0;
   let dragStartY = 0;
   let dragPending = false;
   const DRAG_THRESHOLD = 5;
+  const TOUCH_HOLD_MS = 300;
+  let touchHoldTimer = null;
+  let touchHoldReady = false;
   const onNativeDragStart = () => {
     if (!dragPending && !active)
       return;
-    document.removeEventListener("mousemove", onMouseMove);
-    document.removeEventListener("mouseup", onMouseUp);
+    document.removeEventListener("pointermove", onPointerMove);
+    document.removeEventListener("pointerup", onPointerUp);
+    if (touchHoldTimer) {
+      clearTimeout(touchHoldTimer);
+      touchHoldTimer = null;
+    }
+    touchHoldReady = false;
     ghost == null ? void 0 : ghost.remove();
     ghost = null;
     if (draggedEl) {
-      draggedEl.setCssProps({
-        "opacity": "",
-        "pointer-events": ""
-      });
+      draggedEl.setCssProps({ "opacity": "", "pointer-events": "" });
     }
     clearTransforms();
     draggedEl = null;
@@ -1932,10 +1928,10 @@ function attachDragToReorder(container, plugin, getSortMode, onReorder, onPlaceh
     currentTargetIndex = -1;
     draggedIndex = -1;
   };
-  const onMouseDown = (e) => {
+  const onPointerDown = (e) => {
     if (getSortMode() !== "manual")
       return;
-    if (e.button !== 0)
+    if (e.button !== 0 && e.pointerType === "mouse")
       return;
     const card = getCardEl(e.target);
     if (!card)
@@ -1947,13 +1943,19 @@ function attachDragToReorder(container, plugin, getSortMode, onReorder, onPlaceh
     dragStartX = e.clientX;
     dragStartY = e.clientY;
     dragPending = true;
+    touchHoldReady = e.pointerType !== "touch";
+    if (e.pointerType === "touch") {
+      touchHoldTimer = setTimeout(() => {
+        touchHoldReady = true;
+      }, TOUCH_HOLD_MS);
+    }
     snapRects = /* @__PURE__ */ new Map();
     originalOrder.forEach((c) => snapRects.set(c, c.getBoundingClientRect()));
     const rect = snapRects.get(card);
     offsetX = e.clientX - rect.left;
     offsetY = e.clientY - rect.top;
-    document.addEventListener("mousemove", onMouseMove);
-    document.addEventListener("mouseup", onMouseUp);
+    document.addEventListener("pointermove", onPointerMove);
+    document.addEventListener("pointerup", onPointerUp);
   };
   function activateDrag(e) {
     if (!draggedEl)
@@ -1961,10 +1963,7 @@ function attachDragToReorder(container, plugin, getSortMode, onReorder, onPlaceh
     dragPending = false;
     active = true;
     const rect = snapRects.get(draggedEl);
-    draggedEl.setCssProps({
-      "opacity": "0",
-      "pointer-events": "none"
-    });
+    draggedEl.setCssProps({ "opacity": "0", "pointer-events": "none" });
     ghost = draggedEl.cloneNode(true);
     ghost.classList.add("sc-drag-ghost");
     const cs = getComputedStyle(draggedEl);
@@ -1995,11 +1994,26 @@ function attachDragToReorder(container, plugin, getSortMode, onReorder, onPlaceh
     });
     document.body.appendChild(ghost);
   }
-  const onMouseMove = (e) => {
+  const onPointerMove = (e) => {
     if (dragPending) {
       const dx = e.clientX - dragStartX;
       const dy = e.clientY - dragStartY;
       if (Math.hypot(dx, dy) >= DRAG_THRESHOLD) {
+        if (!touchHoldReady) {
+          if (touchHoldTimer) {
+            clearTimeout(touchHoldTimer);
+            touchHoldTimer = null;
+          }
+          document.removeEventListener("pointermove", onPointerMove);
+          document.removeEventListener("pointerup", onPointerUp);
+          dragPending = false;
+          draggedEl = null;
+          snapRects = /* @__PURE__ */ new Map();
+          originalOrder = [];
+          return;
+        }
+        if (e.pointerType === "touch")
+          e.preventDefault();
         activateDrag(e);
       } else {
         return;
@@ -2007,6 +2021,8 @@ function attachDragToReorder(container, plugin, getSortMode, onReorder, onPlaceh
     }
     if (!active || !ghost || !draggedEl)
       return;
+    if (e.pointerType === "touch")
+      e.preventDefault();
     ghost.setCssProps({
       "left": e.clientX - offsetX + "px",
       "top": e.clientY - offsetY + "px"
@@ -2018,9 +2034,14 @@ function attachDragToReorder(container, plugin, getSortMode, onReorder, onPlaceh
       applyFlip(lastFlipRects);
     }
   };
-  const onMouseUp = () => {
-    document.removeEventListener("mousemove", onMouseMove);
-    document.removeEventListener("mouseup", onMouseUp);
+  const onPointerUp = () => {
+    document.removeEventListener("pointermove", onPointerMove);
+    document.removeEventListener("pointerup", onPointerUp);
+    if (touchHoldTimer) {
+      clearTimeout(touchHoldTimer);
+      touchHoldTimer = null;
+    }
+    touchHoldReady = false;
     if (dragPending) {
       dragPending = false;
       draggedEl = null;
@@ -2033,10 +2054,7 @@ function attachDragToReorder(container, plugin, getSortMode, onReorder, onPlaceh
     active = false;
     ghost == null ? void 0 : ghost.remove();
     ghost = null;
-    draggedEl.setCssProps({
-      "opacity": "",
-      "pointer-events": ""
-    });
+    draggedEl.setCssProps({ "opacity": "", "pointer-events": "" });
     clearTransforms();
     const newOrder = originalOrder.slice();
     newOrder.splice(draggedIndex, 1);
@@ -2056,19 +2074,21 @@ function attachDragToReorder(container, plugin, getSortMode, onReorder, onPlaceh
     currentTargetIndex = -1;
     draggedIndex = -1;
   };
-  container.addEventListener("mousedown", onMouseDown);
+  container.addEventListener("pointerdown", onPointerDown);
   container.addEventListener("dragstart", onNativeDragStart);
   return () => {
-    container.removeEventListener("mousedown", onMouseDown);
+    container.removeEventListener("pointerdown", onPointerDown);
     container.removeEventListener("dragstart", onNativeDragStart);
-    document.removeEventListener("mousemove", onMouseMove);
-    document.removeEventListener("mouseup", onMouseUp);
+    document.removeEventListener("pointermove", onPointerMove);
+    document.removeEventListener("pointerup", onPointerUp);
+    if (touchHoldTimer) {
+      clearTimeout(touchHoldTimer);
+      touchHoldTimer = null;
+    }
+    touchHoldReady = false;
     ghost == null ? void 0 : ghost.remove();
     if (draggedEl) {
-      draggedEl.setCssProps({
-        "opacity": "",
-        "pointer-events": ""
-      });
+      draggedEl.setCssProps({ "opacity": "", "pointer-events": "" });
     }
     clearTransforms();
     ghost = null;
@@ -2131,18 +2151,15 @@ function attachPinnedListDragToReorder(container, getPaths, onReorder) {
       const target = items[idx].getBoundingClientRect();
       top = target.top - containerRect.top;
     }
-    ind.setCssProps({
-      "display": "block",
-      "top": top - 1 + "px"
-    });
+    ind.setCssProps({ "display": "block", "top": top - 1 + "px" });
     if (!ind.parentElement) {
       container.setCssProps({ "position": "relative" });
       container.appendChild(ind);
     }
   }
-  const onMouseDown = (e) => {
+  const onPointerDown = (e) => {
     var _a;
-    if (e.button !== 0)
+    if (e.button !== 0 && e.pointerType === "mouse")
       return;
     const item = getItemEl(e.target);
     if (!item)
@@ -2179,23 +2196,25 @@ function attachPinnedListDragToReorder(container, getPaths, onReorder) {
     active = true;
     dropIndex = computeDropIndex(e.clientY);
     positionIndicator(dropIndex);
-    document.addEventListener("mousemove", onMouseMove);
-    document.addEventListener("mouseup", onMouseUp);
+    document.addEventListener("pointermove", onPointerMove);
+    document.addEventListener("pointerup", onPointerUp);
     e.preventDefault();
   };
-  const onMouseMove = (e) => {
+  const onPointerMove = (e) => {
     if (!active || !ghost)
       return;
+    if (e.pointerType === "touch")
+      e.preventDefault();
     ghost.setCssProps({ "top": e.clientY - offsetY + "px" });
     dropIndex = computeDropIndex(e.clientY);
     positionIndicator(dropIndex);
   };
-  const onMouseUp = () => {
+  const onPointerUp = () => {
     if (!active)
       return;
     active = false;
-    document.removeEventListener("mousemove", onMouseMove);
-    document.removeEventListener("mouseup", onMouseUp);
+    document.removeEventListener("pointermove", onPointerMove);
+    document.removeEventListener("pointerup", onPointerUp);
     ghost == null ? void 0 : ghost.remove();
     ghost = null;
     if (indicator)
@@ -2214,11 +2233,11 @@ function attachPinnedListDragToReorder(container, getPaths, onReorder) {
     draggedPath = "";
     dropIndex = -1;
   };
-  container.addEventListener("mousedown", onMouseDown);
+  container.addEventListener("pointerdown", onPointerDown);
   return () => {
-    container.removeEventListener("mousedown", onMouseDown);
-    document.removeEventListener("mousemove", onMouseMove);
-    document.removeEventListener("mouseup", onMouseUp);
+    container.removeEventListener("pointerdown", onPointerDown);
+    document.removeEventListener("pointermove", onPointerMove);
+    document.removeEventListener("pointerup", onPointerUp);
     ghost == null ? void 0 : ghost.remove();
     indicator == null ? void 0 : indicator.remove();
     if (draggedEl)
@@ -5959,16 +5978,148 @@ var SideCardsSettingTab = class extends import_obsidian10.PluginSettingTab {
       }
     }
     if (typeof hex !== "string" || !hex.startsWith("#")) {
-      return "#000000";
+      return "#1a1a1a";
     }
     const r = parseInt(hex.slice(1, 3), 16);
     const g = parseInt(hex.slice(3, 5), 16);
     const b = parseInt(hex.slice(5, 7), 16);
     if (isNaN(r) || isNaN(g) || isNaN(b)) {
-      return "#000000";
+      return "#1a1a1a";
     }
     const yiq = (r * 299 + g * 587 + b * 114) / 1e3;
-    return yiq >= 128 ? "#000000" : "#ffffff";
+    if (yiq >= 128) {
+      const dr = Math.round(r * 0.15);
+      const dg = Math.round(g * 0.15);
+      const db = Math.round(b * 0.15);
+      return `#${dr.toString(16).padStart(2, "0")}${dg.toString(16).padStart(2, "0")}${db.toString(16).padStart(2, "0")}`;
+    } else {
+      const lr = Math.round(r + (255 - r) * 0.85);
+      const lg = Math.round(g + (255 - g) * 0.85);
+      const lb = Math.round(b + (255 - b) * 0.85);
+      return `#${lr.toString(16).padStart(2, "0")}${lg.toString(16).padStart(2, "0")}${lb.toString(16).padStart(2, "0")}`;
+    }
+  }
+  /**
+   * Attaches touch-based drag-to-reorder to a settings container.
+   * Used as a mobile fallback since HTML5 drag API doesn't work on touch devices.
+   * Items must have a [data-drag-id] attribute.
+   * @param container  The element containing the draggable setting rows
+   * @param getItemSelector  CSS selector for draggable rows within container
+   * @param getDragId  Returns the drag ID from a row element
+   * @param onDrop  Called with [fromId, toId, insertBefore] when a drop occurs
+   */
+  attachSettingsTouchDrag(container, getItemSelector, getDragId, onDrop) {
+    let ghost = null;
+    let draggedEl = null;
+    let draggedId = null;
+    let offsetY = 0;
+    let active = false;
+    const THRESHOLD = 8;
+    let startY = 0;
+    let startX = 0;
+    let pending = false;
+    const getRows = () => Array.from(container.querySelectorAll(getItemSelector));
+    const onPointerDown = (e) => {
+      const handle = e.target.closest(".sc-drag-handle");
+      if (!handle)
+        return;
+      const row = handle.closest(getItemSelector);
+      if (!row)
+        return;
+      const id = getDragId(row);
+      if (!id)
+        return;
+      draggedEl = row;
+      draggedId = id;
+      startX = e.clientX;
+      startY = e.clientY;
+      pending = true;
+      const rect = row.getBoundingClientRect();
+      offsetY = e.clientY - rect.top;
+      document.addEventListener("pointermove", onPointerMove, { passive: false });
+      document.addEventListener("pointerup", onPointerUp);
+    };
+    const onPointerMove = (e) => {
+      if (pending) {
+        const dy = Math.abs(e.clientY - startY);
+        const dx = Math.abs(e.clientX - startX);
+        if (Math.hypot(dx, dy) < THRESHOLD)
+          return;
+        pending = false;
+        active = true;
+        const rect = draggedEl.getBoundingClientRect();
+        ghost = draggedEl.cloneNode(true);
+        ghost.classList.add("sc-drag-ghost", "sc-settings-drag-ghost");
+        const cs = getComputedStyle(draggedEl);
+        ghost.setCssStyles({
+          position: "fixed",
+          zIndex: "9999",
+          pointerEvents: "none",
+          width: rect.width + "px",
+          left: rect.left + "px",
+          top: e.clientY - offsetY + "px",
+          background: cs.background,
+          backgroundColor: cs.backgroundColor,
+          borderRadius: cs.borderRadius,
+          padding: cs.padding,
+          fontSize: cs.fontSize,
+          color: cs.color,
+          boxShadow: "0 4px 16px rgba(0,0,0,0.25)",
+          opacity: "0.9"
+        });
+        document.body.appendChild(ghost);
+        draggedEl.setCssProps({ "opacity": "0.3" });
+      }
+      if (!active || !ghost || !draggedEl)
+        return;
+      e.preventDefault();
+      ghost.setCssProps({ "top": e.clientY - offsetY + "px" });
+      getRows().forEach((row) => row.removeClass("sc-drag-over-top", "sc-drag-over-bottom"));
+      const target = getDropTarget(e.clientY);
+      if (target && target.el !== draggedEl) {
+        target.el.addClass(target.insertBefore ? "sc-drag-over-top" : "sc-drag-over-bottom");
+      }
+    };
+    const getDropTarget = (clientY) => {
+      const rows = getRows().filter((r) => r !== draggedEl);
+      for (const row of rows) {
+        const r = row.getBoundingClientRect();
+        if (clientY >= r.top && clientY <= r.bottom) {
+          return { el: row, insertBefore: clientY < r.top + r.height / 2 };
+        }
+      }
+      return null;
+    };
+    const onPointerUp = (e) => {
+      document.removeEventListener("pointermove", onPointerMove);
+      document.removeEventListener("pointerup", onPointerUp);
+      getRows().forEach((row) => row.removeClass("sc-drag-over-top", "sc-drag-over-bottom"));
+      if (active && draggedEl && draggedId) {
+        const target = getDropTarget(e.clientY);
+        if (target && target.el !== draggedEl) {
+          const toId = getDragId(target.el);
+          if (toId)
+            onDrop(draggedId, toId, target.insertBefore);
+        }
+      }
+      ghost == null ? void 0 : ghost.remove();
+      ghost = null;
+      if (draggedEl)
+        draggedEl.setCssProps({ "opacity": "" });
+      draggedEl = null;
+      draggedId = null;
+      active = false;
+      pending = false;
+    };
+    container.addEventListener("pointerdown", onPointerDown);
+    return () => {
+      container.removeEventListener("pointerdown", onPointerDown);
+      document.removeEventListener("pointermove", onPointerMove);
+      document.removeEventListener("pointerup", onPointerUp);
+      ghost == null ? void 0 : ghost.remove();
+      if (draggedEl)
+        draggedEl.setCssProps({ "opacity": "" });
+    };
   }
   display() {
     const { containerEl } = this;
@@ -6474,6 +6625,7 @@ var SideCardsSettingTab = class extends import_obsidian10.PluginSettingTab {
               finalIndex = destIndex + 1;
             }
             newOrder.splice(finalIndex, 0, dragSrcId);
+            catsContainer.querySelectorAll(".sc-dragging").forEach((el) => el.removeClass("sc-dragging"));
             this.plugin.settings.allItemsOrder = newOrder;
             await this.plugin.saveSettings();
             renderCategories();
@@ -6483,12 +6635,11 @@ var SideCardsSettingTab = class extends import_obsidian10.PluginSettingTab {
         setting.infoEl.remove();
         const row = setting.controlEl;
         row.addClass("sc-cat-row-controls");
-        const handle = row.createEl("div", { cls: "drag-handle sc-drag-handle" });
-        try {
-          (0, import_obsidian10.setIcon)(handle, "grip-vertical");
-        } catch (e) {
-          handle.textContent = "\u22EE\u22EE";
-        }
+        setting.addExtraButton((btn) => {
+          btn.setIcon("grip-vertical").setTooltip("Drag to reorder");
+          btn.extraSettingsEl.addClass("sc-drag-handle");
+          row.prepend(btn.extraSettingsEl);
+        });
         const eyeBtn = row.createEl("button", { cls: "clickable-icon sc-eye sc-round-btn" });
         const updateEye = () => {
           eyeBtn.empty();
@@ -6747,6 +6898,37 @@ var SideCardsSettingTab = class extends import_obsidian10.PluginSettingTab {
           refreshSidebarHeader();
         })();
       });
+      this.attachSettingsTouchDrag(
+        catsContainer,
+        ".setting-item[data-cat-id]",
+        (el) => {
+          var _a;
+          return (_a = el.dataset.catId) != null ? _a : null;
+        },
+        (fromId, toId, insertBefore) => {
+          const allIds = Array.from(catsContainer.querySelectorAll(".setting-item[data-cat-id]")).map((el) => el.dataset.catId);
+          const srcIndex = allIds.indexOf(fromId);
+          const destIndex = allIds.indexOf(toId);
+          if (srcIndex === -1 || destIndex === -1)
+            return;
+          const newOrder = allIds.filter((id) => id !== fromId);
+          let finalIndex = destIndex;
+          if (srcIndex < destIndex && !insertBefore)
+            finalIndex = destIndex;
+          else if (srcIndex > destIndex && insertBefore)
+            finalIndex = destIndex;
+          else if (srcIndex < destIndex && insertBefore)
+            finalIndex = destIndex - 1;
+          else if (srcIndex > destIndex && !insertBefore)
+            finalIndex = destIndex + 1;
+          newOrder.splice(finalIndex, 0, fromId);
+          this.plugin.settings.allItemsOrder = newOrder;
+          void this.plugin.saveSettings().then(() => {
+            renderCategories();
+            refreshSidebarHeader();
+          });
+        }
+      );
     };
     renderCategories();
     new import_obsidian10.Setting(containerEl).setName("Open category on load").setDesc("Which category opens when the sidebar loads.").addDropdown((dropdown) => {
@@ -6818,6 +7000,7 @@ var SideCardsSettingTab = class extends import_obsidian10.PluginSettingTab {
         });
         setting.infoEl.remove();
         setting.controlEl.addClass("sc-rule-row-controls");
+        setting.settingEl.setAttr("data-rule-idx", String(idx));
         setting.settingEl.setAttr("draggable", "true");
         setting.settingEl.addEventListener("dragstart", (e) => {
           var _a;
@@ -6854,6 +7037,7 @@ var SideCardsSettingTab = class extends import_obsidian10.PluginSettingTab {
             const rules2 = this.plugin.settings.autoColorRules || [];
             const [moved] = rules2.splice(srcIdx, 1);
             rules2.splice(idx, 0, moved);
+            rulesContainer.querySelectorAll(".sc-dragging").forEach((el) => el.removeClass("sc-dragging"));
             await this.plugin.saveSettings();
             renderRules();
           })();
@@ -6870,6 +7054,25 @@ var SideCardsSettingTab = class extends import_obsidian10.PluginSettingTab {
           renderRules();
         })();
       });
+      this.attachSettingsTouchDrag(
+        rulesContainer,
+        ".setting-item[data-rule-idx]",
+        (el) => {
+          var _a;
+          return (_a = el.dataset.ruleIdx) != null ? _a : null;
+        },
+        (fromId, toId, insertBefore) => {
+          const srcIdx = parseInt(fromId);
+          const destIdx = parseInt(toId);
+          if (isNaN(srcIdx) || isNaN(destIdx) || srcIdx === destIdx)
+            return;
+          const rulesList = this.plugin.settings.autoColorRules || [];
+          const [moved] = rulesList.splice(srcIdx, 1);
+          const insertAt = insertBefore ? srcIdx < destIdx ? destIdx - 1 : destIdx : srcIdx < destIdx ? destIdx : destIdx + 1;
+          rulesList.splice(insertAt, 0, moved);
+          void this.plugin.saveSettings().then(() => renderRules());
+        }
+      );
     };
     renderRules();
     new import_obsidian10.Setting(containerEl).setName("Status").setDesc("Dropdown colors take precedence over custom unless the dropdown is set to custom.").setHeading();
@@ -6974,7 +7177,7 @@ var SideCardsSettingTab = class extends import_obsidian10.PluginSettingTab {
                 const c = this.plugin.settings[cKey];
                 opt.setCssProps({
                   "background-color": c,
-                  "color": "var(--text-normal)"
+                  "color": this.getContrastColor(c)
                 });
               }
             });
@@ -7004,6 +7207,7 @@ var SideCardsSettingTab = class extends import_obsidian10.PluginSettingTab {
           });
         });
         setting.controlEl.addClass("sc-status-row-controls");
+        setting.settingEl.setAttr("data-status-idx", String(idx));
         setting.settingEl.setAttr("draggable", "true");
         setting.settingEl.addEventListener("dragstart", (e) => {
           var _a;
@@ -7040,6 +7244,7 @@ var SideCardsSettingTab = class extends import_obsidian10.PluginSettingTab {
             const statuses = this.plugin.settings.cardStatuses || [];
             const [moved] = statuses.splice(srcIdx, 1);
             statuses.splice(idx, 0, moved);
+            statusConfigContainer.querySelectorAll(".sc-dragging").forEach((el) => el.removeClass("sc-dragging"));
             await this.plugin.saveSettings();
             renderStatusConfig();
           })();
@@ -7056,6 +7261,25 @@ var SideCardsSettingTab = class extends import_obsidian10.PluginSettingTab {
           renderStatusConfig();
         })();
       });
+      this.attachSettingsTouchDrag(
+        statusConfigContainer,
+        ".setting-item[data-status-idx]",
+        (el) => {
+          var _a;
+          return (_a = el.dataset.statusIdx) != null ? _a : null;
+        },
+        (fromId, toId, insertBefore) => {
+          const srcIdx = parseInt(fromId);
+          const destIdx = parseInt(toId);
+          if (isNaN(srcIdx) || isNaN(destIdx) || srcIdx === destIdx)
+            return;
+          const statuses = this.plugin.settings.cardStatuses || [];
+          const [moved] = statuses.splice(srcIdx, 1);
+          const insertAt = insertBefore ? srcIdx < destIdx ? destIdx - 1 : destIdx : srcIdx < destIdx ? destIdx : destIdx + 1;
+          statuses.splice(insertAt, 0, moved);
+          void this.plugin.saveSettings().then(() => renderStatusConfig());
+        }
+      );
     };
     renderStatusConfig();
     new import_obsidian10.Setting(containerEl).setName("Data management").setHeading();
